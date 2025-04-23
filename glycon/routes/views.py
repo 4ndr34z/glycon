@@ -25,6 +25,12 @@ def init_view_routes(app):
         recent_agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege'], row)) 
                         for row in c.fetchall()]
         
+        
+        c.execute('''
+            CREATE INDEX IF NOT EXISTS idx_tasks_agent_status 
+            ON tasks (agent_id, status)
+        ''')
+
         c.execute("SELECT * FROM tasks ORDER BY created_at DESC LIMIT 5")
         recent_tasks = [dict(zip(['id', 'agent_id', 'task_type', 'task_data', 'status', 'created_at', 'completed_at'], row)) 
                        for row in c.fetchall()]
