@@ -112,24 +112,23 @@ document.addEventListener('DOMContentLoaded', function() {
         addTerminalOutput('Disconnected from server');
     });
     
+    let lastSeqId = 0;
+
     socket.on('terminal_output', function(data) {
-    console.log("Received terminal output:", data);
-    if (data.agent_id === '{{ agent.id }}') {
-        // Always show the command that was executed
-        terminal.innerHTML += `<div style="color: #00ff00;">$ ${data.command}</div>`;
-        
-        // Show output if it exists, otherwise show a message
-        if (data.output && data.output.trim() !== '') {
-            terminal.innerHTML += `<div>${data.output.replace(/\n/g, '<br>')}</div>`;
-        } else if (data.error && data.error.trim() !== '') {
-            terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
-        } else {
-            terminal.innerHTML += `<div style="color: #888;">Command executed but returned no output</div>`;
+        // Skip duplicate messages
+        if (data.seq_id && data.seq_id <= lastSeqId) {
+            return;
         }
+        lastSeqId = data.seq_id || 0;
         
-        terminal.scrollTop = terminal.scrollHeight;
-    }
-});
+        // Display output
+        if (data.output) {
+            appendTerminalOutput(data.command, data.output);
+        }
+        if (data.error) {
+            appendTerminalError(data.command, data.error);
+        }
+    });
     // Helper function to add output to terminal
     function addTerminalOutput(text) {
         terminal.innerHTML += `<div>${text}</div>`;

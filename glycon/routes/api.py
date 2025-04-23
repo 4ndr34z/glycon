@@ -190,11 +190,14 @@ def init_api_routes(app, socketio):
                 task_data = json.loads(task[1])
                 
                 if task_type == 'shell' and task_data.get('terminal', False):
+                    # Add sequence ID to prevent duplicates
                     socketio.emit('terminal_output', {
                         'agent_id': data['agent_id'],
                         'command': task_data.get('cmd', ''),
                         'output': data['result'].get('output', 'No output'),
-                        'error': data['result'].get('error', '')
+                        'error': data['result'].get('error', ''),
+                        'task_id': data['task_id'],
+                        'seq_id': task_data.get('seq_id', 0)
                     }, room=f"terminal_{data['agent_id']}")
             
             if data['task_type'] == 'screenshot' and 'screenshot' in data['result']:
