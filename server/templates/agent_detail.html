@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="fas fa-robot me-2"></i>{{ agent.hostname }}
+            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
+                {{ agent.status|capitalize }}
+            </span>
+        </h2>
+        <div>
+            <a href="{{ url_for('terminal', agent_id=agent.id) }}" class="btn btn-primary me-2">
+                <i class="fas fa-terminal me-1"></i>Terminal
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Agent Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Agent ID:</strong> {{ agent.id }}</p>
+                            <p><strong>IP Address:</strong> {{ agent.ip }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Operating System:</strong> {{ agent.os }}</p>
+                            <p><strong>Privilege Level:</strong> 
+                                <span class="badge bg-{% if agent.privilege == 'admin' %}danger{% else %}warning{% endif %}">
+                                    {{ agent.privilege|capitalize }}
+                                </span>
+                            </p>
+                        </div>
+                    </div>
+                    <p><strong>Last Seen:</strong> {{ agent.last_seen }}</p>
+                </div>
+            </div>
+
+            <div class="card shadow-sm mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Recent Screenshots</h5>
+                    <a href="{{ url_for('screenshots') }}?agent_id={{ agent.id }}" class="btn btn-sm btn-outline-primary">
+                        View All
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if screenshots %}
+                    <div class="row">
+                        {% for screenshot in screenshots %}
+                        <div class="col-md-6 mb-3">
+                            <a href="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" data-lightbox="screenshots-{{ agent.id }}">
+                                <img src="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" class="img-fluid rounded" alt="Screenshot">
+                            </a>
+                            <p class="small text-muted mt-1">{{ screenshot.timestamp }}</p>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No screenshots available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card shadow-sm mb-4">
+                
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent Tasks</h5>
+                        <div class="d-flex">
+                            <select id="taskType" class="form-select form-select-sm me-2" required>
+                                <option value="">Select Task</option>
+                                <option value="shell">Shell Command</option>
+                                <option value="screenshot">Take Screenshot</option>
+                                <option value="harvest_creds">Harvest Credentials</option>
+                            </select>
+                            <button id="executeTask" class="btn btn-sm btn-primary">Execute</button>
+                        </div>
+                    </div>
+                <div class="card-body">
+                    {% if tasks %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Completed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for task in tasks %}
+                                <tr>
+                                    <td>
+                                        <span class="badge bg-{{ 'info' if task.task_type == 'shell' else 'primary' }}">
+                                            {{ task.task_type }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
+                                            {{ task.status }}
+                                        </span>
+                                    </td>
+                                    <td>{{ task.created_at }}</td>
+                                    <td>{{ task.completed_at if task.completed_at else '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No tasks found</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Credentials</h5>
+                </div>
+                <div class="card-body">
+                    {% if creds %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Browser</th>
+                                    <th>URL</th>
+                                    <th>Username</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cred in creds %}
+                                <tr>
+                                    <td><span class="badge bg-primary">{{ cred.browser|capitalize }}</span></td>
+                                    <td>{{ cred.url|truncate(30) }}</td>
+                                    <td>{{ cred.username|truncate(20) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No credentials found</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/css/lightbox.min.css">
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
+<script>
+// Initialize lightbox after DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    // Task execution code
+    const executeBtn = document.getElementById('executeTask');
+    if (executeBtn) {
+        executeBtn.addEventListener('click', async function() {
+            try {
+                const taskType = document.getElementById('taskType').value;
+                if (!taskType) {
+                    alert('Please select a task type');
+                    return;
+                }
+
+                const taskData = {
+                    agent_id: "{{ agent.id }}",
+                    task_type: taskType
+                };
+
+                console.log("Sending task:", taskData); // Debug log
+
+                const response = await fetch("{{ url_for('create_task') }}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(taskData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    alert('Task created successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to create task: ' + error.message);
+            }
+        });
+    } else {
+        console.error("Execute button not found!");
+    }
+});
+</script>
+{% endblock %}

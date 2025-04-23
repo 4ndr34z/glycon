@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="fas fa-terminal me-2"></i>Terminal - {{ agent.hostname }}
+            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
+                {{ agent.status|capitalize }}
+            </span>
+        </h2>
+        <div>
+            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-1"></i>Back to Agent
+            </a>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <span>Remote Shell</span>
+                <span>
+                    <span class="badge bg-primary me-2" id="connection-status">Connecting...</span>
+                    <span class="badge bg-dark">Agent ID: {{ agent.id|truncate(10) }}</span>
+                </span>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div id="terminal" style="height: 500px; background-color: #1e1e1e; color: #f8f8f8; padding: 15px; overflow-y: auto; font-family: 'Courier New', monospace;"></div>
+        </div>
+        <div class="card-footer">
+            <div class="input-group">
+                <span class="input-group-text bg-dark text-white">$</span>
+                <input type="text" class="form-control bg-dark text-white border-dark" id="command-input" placeholder="Enter command..." autocomplete="off">
+                <button class="btn btn-primary" type="button" id="send-command">
+                    <i class="fas fa-paper-plane me-1"></i>Send
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            Commands are executed on the agent with the same privileges as the agent process.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const terminal = document.getElementById('terminal');
+    const commandInput = document.getElementById('command-input');
+    const sendButton = document.getElementById('send-command');
+    const statusBadge = document.getElementById('connection-status');
+    
+    // Connect to SocketIO with explicit configuration
+    const socket = io({
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        transports: ['websocket']
+    });
+    
+    // Join the terminal room for this agent
+    socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
+    
+        socket.on('terminal_output', function(data) {
+        console.log("Received terminal output:", data); // Debug log
+        if (data.agent_id === '{{ agent.id }}') {
+            // Clear previous output if needed
+            if (data.clear) {
+                terminal.innerHTML = '';
+            }
+            
+            // Display the command that was executed
+            if (data.command) {
+                terminal.innerHTML += `<div style="color: #00ff00;">$ ${data.command}</div>`;
+            }
+            
+            // Display the command output
+            if (data.output) {
+                terminal.innerHTML += `<div>${data.output.replace(/\n/g, '<br>')}</div>`;
+            }
+            
+            // Display any errors
+            if (data.error) {
+                terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
+            }
+            
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    });
+    
+    // Handle connection status
+    socket.on('connect', function() {
+        statusBadge.textContent = "Connected";
+        statusBadge.className = "badge bg-success";
+        addTerminalOutput(`Connected to agent: {{ agent.hostname }} ({{ agent.id }})`);
+        addTerminalOutput(`OS: {{ agent.os }} | Privilege: {{ agent.privilege }}`);
+        addTerminalOutput('Type commands below:');
+        addTerminalOutput('');
+    });
+    
+    socket.on('disconnect', function() {
+        statusBadge.textContent = "Disconnected";
+        statusBadge.className = "badge bg-danger";
+        addTerminalOutput('Disconnected from server');
+    });
+    
+    socket.on('terminal_output', function(data) {
+    console.log("Received terminal output:", data);
+    if (data.agent_id === '{{ agent.id }}') {
+        // Always show the command that was executed
+        terminal.innerHTML += `<div style="color: #00ff00;">$ ${data.command}</div>`;
+        
+        // Show output if it exists, otherwise show a message
+        if (data.output && data.output.trim() !== '') {
+            terminal.innerHTML += `<div>${data.output.replace(/\n/g, '<br>')}</div>`;
+        } else if (data.error && data.error.trim() !== '') {
+            terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
+        } else {
+            terminal.innerHTML += `<div style="color: #888;">Command executed but returned no output</div>`;
+        }
+        
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+});
+    // Helper function to add output to terminal
+    function addTerminalOutput(text) {
+        terminal.innerHTML += `<div>${text}</div>`;
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+    
+    // Send command
+    function sendCommand() {
+        const command = commandInput.value.trim();
+        if (command) {
+            socket.emit('terminal_command', {
+                agent_id: '{{ agent.id }}',
+                command: command
+            });
+            commandInput.value = '';
+        }
+    }
+    
+    sendButton.addEventListener('click', sendCommand);
+    commandInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendCommand();
+    });
+    
+    // Focus the input field
+    commandInput.focus();
+});
+</script>
+{% endblock %}

