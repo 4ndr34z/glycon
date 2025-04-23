@@ -31,8 +31,12 @@
         </div>
         <div class="card-footer">
             <div class="input-group">
-                <span class="input-group-text bg-dark text-white">$</span>
-                <input type="text" class="form-control bg-dark text-white border-dark" id="command-input" placeholder="Enter command..." autocomplete="off">
+                <span class="input-group-text bg-dark text-white" id="dir-prompt" 
+                      style="font-family: Consolas, monospace; min-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                </span>
+                <input type="text" class="form-control bg-dark text-white border-dark" 
+                       id="command-input" placeholder="Enter command..." autocomplete="off"
+                       style="font-family: Consolas, monospace;">
                 <button class="btn btn-primary" type="button" id="send-command">
                     <i class="fas fa-paper-plane me-1"></i>Send
                 </button>
@@ -56,94 +60,117 @@ document.addEventListener('DOMContentLoaded', function() {
     const terminal = document.getElementById('terminal');
     const commandInput = document.getElementById('command-input');
     const sendButton = document.getElementById('send-command');
-    const statusBadge = document.getElementById('connection-status');
-    let lastSeqId = 0;
+    const dirPrompt = document.getElementById('dir-prompt');
+    let currentDir = 'C:\\'; // Start with default directory
+    let waitingForResponse = false;
     
     // Connect to SocketIO
-    const socket = io({
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        transports: ['websocket']
+    const socket = io();
+    
+    // Join terminal room and request initial directory
+    socket.emit('join_terminal', { 
+        agent_id: '{{ agent.id }}',
+        request_init_dir: true
     });
-
-    // Join the terminal room
-    socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
-
-    // Single consolidated terminal output handler
+    
+    // Handle initial directory response
+    socket.on('terminal_init_dir', function(data) {
+        if (data.current_dir) {
+            currentDir = formatPathForDisplay(data.current_dir);
+            updatePrompt();
+        }
+    });
+    
+    // Handle terminal output
     socket.on('terminal_output', function(data) {
-        console.log("Terminal output received:", data);
+        waitingForResponse = false;
         
-        // Skip duplicate messages
-        if (data.seq_id && data.seq_id <= lastSeqId) {
-            return;
+        // Always update current directory if provided
+        if (data.current_dir) {
+            currentDir = formatPathForDisplay(data.current_dir);
+            updatePrompt();
         }
-        lastSeqId = data.seq_id || 0;
         
-        // Display the command that was executed
+        // Show the command that was executed
         if (data.command) {
-            terminal.innerHTML += `<div style="color: #00ff00;">$ ${data.command}</div>`;
+            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}> ${data.command}</div>`;
         }
         
-        // Display the command output
+        // Show command output if available
         if (data.output && data.output.trim() !== "") {
-            terminal.innerHTML += `<div>${data.output.replace(/\n/g, '<br>')}</div>`;
+            terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre;">${data.output.replace(/\n/g, '<br>')}</div>`;
         }
         
-        // Display any errors
+        // Show errors if any
         if (data.error && data.error.trim() !== "") {
             terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
         }
         
         terminal.scrollTop = terminal.scrollHeight;
     });
-
-    // Connection status handlers
-    socket.on('connect', function() {
-        console.log("Socket connected");
-        statusBadge.textContent = "Connected";
-        statusBadge.className = "badge bg-success";
-        appendToTerminal(`Connected to agent: {{ agent.hostname }} ({{ agent.id }})`);
-        appendToTerminal(`OS: {{ agent.os }} | Privilege: {{ agent.privilege }}`);
-        appendToTerminal('Type commands below:');
-        appendToTerminal('');
-    });
     
-    socket.on('disconnect', function() {
-        console.log("Socket disconnected");
-        statusBadge.textContent = "Disconnected";
-        statusBadge.className = "badge bg-danger";
-        appendToTerminal('Disconnected from server. Attempting to reconnect...');
-    });
-
-    // Helper function to append text to terminal
-    function appendToTerminal(text) {
-        terminal.innerHTML += `<div>${text}</div>`;
-        terminal.scrollTop = terminal.scrollHeight;
+    // Update the prompt display
+    function updatePrompt() {
+        dirPrompt.textContent = getPrompt() + '>';
     }
-
+    
+    // Get the full prompt path
+    function getPrompt() {
+        return currentDir;
+    }
+    
+    // Format path for display (Windows style)
+    function formatPathForDisplay(path) {
+        // Convert to Windows-style path
+        path = path.replace(/\//g, '\\');
+        // Ensure proper casing for drive letter
+        if (path.match(/^[a-zA-Z]:\\/)) {
+            path = path[0].toUpperCase() + path.slice(1);
+        }
+        // Remove trailing backslash unless it's root
+        if (path.endsWith('\\') && path.length > 3) {
+            path = path.slice(0, -1);
+        }
+        return path;
+    }
+    
     function sendCommand() {
-    const command = commandInput.value.trim();
-    if (command) {
-        console.log("Sending command:", command);  // Debug log
-        socket.emit('terminal_command', {
-            agent_id: '{{ agent.id }}',
-            command: command,
-            terminal: true  // Explicitly mark as terminal command
-        });
-        // Show local echo while waiting for response
-        terminal.innerHTML += `<div style="color: #00ff00;">$ ${command}</div>`;
-        terminal.scrollTop = terminal.scrollHeight;
-        commandInput.value = '';
+        const command = commandInput.value.trim();
+        if (command && !waitingForResponse) {
+            waitingForResponse = true;
+            
+            // Show command immediately
+            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}> ${command}</div>`;
+            terminal.scrollTop = terminal.scrollHeight;
+            
+            socket.emit('terminal_command', {
+                agent_id: '{{ agent.id }}',
+                command: command,
+                terminal: true,
+                current_dir: currentDir
+            });
+            
+            commandInput.value = '';
+        }
     }
-}
+    
     // Event listeners
     sendButton.addEventListener('click', sendCommand);
     commandInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') sendCommand();
     });
-
-    // Focus the input field
+    
+    // Initialize with welcome message
+    terminal.innerHTML = `
+        <div>Connected to agent: {{ agent.hostname }} ({{ agent.id }})</div>
+        <div>OS: {{ agent.os }} | Privilege: {{ agent.privilege }}</div>
+        <div>Initial directory: ${currentDir}</div>
+        <div>Type commands below:</div>
+        <div></div>
+    `;
+    
+    // Initialize prompt
+    updatePrompt();
     commandInput.focus();
 });
 </script>

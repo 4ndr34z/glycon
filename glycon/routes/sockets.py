@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 import json
 
+
 def init_socket_handlers(socketio):
     @socketio.on('connect')
     def handle_connect():
@@ -13,12 +14,20 @@ def init_socket_handlers(socketio):
 
     @socketio.on('join_terminal')
     def handle_join_terminal(data):
-        join_room(f"terminal_{data['agent_id']}")
+        agent_id = data['agent_id']
+        join_room(f"terminal_{agent_id}")
+        
+        # Send initial directory if requested
+        if data.get('request_init_dir'):
+            emit('terminal_init_dir', {
+                'current_dir': os.getcwd()
+            }, room=f"terminal_{agent_id}")
+        
         emit('terminal_status', {
             'status': 'Connected', 
             'connected': True,
-            'agent_id': data['agent_id']
-        }, room=f"terminal_{data['agent_id']}")
+            'agent_id': agent_id
+        }, room=f"terminal_{agent_id}")
 
     @socketio.on('terminal_command')
     def handle_terminal_command(data):
