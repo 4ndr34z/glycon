@@ -57,101 +57,92 @@ document.addEventListener('DOMContentLoaded', function() {
     const commandInput = document.getElementById('command-input');
     const sendButton = document.getElementById('send-command');
     const statusBadge = document.getElementById('connection-status');
+    let lastSeqId = 0;
     
-    // Connect to SocketIO with explicit configuration
+    // Connect to SocketIO
     const socket = io({
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         transports: ['websocket']
     });
-    
-    // Join the terminal room for this agent
-    socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
-    
-        socket.on('terminal_output', function(data) {
-        console.log("Received terminal output:", data); // Debug log
-        if (data.agent_id === '{{ agent.id }}') {
-            // Clear previous output if needed
-            if (data.clear) {
-                terminal.innerHTML = '';
-            }
-            
-            // Display the command that was executed
-            if (data.command) {
-                terminal.innerHTML += `<div style="color: #00ff00;">$ ${data.command}</div>`;
-            }
-            
-            // Display the command output
-            if (data.output) {
-                terminal.innerHTML += `<div>${data.output.replace(/\n/g, '<br>')}</div>`;
-            }
-            
-            // Display any errors
-            if (data.error) {
-                terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
-            }
-            
-            terminal.scrollTop = terminal.scrollHeight;
-        }
-    });
-    
-    // Handle connection status
-    socket.on('connect', function() {
-        statusBadge.textContent = "Connected";
-        statusBadge.className = "badge bg-success";
-        addTerminalOutput(`Connected to agent: {{ agent.hostname }} ({{ agent.id }})`);
-        addTerminalOutput(`OS: {{ agent.os }} | Privilege: {{ agent.privilege }}`);
-        addTerminalOutput('Type commands below:');
-        addTerminalOutput('');
-    });
-    
-    socket.on('disconnect', function() {
-        statusBadge.textContent = "Disconnected";
-        statusBadge.className = "badge bg-danger";
-        addTerminalOutput('Disconnected from server');
-    });
-    
-    let lastSeqId = 0;
 
+    // Join the terminal room
+    socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
+
+    // Single consolidated terminal output handler
     socket.on('terminal_output', function(data) {
+        console.log("Terminal output received:", data);
+        
         // Skip duplicate messages
         if (data.seq_id && data.seq_id <= lastSeqId) {
             return;
         }
         lastSeqId = data.seq_id || 0;
         
-        // Display output
-        if (data.output) {
-            appendTerminalOutput(data.command, data.output);
+        // Display the command that was executed
+        if (data.command) {
+            terminal.innerHTML += `<div style="color: #00ff00;">$ ${data.command}</div>`;
         }
-        if (data.error) {
-            appendTerminalError(data.command, data.error);
+        
+        // Display the command output
+        if (data.output && data.output.trim() !== "") {
+            terminal.innerHTML += `<div>${data.output.replace(/\n/g, '<br>')}</div>`;
         }
+        
+        // Display any errors
+        if (data.error && data.error.trim() !== "") {
+            terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
+        }
+        
+        terminal.scrollTop = terminal.scrollHeight;
     });
-    // Helper function to add output to terminal
-    function addTerminalOutput(text) {
+
+    // Connection status handlers
+    socket.on('connect', function() {
+        console.log("Socket connected");
+        statusBadge.textContent = "Connected";
+        statusBadge.className = "badge bg-success";
+        appendToTerminal(`Connected to agent: {{ agent.hostname }} ({{ agent.id }})`);
+        appendToTerminal(`OS: {{ agent.os }} | Privilege: {{ agent.privilege }}`);
+        appendToTerminal('Type commands below:');
+        appendToTerminal('');
+    });
+    
+    socket.on('disconnect', function() {
+        console.log("Socket disconnected");
+        statusBadge.textContent = "Disconnected";
+        statusBadge.className = "badge bg-danger";
+        appendToTerminal('Disconnected from server. Attempting to reconnect...');
+    });
+
+    // Helper function to append text to terminal
+    function appendToTerminal(text) {
         terminal.innerHTML += `<div>${text}</div>`;
         terminal.scrollTop = terminal.scrollHeight;
     }
-    
-    // Send command
+
     function sendCommand() {
-        const command = commandInput.value.trim();
-        if (command) {
-            socket.emit('terminal_command', {
-                agent_id: '{{ agent.id }}',
-                command: command
-            });
-            commandInput.value = '';
-        }
+    const command = commandInput.value.trim();
+    if (command) {
+        console.log("Sending command:", command);  // Debug log
+        socket.emit('terminal_command', {
+            agent_id: '{{ agent.id }}',
+            command: command,
+            terminal: true  // Explicitly mark as terminal command
+        });
+        // Show local echo while waiting for response
+        terminal.innerHTML += `<div style="color: #00ff00;">$ ${command}</div>`;
+        terminal.scrollTop = terminal.scrollHeight;
+        commandInput.value = '';
     }
-    
+}
+    // Event listeners
     sendButton.addEventListener('click', sendCommand);
     commandInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') sendCommand();
     });
-    
+
     // Focus the input field
     commandInput.focus();
 });

