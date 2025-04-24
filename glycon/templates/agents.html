@@ -9,7 +9,7 @@
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Agent List</h5>
         <div>
-            <button class="btn btn-sm btn-outline-primary me-2">
+            <button class="btn btn-sm btn-outline-primary me-2" id="manualRefresh">
                 <i class="bi bi-arrow-clockwise"></i> Refresh
             </button>
             <button class="btn btn-sm btn-primary">
@@ -31,7 +31,7 @@
                         <th>Actions</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="agentsTableBody">
                     {% for agent in agents %}
                     <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}">
                         <td>{{ agent.id[:8] }}...</td>
@@ -61,4 +61,52 @@
         </div>
     </div>
 </div>
+
+<script>
+    function refreshAgentList() {
+        fetch(window.location.href, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(html, 'text/html');
+            
+            // Update agents table body
+            document.getElementById('agentsTableBody').innerHTML = 
+                newDoc.getElementById('agentsTableBody').innerHTML;
+        })
+        .catch(error => console.error('Error refreshing agent list:', error));
+    }
+
+    // Refresh every 5 seconds
+    let refreshInterval = setInterval(refreshAgentList, 5000);
+
+    // Manual refresh button
+    document.getElementById('manualRefresh').addEventListener('click', function() {
+        refreshAgentList();
+    });
+
+    // Pause refresh when window loses focus
+    window.addEventListener('blur', function() {
+        clearInterval(refreshInterval);
+    });
+
+    // Resume refresh when window regains focus
+    window.addEventListener('focus', function() {
+        refreshInterval = setInterval(refreshAgentList, 5000);
+        refreshAgentList(); // Immediate refresh when returning
+    });
+</script>
+
+<style>
+    .agent-online {
+        background-color: rgba(25, 135, 84, 0.1);
+    }
+    .agent-offline {
+        background-color: rgba(220, 53, 69, 0.1);
+    }
+</style>
 {% endblock %}

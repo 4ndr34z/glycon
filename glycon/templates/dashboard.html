@@ -10,7 +10,7 @@
         <div class="card text-white bg-primary">
             <div class="card-body">
                 <h5 class="card-title">Active Agents</h5>
-                <p class="card-text display-6">{{ agent_count }}</p>
+                <p class="card-text display-6" id="agent-count">{{ agent_count }}</p>
             </div>
         </div>
     </div>
@@ -18,7 +18,7 @@
         <div class="card text-white bg-warning">
             <div class="card-body">
                 <h5 class="card-title">Pending Tasks</h5>
-                <p class="card-text display-6">{{ pending_tasks }}</p>
+                <p class="card-text display-6" id="pending-tasks">{{ pending_tasks }}</p>
             </div>
         </div>
     </div>
@@ -26,7 +26,7 @@
         <div class="card text-white bg-success">
             <div class="card-body">
                 <h5 class="card-title">Credentials Harvested</h5>
-                <p class="card-text display-6">{{ credential_count }}</p>
+                <p class="card-text display-6" id="credential-count">{{ credential_count }}</p>
             </div>
         </div>
     </div>
@@ -40,7 +40,7 @@
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover" id="recent-agents-table">
                         <thead>
                             <tr>
                                 <th>Hostname</th>
@@ -49,7 +49,7 @@
                                 <th>Last Seen</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="recent-agents-body">
                             {% for agent in recent_agents %}
                             <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}">
                                 <td>
@@ -76,7 +76,7 @@
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover" id="recent-tasks-table">
                         <thead>
                             <tr>
                                 <th>Agent</th>
@@ -85,7 +85,7 @@
                                 <th>Created</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="recent-tasks-body">
                             {% for task in recent_tasks %}
                             <tr>
                                 <td>{{ task.agent_id[:8] }}...</td>
@@ -105,4 +105,48 @@
         </div>
     </div>
 </div>
+
+<script>
+    function refreshDashboard() {
+        fetch(window.location.href, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(html, 'text/html');
+            
+            // Update counters
+            document.getElementById('agent-count').textContent = 
+                newDoc.getElementById('agent-count').textContent;
+            document.getElementById('pending-tasks').textContent = 
+                newDoc.getElementById('pending-tasks').textContent;
+            document.getElementById('credential-count').textContent = 
+                newDoc.getElementById('credential-count').textContent;
+            
+            // Update recent agents table
+            document.getElementById('recent-agents-body').innerHTML = 
+                newDoc.getElementById('recent-agents-body').innerHTML;
+            
+            // Update recent tasks table
+            document.getElementById('recent-tasks-body').innerHTML = 
+                newDoc.getElementById('recent-tasks-body').innerHTML;
+        })
+        .catch(error => console.error('Error refreshing dashboard:', error));
+    }
+
+    // Refresh every 5 seconds
+    setInterval(refreshDashboard, 5000);
+</script>
+
+<style>
+    .agent-online {
+        background-color: rgba(25, 135, 84, 0.1);
+    }
+    .agent-offline {
+        background-color: rgba(220, 53, 69, 0.1);
+    }
+</style>
 {% endblock %}

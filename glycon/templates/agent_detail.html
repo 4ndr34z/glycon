@@ -4,8 +4,8 @@
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>
-            <i class="fas fa-robot me-2"></i>{{ agent.hostname }}
-            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
+            <i class="fas fa-robot me-2"></i><span id="agent-hostname">{{ agent.hostname }}</span>
+            <span id="agent-status" class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
                 {{ agent.status|capitalize }}
             </span>
         </h2>
@@ -13,6 +13,9 @@
             <a href="{{ url_for('terminal', agent_id=agent.id) }}" class="btn btn-primary me-2">
                 <i class="fas fa-terminal me-1"></i>Terminal
             </a>
+            <button id="manualRefresh" class="btn btn-outline-primary">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
         </div>
     </div>
 
@@ -22,22 +25,22 @@
                 <div class="card-header">
                     <h5 class="mb-0">Agent Information</h5>
                 </div>
-                <div class="card-body">
+                <div class="card-body" id="agent-info-section">
                     <div class="row">
                         <div class="col-md-6">
-                            <p><strong>Agent ID:</strong> {{ agent.id }}</p>
-                            <p><strong>IP Address:</strong> {{ agent.ip }}</p>
+                            <p><strong>Agent ID:</strong> <span id="agent-id">{{ agent.id }}</span></p>
+                            <p><strong>IP Address:</strong> <span id="agent-ip">{{ agent.ip }}</span></p>
                         </div>
                         <div class="col-md-6">
-                            <p><strong>Operating System:</strong> {{ agent.os }}</p>
+                            <p><strong>Operating System:</strong> <span id="agent-os">{{ agent.os }}</span></p>
                             <p><strong>Privilege Level:</strong> 
-                                <span class="badge bg-{% if agent.privilege == 'admin' %}danger{% else %}warning{% endif %}">
+                                <span id="agent-privilege" class="badge bg-{% if agent.privilege == 'admin' %}danger{% else %}warning{% endif %}">
                                     {{ agent.privilege|capitalize }}
                                 </span>
                             </p>
                         </div>
                     </div>
-                    <p><strong>Last Seen:</strong> {{ agent.last_seen }}</p>
+                    <p><strong>Last Seen:</strong> <span id="agent-last-seen">{{ agent.last_seen }}</span></p>
                 </div>
             </div>
 
@@ -48,9 +51,9 @@
                         View All
                     </a>
                 </div>
-                <div class="card-body">
+                <div class="card-body" id="screenshots-section">
                     {% if screenshots %}
-                    <div class="row">
+                    <div class="row" id="screenshots-container">
                         {% for screenshot in screenshots %}
                         <div class="col-md-6 mb-3">
                             <a href="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" data-lightbox="screenshots-{{ agent.id }}">
@@ -69,21 +72,19 @@
 
         <div class="col-md-6">
             <div class="card shadow-sm mb-4">
-                
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Recent Tasks</h5>
-                        <div class="d-flex">
-                            <select id="taskType" class="form-select form-select-sm me-2" required>
-                                <option value="">Select Task</option>
-                                <option value="shell">Shell Command</option>
-                                <option value="screenshot">Take Screenshot</option>
-                                <option value="harvest_creds">Harvest Credentials</option>
-                            </select>
-                            <button id="executeTask" class="btn btn-sm btn-primary">Execute</button>
-                        </div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Recent Tasks</h5>
+                    <div class="d-flex">
+                        <select id="taskType" class="form-select form-select-sm me-2" required>
+                            <option value="">Select Task</option>
+                            <option value="shell">Shell Command</option>
+                            <option value="screenshot">Take Screenshot</option>
+                            <option value="harvest_creds">Harvest Credentials</option>
+                        </select>
+                        <button id="executeTask" class="btn btn-sm btn-primary">Execute</button>
                     </div>
+                </div>
                 <div class="card-body">
-                    {% if tasks %}
                     <div class="table-responsive">
                         <table class="table table-sm">
                             <thead>
@@ -94,7 +95,8 @@
                                     <th>Completed</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody id="tasks-container">
+                                {% if tasks %}
                                 {% for task in tasks %}
                                 <tr>
                                     <td>
@@ -111,12 +113,14 @@
                                     <td>{{ task.completed_at if task.completed_at else '-' }}</td>
                                 </tr>
                                 {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="4" class="text-muted">No tasks found</td>
+                                </tr>
+                                {% endif %}
                             </tbody>
                         </table>
                     </div>
-                    {% else %}
-                    <p class="text-muted">No tasks found</p>
-                    {% endif %}
                 </div>
             </div>
 
@@ -125,7 +129,6 @@
                     <h5 class="mb-0">Recent Credentials</h5>
                 </div>
                 <div class="card-body">
-                    {% if creds %}
                     <div class="table-responsive">
                         <table class="table table-sm">
                             <thead>
@@ -135,7 +138,8 @@
                                     <th>Username</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody id="creds-container">
+                                {% if creds %}
                                 {% for cred in creds %}
                                 <tr>
                                     <td><span class="badge bg-primary">{{ cred.browser|capitalize }}</span></td>
@@ -143,12 +147,14 @@
                                     <td>{{ cred.username|truncate(20) }}</td>
                                 </tr>
                                 {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="3" class="text-muted">No credentials found</td>
+                                </tr>
+                                {% endif %}
                             </tbody>
                         </table>
                     </div>
-                    {% else %}
-                    <p class="text-muted">No credentials found</p>
-                    {% endif %}
                 </div>
             </div>
         </div>
@@ -163,9 +169,8 @@
 {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
 <script>
-// Initialize lightbox after DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    // Task execution code
+    // Task execution code (unchanged)
     const executeBtn = document.getElementById('executeTask');
     if (executeBtn) {
         executeBtn.addEventListener('click', async function() {
@@ -181,8 +186,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     task_type: taskType
                 };
 
-                console.log("Sending task:", taskData); // Debug log
-
                 const response = await fetch("{{ url_for('create_task') }}", {
                     method: 'POST',
                     headers: {
@@ -192,15 +195,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     body: JSON.stringify(taskData)
                 });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
+                const data = await response.json();
                 if (data.status === 'success') {
                     alert('Task created successfully!');
-                    location.reload();
+                    refreshAgentDetail();
                 } else {
                     alert('Error: ' + (data.message || 'Unknown error'));
                 }
@@ -209,9 +209,125 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert('Failed to create task: ' + error.message);
             }
         });
-    } else {
-        console.error("Execute button not found!");
     }
+
+    // Improved refresh functionality
+    let isRefreshing = false;
+    
+    async function refreshAgentDetail() {
+        if (isRefreshing) return;
+        isRefreshing = true;
+        
+        try {
+            const response = await fetch(window.location.href, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Cache-Control': 'no-cache'
+                },
+                cache: 'no-store'
+            });
+            
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const html = await response.text();
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(html, 'text/html');
+            
+            // Update agent info
+            updateElementContent(newDoc, 'agent-hostname');
+            updateElementContent(newDoc, 'agent-status');
+            updateElementContent(newDoc, 'agent-id');
+            updateElementContent(newDoc, 'agent-ip');
+            updateElementContent(newDoc, 'agent-os');
+            updateElementContent(newDoc, 'agent-last-seen');
+            
+            // Update status badge class
+            const statusBadge = document.getElementById('agent-status');
+            const newStatusBadge = newDoc.getElementById('agent-status');
+            if (statusBadge && newStatusBadge) {
+                statusBadge.className = newStatusBadge.className;
+            }
+            
+            // Update privilege badge class and content
+            updateElementContent(newDoc, 'agent-privilege');
+            const privilegeBadge = document.getElementById('agent-privilege');
+            const newPrivilegeBadge = newDoc.getElementById('agent-privilege');
+            if (privilegeBadge && newPrivilegeBadge) {
+                privilegeBadge.className = newPrivilegeBadge.className;
+            }
+            
+            // Update tables
+            updateTableContent(newDoc, 'tasks-container');
+            updateTableContent(newDoc, 'creds-container');
+            
+            // Update screenshots
+            const newScreenshots = newDoc.getElementById('screenshots-container');
+            if (newScreenshots) {
+                document.getElementById('screenshots-container').innerHTML = newScreenshots.innerHTML;
+            } else {
+                document.getElementById('screenshots-section').innerHTML = 
+                    newDoc.getElementById('screenshots-section').innerHTML;
+            }
+            
+            // Reinitialize lightbox if it exists
+            if (typeof lightbox !== 'undefined') {
+                lightbox.init();
+            }
+            
+        } catch (error) {
+            console.error('Refresh failed:', error);
+        } finally {
+            isRefreshing = false;
+        }
+    }
+    
+    function updateElementContent(newDoc, elementId) {
+        const newElement = newDoc.getElementById(elementId);
+        if (newElement) {
+            const currentElement = document.getElementById(elementId);
+            if (currentElement && currentElement.textContent !== newElement.textContent) {
+                currentElement.textContent = newElement.textContent;
+            }
+        }
+    }
+    
+    function updateTableContent(newDoc, tableBodyId) {
+        const newTableBody = newDoc.getElementById(tableBodyId);
+        if (newTableBody) {
+            const currentTableBody = document.getElementById(tableBodyId);
+            if (currentTableBody && currentTableBody.innerHTML !== newTableBody.innerHTML) {
+                currentTableBody.innerHTML = newTableBody.innerHTML;
+            }
+        }
+    }
+
+    // Manual refresh
+    document.getElementById('manualRefresh').addEventListener('click', function() {
+        refreshAgentDetail();
+    });
+
+    // Auto-refresh with visibility check
+    let refreshInterval;
+    function setupRefresh() {
+        refreshInterval = setInterval(() => {
+            if (!document.hidden) {
+                refreshAgentDetail();
+            }
+        }, 5000);
+    }
+    
+    // Handle visibility changes
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            clearInterval(refreshInterval);
+        } else {
+            setupRefresh();
+            refreshAgentDetail(); // Immediate refresh when tab becomes visible
+        }
+    });
+    
+    // Initial setup
+    setupRefresh();
 });
 </script>
 {% endblock %}

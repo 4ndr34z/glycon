@@ -6,8 +6,17 @@
 <div class="row justify-content-center mt-5">
     <div class="col-md-6 col-lg-4">
         <div class="card shadow">
+            <!-- Logo and Title Placeholder -->
+            <div class="text-center mt-4">
+                <div class="logo-placeholder mb-3">
+                    <img src="{{ url_for('static_files', filename='images/glycon.jpg') }}" alt="Logo" height="120" class="d-inline-block align-text-top me-2">
+                </div>
+                <h2 class="h4">Glycon - C2</h2>
+                <p class="text-muted mb-4">Secure Access Portal</p>
+            </div>
+            
             <div class="card-body p-4">
-                <h3 class="card-title text-center mb-4">C2 Console Login</h3>
+                <h3 class="card-title text-center mb-4">Login to Console</h3>
                 
                 {% if error %}
                 <div class="alert alert-danger">{{ error }}</div>
@@ -28,4 +37,20 @@
         </div>
     </div>
 </div>
+
+<style>
+    .logo-placeholder {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background-color: rgba(13, 110, 253, 0.1);
+    }
+    .logo-placeholder svg {
+        width: 40px;
+        height: 40px;
+    }
+</style>
 {% endblock %}
