@@ -15,7 +15,7 @@ class Config:
 
         # Create required directories
         os.makedirs(self.upload_folder, exist_ok=True)
-        os.makedirs(self.screenshot_folder, exist_ok=True)
+        #os.makedirs(self.screenshot_folder, exist_ok=True)
 
         # Initialize database
         self.init_db()

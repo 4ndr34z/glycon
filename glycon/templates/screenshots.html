@@ -40,51 +40,96 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script>
-lightbox.option({
-    'resizeDuration': 200,
-    'wrapAround': true,
-    'albumLabel': "Screenshot %1 of %2"
-});
-
+// Initialize lightbox after ensuring jQuery is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    // Connect to Socket.IO namespace for screenshots
-    const socket = io('/screenshots');
-    
-    // Handle screenshot deletion
-    document.addEventListener('click', function(e) {
-        if (e.target.closest('.delete-screenshot')) {
-            const button = e.target.closest('.delete-screenshot');
-            const screenshotId = button.getAttribute('data-screenshot-id');
+    // Initialize lightbox if available
+    if (window.lightbox) {
+        lightbox.option({
+            'resizeDuration': 200,
+            'wrapAround': true,
+            'albumLabel': "Screenshot %1 of %2"
+        });
+    }
+
+    // Connect to Socket.IO with error handling
+    let socket;
+    try {
+        socket = io('/screenshots');
+        console.log('Socket.IO connected successfully');
+    } catch (e) {
+        console.error('Socket.IO connection failed:', e);
+        alert('Real-time features disabled. Please refresh the page.');
+        return;
+    }
+
+    // Improved delete handler with event delegation
+    document.getElementById('screenshots-container').addEventListener('click', function(e) {
+        const deleteBtn = e.target.closest('.delete-screenshot');
+        if (deleteBtn) {
+            const screenshotId = deleteBtn.dataset.screenshotId;
             if (confirm('Are you sure you want to delete this screenshot?')) {
-                socket.emit('delete_screenshot', { screenshot_id: screenshotId });
+                deleteScreenshot(screenshotId, socket);
             }
         }
     });
 
-    // Handle deletion confirmation
+    // Handle server responses
     socket.on('screenshot_deleted', function(data) {
-        const card = document.querySelector(`.screenshot-card[data-screenshot-id="${data.screenshot_id}"]`);
+        const card = document.querySelector(`[data-screenshot-id="${data.screenshot_id}"]`);
         if (card) {
             card.remove();
-            showToast(data.message || 'Screenshot deleted successfully');
+            showNotification('Screenshot deleted successfully', 'success');
         }
     });
 
-    // Handle errors
     socket.on('screenshots_error', function(data) {
-        console.error('Screenshot error:', data.error);
-        showToast('Error: ' + data.error, 'error');
+        console.error('Server error:', data.error);
+        showNotification(data.error, 'error');
     });
 
-    function showToast(message, type = 'success') {
-        // Implement a proper toast notification or use alert temporarily
-        alert(message);
+    async function deleteScreenshot(id, socket) {
+    try {
+        // First try WebSocket
+        if (socket && socket.connected) {
+            socket.emit('delete_screenshot', { screenshot_id: id });
+            return;
+        }
         
-        // For a better toast notification, you could use:
-        // const toast = new bootstrap.Toast(document.getElementById('toast'));
-        // document.getElementById('toast-message').textContent = message;
-        // document.getElementById('toast').classList.add(`text-bg-${type}`);
-        // toast.show();
+        // Fallback to HTTP
+        const response = await fetch(`/api/screenshots/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to delete screenshot');
+        }
+        
+        // Manually remove the element if WebSocket didn't notify us
+        const card = document.querySelector(`[data-screenshot-id="${id}"]`);
+        if (card) {
+            card.remove();
+        }
+        showNotification('Screenshot deleted successfully', 'success');
+        
+    } catch (error) {
+        console.error('Delete failed:', error);
+        showNotification('Delete failed: ' + error.message, 'error');
+    }
+}
+
+    function showNotification(message, type) {
+        // Simple notification - replace with your preferred UI
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} fixed-top mx-auto mt-3`;
+        alert.style.width = '300px';
+        alert.style.zIndex = '1000';
+        alert.textContent = message;
+        document.body.appendChild(alert);
+        setTimeout(() => alert.remove(), 3000);
     }
 });
 </script>

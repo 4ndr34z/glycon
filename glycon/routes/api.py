@@ -169,6 +169,47 @@ def init_api_routes(app, socketio):
                 conn.close()
             return Response(SecureComms.encrypt({'type': 'noop'}),
                           mimetype='application/octet-stream')
+ 
+    @app.route('/api/screenshots/<int:screenshot_id>', methods=['DELETE'])
+    @login_required
+    def delete_screenshot(screenshot_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # First get the screenshot info
+            c.execute("SELECT id, agent_id, file_path FROM screenshots WHERE id = ?", (screenshot_id,))
+            screenshot = c.fetchone()
+            
+            if not screenshot:
+                return jsonify({"status": "error", "message": "Screenshot not found"}), 404
+                
+            # Delete from database
+            c.execute("DELETE FROM screenshots WHERE id = ?", (screenshot_id,))
+            
+            # Delete the file if it exists
+            #file_path = screenshot[2]
+            #if os.path.exists(file_path):
+            #    os.remove(file_path)
+                
+            conn.commit()
+            
+            # Notify via WebSocket
+            socketio.emit('screenshot_deleted', {
+                'screenshot_id': screenshot_id,
+                'agent_id': screenshot[1]
+            })
+            
+            return jsonify({"status": "success"}), 200
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            return jsonify({"status": "error", "message": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
     @app.route('/api/task_result', methods=['POST'])
     def task_result():
