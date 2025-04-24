@@ -179,7 +179,7 @@ def init_api_routes(app, socketio):
             c = conn.cursor()
             
             # First get the screenshot info
-            c.execute("SELECT id, agent_id, file_path FROM screenshots WHERE id = ?", (screenshot_id,))
+            c.execute("SELECT id, agent_id FROM screenshots WHERE id = ?", (screenshot_id,))
             screenshot = c.fetchone()
             
             if not screenshot:
