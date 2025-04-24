@@ -167,6 +167,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -208,9 +209,71 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error:', error);
                 alert('Failed to create task: ' + error.message);
             }
+
         });
     }
+    // Connect to screenshots namespace for this agent
+    const screenshotSocket = io('/screenshots');
+    screenshotSocket.emit('join_screenshots', { agent_id: "{{ agent.id }}" });
 
+    // Handle new screenshots
+    screenshotSocket.on('screenshot_added', function(data) {
+        if (data.agent_id === "{{ agent.id }}") {
+            refreshScreenshotsSection();
+        }
+    });
+
+    // Handle deleted screenshots
+    screenshotSocket.on('screenshot_deleted', function(data) {
+        if (data.agent_id === "{{ agent.id }}") {
+            refreshScreenshotsSection();
+        }
+    });
+
+    // Handle errors
+    screenshotSocket.on('screenshots_error', function(data) {
+        console.error('Screenshots error:', data.error);
+        showToast('Screenshots error: ' + data.error, 'error');
+    });
+
+    // Refresh just the screenshots section
+    async function refreshScreenshotsSection() {
+        try {
+            const response = await fetch("{{ url_for('agent_detail', agent_id=agent.id) }}", {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Cache-Control': 'no-cache'
+                },
+                cache: 'no-store'
+            });
+            
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const html = await response.text();
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(html, 'text/html');
+            
+            const newScreenshots = newDoc.getElementById('screenshots-container');
+            if (newScreenshots) {
+                document.getElementById('screenshots-container').innerHTML = newScreenshots.innerHTML;
+            } else {
+                document.getElementById('screenshots-section').innerHTML = 
+                    newDoc.getElementById('screenshots-section').innerHTML;
+            }
+            
+            if (typeof lightbox !== 'undefined') {
+                lightbox.init();
+            }
+        } catch (error) {
+            console.error('Error refreshing screenshots:', error);
+        }
+    }
+
+    function showToast(message, type = 'success') {
+        // Implement your toast notification system here
+        alert(message); // Temporary simple alert
+    }
+    
     // Improved refresh functionality
     let isRefreshing = false;
     

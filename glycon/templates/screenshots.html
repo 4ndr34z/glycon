@@ -38,6 +38,7 @@
 
 {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script>
 lightbox.option({
     'resizeDuration': 200,
@@ -46,42 +47,44 @@ lightbox.option({
 });
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Connect to Socket.IO namespace for screenshots
+    const socket = io('/screenshots');
+    
     // Handle screenshot deletion
-    document.querySelectorAll('.delete-screenshot').forEach(button => {
-        button.addEventListener('click', function() {
-            const screenshotId = this.getAttribute('data-screenshot-id');
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.delete-screenshot')) {
+            const button = e.target.closest('.delete-screenshot');
+            const screenshotId = button.getAttribute('data-screenshot-id');
             if (confirm('Are you sure you want to delete this screenshot?')) {
-                deleteScreenshot(screenshotId);
+                socket.emit('delete_screenshot', { screenshot_id: screenshotId });
             }
-        });
+        }
     });
 
-    async function deleteScreenshot(screenshotId) {
-        try {
-            const response = await fetch(`/screenshots/${screenshotId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token() }}'  // Make sure to include CSRF protection
-                }
-            });
-
-            if (response.ok) {
-                // Remove the screenshot card from the DOM
-                const card = document.querySelector(`.screenshot-card[data-screenshot-id="${screenshotId}"]`);
-                if (card) {
-                    card.remove();
-                }
-                // Show success message
-                alert('Screenshot deleted successfully');
-            } else {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to delete screenshot');
-            }
-        } catch (error) {
-            console.error('Error deleting screenshot:', error);
-            alert('Error: ' + error.message);
+    // Handle deletion confirmation
+    socket.on('screenshot_deleted', function(data) {
+        const card = document.querySelector(`.screenshot-card[data-screenshot-id="${data.screenshot_id}"]`);
+        if (card) {
+            card.remove();
+            showToast(data.message || 'Screenshot deleted successfully');
         }
+    });
+
+    // Handle errors
+    socket.on('screenshots_error', function(data) {
+        console.error('Screenshot error:', data.error);
+        showToast('Error: ' + data.error, 'error');
+    });
+
+    function showToast(message, type = 'success') {
+        // Implement a proper toast notification or use alert temporarily
+        alert(message);
+        
+        // For a better toast notification, you could use:
+        // const toast = new bootstrap.Toast(document.getElementById('toast'));
+        // document.getElementById('toast-message').textContent = message;
+        // document.getElementById('toast').classList.add(`text-bg-${type}`);
+        // toast.show();
     }
 });
 </script>

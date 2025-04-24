@@ -7,6 +7,7 @@ from glycon.routes.auth import init_auth_routes
 from glycon.routes.views import init_view_routes
 from glycon.routes.api import init_api_routes
 from glycon.routes.sockets import init_socket_handlers
+from glycon.routes.screenshots import init_screenshot_handlers  # Add this import
 
 def create_app():
     app = Flask(__name__, template_folder='templates')
@@ -15,18 +16,16 @@ def create_app():
     app.config['HOST'] = CONFIG.host
     app.config['PORT'] = CONFIG.port
 
-    # Initialize extensions
     # Enable CORS for all domains
     CORS(app, resources={r"/*": {"origins": "*"}})
 
-    # Initialize SocketIO with proper async_mode
+    # Initialize SocketIO
     socketio = SocketIO(app, 
                     cors_allowed_origins="*",
-                    async_mode='eventlet',  # or 'eventlet' if you prefer
+                    async_mode='eventlet',
                     logger=True,
                     engineio_logger=True)
 
-    
     login_manager = LoginManager(app)
     login_manager.login_view = 'login'
 
@@ -34,7 +33,10 @@ def create_app():
     init_auth_routes(app, login_manager)
     init_view_routes(app)
     init_api_routes(app, socketio)
+    
+    # Initialize both socket handlers
     init_socket_handlers(socketio)
+    init_screenshot_handlers(socketio) 
 
     return app, socketio
 
