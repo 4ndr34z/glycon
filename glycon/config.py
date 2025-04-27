@@ -25,16 +25,17 @@ class Config:
         c = conn.cursor()
         
         c.execute('''
-            CREATE TABLE IF NOT EXISTS agents (
-                id TEXT PRIMARY KEY,
-                hostname TEXT,
-                ip TEXT,
-                os TEXT,
-                last_seen TEXT,
-                status TEXT,
-                privilege TEXT
-            )
-        ''')
+        CREATE TABLE IF NOT EXISTS agents (
+            id TEXT PRIMARY KEY,
+            hostname TEXT,
+            ip TEXT,
+            os TEXT,
+            last_seen TEXT,
+            status TEXT,
+            privilege TEXT,
+            ws_connected INTEGER DEFAULT 0
+        )
+    ''')
         
         c.execute('''
             CREATE TABLE IF NOT EXISTS tasks (

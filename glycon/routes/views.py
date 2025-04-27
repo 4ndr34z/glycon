@@ -113,7 +113,8 @@ def init_view_routes(app):
             'os': agent_data[3],
             'last_seen': agent_data[4],
             'status': agent_data[5],
-            'privilege': agent_data[6]
+            'privilege': agent_data[6],
+            'ws_connected': False  # We'll update this later with actual status
         }
         
         return render_template('terminal.html', agent=agent)
