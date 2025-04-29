@@ -2,7 +2,6 @@
 
 {% block content %}
 <div class="container-fluid">
-    <!-- Header section remains the same -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>
             <i class="fas fa-terminal me-2"></i>Terminal - {{ agent.hostname }}
@@ -11,9 +10,9 @@
             </span>
         </h2>
         <div>
-            <button id="wsControl" class="btn btn-danger me-2">
+            <button id="wsControl" class="btn btn-{% if agent.ws_connected %}success{% else %}danger{% endif %} me-2">
                 <i class="fas fa-plug me-1"></i>
-                <span id="wsStatusText">Connect Terminal</span>
+                <span id="wsStatusText">{% if agent.ws_connected %}Disconnect{% else %}Connect{% endif %} Terminal</span>
             </button>
             <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="btn btn-outline-secondary">
                 <i class="fas fa-arrow-left me-1"></i>Back to Agent
@@ -21,13 +20,14 @@
         </div>
     </div>
 
-    <!-- Terminal display section remains the same -->
     <div class="card shadow-sm">
         <div class="card-header">
             <div class="d-flex justify-content-between align-items-center">
                 <span>Remote Shell</span>
                 <span>
-                    <span class="badge bg-danger me-2" id="connection-status">Disconnected</span>
+                    <span class="badge bg-{% if agent.ws_connected %}success{% else %}danger{% endif %} me-2" id="connection-status">
+                        {% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}
+                    </span>
                     <span class="badge bg-dark">Agent ID: {{ agent.id|truncate(10) }}</span>
                 </span>
             </div>
@@ -39,12 +39,12 @@
             <div class="input-group">
                 <span class="input-group-text bg-dark text-white" id="dir-prompt" 
                       style="font-family: Consolas, monospace; min-width: 200px; overflow: hidden; text-overflow: ellipsis;">
-                    C:\>
+                    {% if agent.os.startswith('Windows') %}C:\>{% else %}$ {% endif %}
                 </span>
                 <input type="text" class="form-control bg-dark text-white border-dark" 
-                       id="command-input" placeholder="Enter command..." autocomplete="off" disabled
+                       id="command-input" placeholder="Enter command..." autocomplete="off" {% if not agent.ws_connected %}disabled{% endif %}
                        style="font-family: Consolas, monospace;">
-                <button class="btn btn-primary" type="button" id="send-command" disabled>
+                <button class="btn btn-primary" type="button" id="send-command" {% if not agent.ws_connected %}disabled{% endif %}>
                     <i class="fas fa-paper-plane me-1"></i>Send
                 </button>
             </div>
@@ -54,7 +54,7 @@
     <div class="mt-3">
         <div class="alert alert-info">
             <i class="fas fa-info-circle me-2"></i>
-            WebSocket status: <span id="wsStatusAlert">Disconnected</span>
+            WebSocket status: <span id="wsStatusAlert">{% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}</span>
         </div>
     </div>
 </div>
@@ -73,43 +73,42 @@ document.addEventListener('DOMContentLoaded', function() {
     const wsStatusAlert = document.getElementById('wsStatusAlert');
     const connectionStatus = document.getElementById('connection-status');
     
-    let currentDir = 'C:\\';
+    let currentDir = '{% if agent.os.startswith("Windows") %}C:\\{% else %}/{% endif %}';
     let socket = null;
     let waitingForResponse = false;
-    let isConnected = false;
+    let isConnected = {{ 'true' if agent.ws_connected else 'false' }};
 
-    function connectWebSocket() {
-        if (socket && socket.connected) {
-            return;
+    function initializeSocket() {
+        if (socket) {
+            socket.disconnect();
+            socket = null;
         }
 
         socket = io('/terminal', {
-            reconnectionAttempts: 5,
+            reconnectionAttempts: 3,
             reconnectionDelay: 1000,
-            transports: ['websocket']
+            transports: ['websocket'],
+            autoConnect: false
         });
 
         socket.on('connect', function() {
             console.log('WebSocket connected');
-            isConnected = true;
-            updateConnectionStatus(true);
             socket.emit('join', { agent_id: '{{ agent.id }}' });
+            updateConnectionStatus(true);
         });
 
         socket.on('disconnect', function() {
             console.log('WebSocket disconnected');
-            isConnected = false;
             updateConnectionStatus(false);
         });
 
         socket.on('connect_error', function(error) {
             console.error('Connection error:', error);
-            showAlert('Connection failed: ' + error.message, 'danger');
+            showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
             updateConnectionStatus(false);
         });
 
         socket.on('terminal_output', function(data) {
-            console.log('Received output:', data);
             waitingForResponse = false;
             
             if (data.current_dir) {
@@ -117,7 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 updatePrompt();
             }
             
-            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}> ${data.command}</div>`;
+            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}</div>`;
             
             if (data.output) {
                 terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre;">${data.output.replace(/\n/g, '<br>')}</div>`;
@@ -129,9 +128,23 @@ document.addEventListener('DOMContentLoaded', function() {
             
             terminal.scrollTop = terminal.scrollHeight;
         });
+
+        socket.on('ws_status', function(data) {
+            if (data.status === 'success') {
+                updateConnectionStatus(data.action === 'start');
+                showAlert(`WebSocket ${data.action}ed successfully`, 'success');
+            } else if (data.error) {
+                showAlert(data.error, 'danger');
+            }
+        });
+
+        socket.on('status', function(data) {
+            updateConnectionStatus(data.status === 'connected');
+        });
     }
 
     function updateConnectionStatus(connected) {
+        isConnected = connected;
         if (connected) {
             connectionStatus.textContent = 'Connected';
             connectionStatus.className = 'badge bg-success me-2';
@@ -154,7 +167,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updatePrompt() {
-        dirPrompt.textContent = getPrompt() + '>';
+        dirPrompt.textContent = getPrompt() + (currentDir.includes('\\') ? '>' : '$');
     }
 
     function getPrompt() {
@@ -162,12 +175,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function formatPathForDisplay(path) {
-        path = path.replace(/\//g, '\\');
-        if (path.match(/^[a-zA-Z]:\\/)) {
-            path = path[0].toUpperCase() + path.slice(1);
-        }
-        if (path.endsWith('\\') && path.length > 3) {
-            path = path.slice(0, -1);
+        if ('{{ agent.os }}'.toLowerCase().includes('windows')) {
+            path = path.replace(/\//g, '\\');
+            if (path.match(/^[a-zA-Z]:\\/)) {
+                path = path[0].toUpperCase() + path.slice(1);
+            }
+            if (path.endsWith('\\') && path.length > 3) {
+                path = path.slice(0, -1);
+            }
+        } else {
+            path = path.replace(/\\/g, '/');
+            if (path.endsWith('/') && path.length > 1) {
+                path = path.slice(0, -1);
+            }
         }
         return path;
     }
@@ -177,14 +197,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (command && !waitingForResponse && socket && socket.connected) {
             waitingForResponse = true;
             
-            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}> ${command}</div>`;
+            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}</div>`;
             terminal.scrollTop = terminal.scrollHeight;
             
-            socket.emit('command', {
-                agent_id: '{{ agent.id }}',
-                command: command,
-                current_dir: currentDir
-            });
+            try {
+                socket.emit('command', {
+                    agent_id: '{{ agent.id }}',
+                    command: command,
+                    current_dir: currentDir
+                });
+            } catch (e) {
+                terminal.innerHTML += `<div style="color: #ff0000;">Error sending command: ${e.message}</div>`;
+                waitingForResponse = false;
+            }
             
             commandInput.value = '';
         }
@@ -210,6 +235,9 @@ document.addEventListener('DOMContentLoaded', function() {
         <div></div>
     `;
 
+    // Initialize socket
+    initializeSocket();
+
     // Event listeners
     sendButton.addEventListener('click', sendCommand);
     commandInput.addEventListener('keypress', function(e) {
@@ -218,12 +246,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
     wsControl.addEventListener('click', function() {
         if (isConnected) {
-            socket.disconnect();
+            if (socket && socket.connected) {
+                socket.emit('ws_control', {
+                    agent_id: '{{ agent.id }}',
+                    action: 'stop'
+                });
+            }
             updateConnectionStatus(false);
         } else {
-            connectWebSocket();
+            initializeSocket();
+            socket.connect();
+            socket.emit('ws_control', {
+                agent_id: '{{ agent.id }}',
+                action: 'start'
+            });
         }
     });
+
+    // Connect WebSocket if already connected
+    if (isConnected) {
+        initializeSocket();
+        socket.connect();
+    }
 });
 </script>
 {% endblock %}

