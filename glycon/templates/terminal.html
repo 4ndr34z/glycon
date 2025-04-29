@@ -77,6 +77,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let socket = null;
     let waitingForResponse = false;
     let isConnected = {{ 'true' if agent.ws_connected else 'false' }};
+    let commandHistory = [];
+    let historyIndex = -1;
 
     function initializeSocket() {
         if (socket) {
@@ -85,16 +87,20 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         socket = io('/terminal', {
-            reconnectionAttempts: 3,
+            reconnectionAttempts: 5,
             reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
             transports: ['websocket'],
-            autoConnect: false
+            autoConnect: false,
+            query: {
+                agent_id: '{{ agent.id }}'
+            }
         });
 
         socket.on('connect', function() {
             console.log('WebSocket connected');
-            socket.emit('join', { agent_id: '{{ agent.id }}' });
             updateConnectionStatus(true);
+            socket.emit('join', { agent_id: '{{ agent.id }}' });
         });
 
         socket.on('disconnect', function() {
@@ -116,10 +122,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 updatePrompt();
             }
             
-            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}</div>`;
+            if (data.command) {
+                terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}</div>`;
+            }
             
             if (data.output) {
-                terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre;">${data.output.replace(/\n/g, '<br>')}</div>`;
+                terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre-wrap;">${data.output.replace(/\n/g, '<br>')}</div>`;
             }
             
             if (data.error) {
@@ -132,7 +140,7 @@ document.addEventListener('DOMContentLoaded', function() {
         socket.on('ws_status', function(data) {
             if (data.status === 'success') {
                 updateConnectionStatus(data.action === 'start');
-                showAlert(`WebSocket ${data.action}ed successfully`, 'success');
+                showAlert(`WebSocket ${data.action}ed successfully: ${data.message || ''}`, 'success');
             } else if (data.error) {
                 showAlert(data.error, 'danger');
             }
@@ -194,20 +202,62 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function sendCommand() {
         const command = commandInput.value.trim();
-        if (command && !waitingForResponse && socket && socket.connected) {
+        if (command && !waitingForResponse) {
             waitingForResponse = true;
+            
+            // Add to command history
+            commandHistory.unshift(command);
+            if (commandHistory.length > 50) {
+                commandHistory.pop();
+            }
+            historyIndex = -1;
             
             terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}</div>`;
             terminal.scrollTop = terminal.scrollHeight;
             
             try {
-                socket.emit('command', {
-                    agent_id: '{{ agent.id }}',
-                    command: command,
-                    current_dir: currentDir
-                });
+                if (socket && socket.connected) {
+                    socket.emit('command', {
+                        agent_id: '{{ agent.id }}',
+                        command: command,
+                        current_dir: currentDir
+                    });
+                } else {
+                    // Fallback to task-based execution
+                    fetch('/api/task', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            agent_id: '{{ agent.id }}',
+                            task_type: 'terminal',
+                            task_data: {
+                                command: command,
+                                current_dir: currentDir,
+                                terminal: true
+                            }
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            terminal.innerHTML += `<div style="color: #ffff00;">Command queued (Task ID: ${data.task_id})</div>`;
+                        } else {
+                            terminal.innerHTML += `<div style="color: #ff0000;">Failed to queue command: ${data.message || 'Unknown error'}</div>`;
+                        }
+                        terminal.scrollTop = terminal.scrollHeight;
+                        waitingForResponse = false;
+                    })
+                    .catch(error => {
+                        terminal.innerHTML += `<div style="color: #ff0000;">Error: ${error.message}</div>`;
+                        terminal.scrollTop = terminal.scrollHeight;
+                        waitingForResponse = false;
+                    });
+                }
             } catch (e) {
                 terminal.innerHTML += `<div style="color: #ff0000;">Error sending command: ${e.message}</div>`;
+                terminal.scrollTop = terminal.scrollHeight;
                 waitingForResponse = false;
             }
             
@@ -240,8 +290,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Event listeners
     sendButton.addEventListener('click', sendCommand);
+    
     commandInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') sendCommand();
+    });
+
+    commandInput.addEventListener('keydown', function(e) {
+        if (commandHistory.length > 0) {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    commandInput.value = commandHistory[historyIndex];
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    commandInput.value = commandHistory[historyIndex];
+                } else {
+                    historyIndex = -1;
+                    commandInput.value = '';
+                }
+            }
+        }
     });
 
     wsControl.addEventListener('click', function() {
@@ -268,6 +340,9 @@ document.addEventListener('DOMContentLoaded', function() {
         initializeSocket();
         socket.connect();
     }
+
+    // Focus command input
+    commandInput.focus();
 });
 </script>
 {% endblock %}

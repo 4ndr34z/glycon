@@ -299,7 +299,5 @@ def init_api_routes(app, socketio):
                 conn.rollback()
                 conn.close()
             return jsonify({'status': 'error', 'message': str(e)}), 500
-                
             
-            
-         
+        
