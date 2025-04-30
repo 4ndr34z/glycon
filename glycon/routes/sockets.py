@@ -101,14 +101,23 @@ def init_socket_handlers(socketio):
 
     @socketio.on('command_result', namespace='/terminal')
     def handle_command_result(data):
-        print(f"[SocketIO] Received command result from agent {data['agent_id']}")
-        emit('terminal_output', {
-            'agent_id': data['agent_id'],
-            'command': data.get('command', ''),
-            'output': data.get('output', ''),
-            'error': data.get('error', ''),
-            'current_dir': data.get('current_dir', '')
-        }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+        try:
+            print(f"[SocketIO] Command result from agent {data['agent_id']}:")
+            print(f"Command: {data.get('command')}")
+            print(f"Output: {data.get('output')}")
+            print(f"Error: {data.get('error')}")
+            
+            # Broadcast to the terminal UI
+            emit('terminal_output', {
+                'agent_id': data['agent_id'],
+                'command': data.get('command'),
+                'output': data.get('output'),
+                'error': data.get('error'),
+                'current_dir': data.get('current_dir')
+            }, room=f"terminal_{data['agent_id']}")
+            
+        except Exception as e:
+            print(f"[SocketIO] Error handling command result: {str(e)}")
 
     @socketio.on('ws_control', namespace='/terminal')
     def handle_ws_control(data):

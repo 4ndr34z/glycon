@@ -614,6 +614,38 @@ class WebSocketClient:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(handler)
 
+
+    def _setup_event_handlers(self):
+        """Setup all WebSocket event handlers"""
+        @self.socket.on('execute_command', namespace='/terminal')
+        def on_command(data):
+            try:
+                self.logger.info(f"Executing command: {data.get('command')}")
+                
+                # Execute the command and get results
+                result = self._execute_command(data.get('command', ''))
+                
+                # Format the response properly
+                response = {
+                    'agent_id': self.agent_id,
+                    'command': data.get('command', ''),
+                    'output': result.get('output', ''),
+                    'error': result.get('error', ''),
+                    'current_dir': result.get('current_dir', '')
+                }
+                
+                self.logger.debug(f"Sending command result: {response}")
+                self.socket.emit('command_result', response, namespace='/terminal')
+                
+            except Exception as e:
+                self.logger.error(f"Command handling failed: {str(e)}")
+                self.socket.emit('command_result', {
+                    'agent_id': self.agent_id,
+                    'error': f"Command processing error: {str(e)}",
+                    'current_dir': self.current_dir
+                }, namespace='/terminal')
+
+
     def connect(self):
         try:
             self.logger.info(f"Connecting to WebSocket at {self.server_url}")
@@ -643,6 +675,7 @@ class WebSocketClient:
                         })
                     }
                     self.socket.emit('agent_connect', auth_data, namespace='/terminal')
+                    self._setup_event_handlers()
                     self.connected = True
                     connected_event.set()
                 except Exception as e:
@@ -675,11 +708,12 @@ class WebSocketClient:
             self.logger.error(f"WebSocket connection failed: {str(e)}")
             return False
         
-        
+
     def _execute_command(self, command):
         try:
-            self.logger.debug(f"Executing command: {command}")
+            self.logger.info(f"Executing: {command}")
             
+            # Handle CD command separately
             if command.lower().startswith('cd '):
                 new_dir = command[3:].strip()
                 try:
@@ -696,6 +730,7 @@ class WebSocketClient:
                         'current_dir': self.current_dir
                     }
 
+            # Execute regular commands
             result = subprocess.run(
                 command,
                 shell=True,
@@ -705,6 +740,7 @@ class WebSocketClient:
                 text=True,
                 timeout=30
             )
+            
             self.current_dir = os.getcwd()
             
             return {
@@ -723,7 +759,6 @@ class WebSocketClient:
                 'error': str(e),
                 'current_dir': self.current_dir
             }
-
     def disconnect(self):
         if self.socket:
             try:
