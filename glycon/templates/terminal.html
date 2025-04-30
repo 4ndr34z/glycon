@@ -75,74 +75,74 @@ document.addEventListener('DOMContentLoaded', function() {
     
     let currentDir = '{% if agent.os.startswith("Windows") %}C:\\{% else %}/{% endif %}';
     let socket = null;
-    let waitingForResponse = false;
     let isConnected = {{ 'true' if agent.ws_connected else 'false' }};
     let commandHistory = [];
     let historyIndex = -1;
 
     function initializeSocket() {
-        if (socket) {
-            socket.disconnect();
-            socket = null;
+    if (socket) {
+        console.log('[Terminal] Disconnecting existing socket');
+        socket.disconnect();
+        socket = null;
+    }
+
+    console.log('[Terminal] Initializing new socket connection');
+    socket = io('/terminal', {
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        transports: ['websocket'],
+        autoConnect: false,
+        query: {
+            agent_id: '{{ agent.id }}'
         }
+    });
 
-        socket = io('/terminal', {
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            transports: ['websocket'],
-            autoConnect: false,
-            query: {
-                agent_id: '{{ agent.id }}'
-            }
-        });
+    socket.on('connect', function() {
+        console.log('[Terminal] Socket connected');
+        updateConnectionStatus(true);
+        socket.emit('join', { agent_id: '{{ agent.id }}' });
+    });
 
-        socket.on('connect', function() {
-            console.log('WebSocket connected');
-            updateConnectionStatus(true);
-            socket.emit('join', { agent_id: '{{ agent.id }}' });
-        });
+    socket.on('disconnect', function() {
+        console.log('[Terminal] Socket disconnected');
+        updateConnectionStatus(false);
+    });
 
-        socket.on('disconnect', function() {
-            console.log('WebSocket disconnected');
-            updateConnectionStatus(false);
-        });
+    socket.on('connect_error', function(error) {
+        console.error('[Terminal] Connection error:', error);
+        showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
+        updateConnectionStatus(false);
+    });
 
-        socket.on('connect_error', function(error) {
-            console.error('Connection error:', error);
-            showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
-            updateConnectionStatus(false);
-        });
-
-        socket.on('terminal_output', function(data) {
-            waitingForResponse = false;
-            
-            if (data.current_dir) {
-                currentDir = formatPathForDisplay(data.current_dir);
-                updatePrompt();
-            }
-            
-            if (data.command) {
-                terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}</div>`;
-            }
-            
-            if (data.output) {
-                terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre-wrap;">${data.output.replace(/\n/g, '<br>')}</div>`;
-            }
-            
-            if (data.error) {
-                terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
-            }
-            
-            terminal.scrollTop = terminal.scrollHeight;
-        });
+    socket.on('terminal_output', function(data) {
+        console.log('[Terminal] Received output:', data);
+        if (data.current_dir) {
+            currentDir = formatPathForDisplay(data.current_dir);
+            updatePrompt();
+        }
+        
+        if (data.command) {
+            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}</div>`;
+        }
+        
+        if (data.output) {
+            terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre-wrap;">${data.output.replace(/\n/g, '<br>')}</div>`;
+        }
+        
+        if (data.error) {
+            terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
+        }
+        
+        terminal.scrollTop = terminal.scrollHeight;
+    });
 
         socket.on('ws_status', function(data) {
             if (data.status === 'success') {
                 updateConnectionStatus(data.action === 'start');
                 showAlert(`WebSocket ${data.action}ed successfully: ${data.message || ''}`, 'success');
-            } else if (data.error) {
-                showAlert(data.error, 'danger');
+            } else {
+                showAlert(`WebSocket error: ${data.message || 'Unknown error'}`, 'danger');
             }
         });
 
@@ -202,9 +202,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function sendCommand() {
         const command = commandInput.value.trim();
-        if (command && !waitingForResponse) {
-            waitingForResponse = true;
-            
+        if (command) {
             // Add to command history
             commandHistory.unshift(command);
             if (commandHistory.length > 50) {
@@ -216,49 +214,14 @@ document.addEventListener('DOMContentLoaded', function() {
             terminal.scrollTop = terminal.scrollHeight;
             
             try {
-                if (socket && socket.connected) {
-                    socket.emit('command', {
-                        agent_id: '{{ agent.id }}',
-                        command: command,
-                        current_dir: currentDir
-                    });
-                } else {
-                    // Fallback to task-based execution
-                    fetch('/api/task', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            agent_id: '{{ agent.id }}',
-                            task_type: 'terminal',
-                            task_data: {
-                                command: command,
-                                current_dir: currentDir,
-                                terminal: true
-                            }
-                        })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            terminal.innerHTML += `<div style="color: #ffff00;">Command queued (Task ID: ${data.task_id})</div>`;
-                        } else {
-                            terminal.innerHTML += `<div style="color: #ff0000;">Failed to queue command: ${data.message || 'Unknown error'}</div>`;
-                        }
-                        terminal.scrollTop = terminal.scrollHeight;
-                        waitingForResponse = false;
-                    })
-                    .catch(error => {
-                        terminal.innerHTML += `<div style="color: #ff0000;">Error: ${error.message}</div>`;
-                        terminal.scrollTop = terminal.scrollHeight;
-                        waitingForResponse = false;
-                    });
-                }
+                socket.emit('command', {
+                    agent_id: '{{ agent.id }}',
+                    command: command,
+                    current_dir: currentDir
+                });
             } catch (e) {
                 terminal.innerHTML += `<div style="color: #ff0000;">Error sending command: ${e.message}</div>`;
                 terminal.scrollTop = terminal.scrollHeight;
-                waitingForResponse = false;
             }
             
             commandInput.value = '';
@@ -318,26 +281,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
     wsControl.addEventListener('click', function() {
         if (isConnected) {
-            if (socket && socket.connected) {
-                socket.emit('ws_control', {
-                    agent_id: '{{ agent.id }}',
-                    action: 'stop'
-                });
-            }
-            updateConnectionStatus(false);
-        } else {
-            initializeSocket();
-            socket.connect();
             socket.emit('ws_control', {
                 agent_id: '{{ agent.id }}',
-                action: 'start'
+                action: 'stop'
+            });
+        } else {
+            // First send task to start WebSocket
+            fetch('/api/task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    agent_id: '{{ agent.id }}',
+                    task_type: 'websocket',
+                    task_data: {
+                        action: 'start'
+                    }
+                })
+            }).then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Then connect the terminal
+                    socket.connect();
+                } else {
+                    showAlert('Failed to start WebSocket: ' + (data.message || 'Unknown error'), 'danger');
+                }
             });
         }
     });
 
     // Connect WebSocket if already connected
     if (isConnected) {
-        initializeSocket();
         socket.connect();
     }
 

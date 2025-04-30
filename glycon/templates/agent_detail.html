@@ -170,6 +170,31 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
 <script>
+
+document.getElementById('terminal-btn').addEventListener('click', function() {
+    // First send a task to start WebSocket
+    fetch('/api/task', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            agent_id: '{{ agent.id }}',
+            task_type: 'websocket',
+            task_data: {
+                action: 'start'
+            }
+        })
+    }).then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // Then open the terminal page
+            window.location.href = `/terminal/{{ agent.id }}`;
+        } else {
+            alert('Failed to start WebSocket: ' + (data.message || 'Unknown error'));
+        }
+    });
+});
 document.addEventListener('DOMContentLoaded', function() {
     // Task execution code (unchanged)
     const executeBtn = document.getElementById('executeTask');

