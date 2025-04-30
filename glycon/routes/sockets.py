@@ -19,6 +19,12 @@ def init_socket_handlers(socketio):
         if current_user.is_authenticated:
             print(f"[SocketIO] Authenticated user: {current_user.id}")
 
+    @socketio.on('join_terminal', namespace='/terminal')
+    def handle_join_terminal(data):
+        if current_user.is_authenticated:
+            join_room(f"terminal_{data['agent_id']}")
+            print(f"[SocketIO] Terminal UI joined room for agent {data['agent_id']}")
+
     @socketio.on('disconnect', namespace='/terminal')
     def handle_terminal_disconnect():
         nonlocal connection_count

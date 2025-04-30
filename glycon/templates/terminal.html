@@ -80,62 +80,87 @@ document.addEventListener('DOMContentLoaded', function() {
     let historyIndex = -1;
 
     function initializeSocket() {
-    if (socket) {
-        console.log('[Terminal] Disconnecting existing socket');
-        socket.disconnect();
-        socket = null;
-    }
-
-    console.log('[Terminal] Initializing new socket connection');
-    socket = io('/terminal', {
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        transports: ['websocket'],
-        autoConnect: false,
-        query: {
-            agent_id: '{{ agent.id }}'
+        if (socket) {
+            console.log('[Terminal] Disconnecting existing socket');
+            socket.disconnect();
+            socket = null;
         }
-    });
 
-    socket.on('connect', function() {
+        console.log('[Terminal] Initializing new socket connection');
+        socket = io('/terminal', {
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            transports: ['websocket'],
+            autoConnect: false,
+            query: {
+                agent_id: '{{ agent.id }}'
+            }
+        });
+
+        socket.on('connect', function() {
         console.log('[Terminal] Socket connected');
         updateConnectionStatus(true);
-        socket.emit('join', { agent_id: '{{ agent.id }}' });
+        socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });  // Add this line
+        socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
     });
 
-    socket.on('disconnect', function() {
-        console.log('[Terminal] Socket disconnected');
-        updateConnectionStatus(false);
-    });
+        socket.on('disconnect', function() {
+            console.log('[Terminal] Socket disconnected');
+            updateConnectionStatus(false);
+        });
 
-    socket.on('connect_error', function(error) {
-        console.error('[Terminal] Connection error:', error);
-        showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
-        updateConnectionStatus(false);
-    });
+        socket.on('connect_error', function(error) {
+            console.error('[Terminal] Connection error:', error);
+            showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
+            updateConnectionStatus(false);
+        });
 
-    socket.on('terminal_output', function(data) {
+        socket.on('terminal_output', function(data) {
         console.log('[Terminal] Received output:', data);
+        
         if (data.current_dir) {
             currentDir = formatPathForDisplay(data.current_dir);
             updatePrompt();
         }
         
+        // Display command if it exists
         if (data.command) {
-            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}</div>`;
+            const commandDiv = document.createElement('div');
+            commandDiv.style.color = '#00ff00';
+            commandDiv.style.fontFamily = 'Consolas, monospace';
+            commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}`;
+            terminal.appendChild(commandDiv);
         }
         
+        // Display output if it exists
         if (data.output) {
-            terminal.innerHTML += `<div style="font-family: Consolas, monospace; white-space: pre-wrap;">${data.output.replace(/\n/g, '<br>')}</div>`;
+            const outputDiv = document.createElement('div');
+            outputDiv.style.fontFamily = 'Consolas, monospace';
+            outputDiv.style.whiteSpace = 'pre-wrap';
+            outputDiv.textContent = data.output;
+            terminal.appendChild(outputDiv);
         }
         
+        // Display error if it exists
         if (data.error) {
-            terminal.innerHTML += `<div style="color: #ff0000;">${data.error.replace(/\n/g, '<br>')}</div>`;
+            const errorDiv = document.createElement('div');
+            errorDiv.style.color = '#ff0000';
+            errorDiv.style.fontFamily = 'Consolas, monospace';
+            errorDiv.style.whiteSpace = 'pre-wrap';
+            errorDiv.textContent = data.error;
+            terminal.appendChild(errorDiv);
         }
         
         terminal.scrollTop = terminal.scrollHeight;
     });
+
+        socket.on('current_dir', function(data) {
+            if (data.current_dir) {
+                currentDir = formatPathForDisplay(data.current_dir);
+                updatePrompt();
+            }
+        });
 
         socket.on('ws_status', function(data) {
             if (data.status === 'success') {
@@ -175,7 +200,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updatePrompt() {
-        dirPrompt.textContent = getPrompt() + (currentDir.includes('\\') ? '>' : '$');
+        const promptSymbol = currentDir.includes('\\') ? '>' : '$';
+        dirPrompt.textContent = `${getPrompt()}${promptSymbol}`;
     }
 
     function getPrompt() {
@@ -183,6 +209,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function formatPathForDisplay(path) {
+        if (!path) return currentDir;
+        
         if ('{{ agent.os }}'.toLowerCase().includes('windows')) {
             path = path.replace(/\//g, '\\');
             if (path.match(/^[a-zA-Z]:\\/)) {
@@ -191,13 +219,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (path.endsWith('\\') && path.length > 3) {
                 path = path.slice(0, -1);
             }
+            return path;
         } else {
             path = path.replace(/\\/g, '/');
             if (path.endsWith('/') && path.length > 1) {
                 path = path.slice(0, -1);
             }
+            return path;
         }
-        return path;
     }
 
     function sendCommand() {
@@ -210,8 +239,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             historyIndex = -1;
             
-            terminal.innerHTML += `<div style="color: #00ff00;">${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}</div>`;
-            terminal.scrollTop = terminal.scrollHeight;
+            // Display command in terminal
+            const commandDiv = document.createElement('div');
+            commandDiv.style.color = '#00ff00';
+            commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}`;
+            terminal.appendChild(commandDiv);
             
             try {
                 socket.emit('command', {
@@ -220,11 +252,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     current_dir: currentDir
                 });
             } catch (e) {
-                terminal.innerHTML += `<div style="color: #ff0000;">Error sending command: ${e.message}</div>`;
-                terminal.scrollTop = terminal.scrollHeight;
+                const errorDiv = document.createElement('div');
+                errorDiv.style.color = '#ff0000';
+                errorDiv.textContent = `Error sending command: ${e.message}`;
+                terminal.appendChild(errorDiv);
             }
             
             commandInput.value = '';
+            terminal.scrollTop = terminal.scrollHeight;
         }
     }
 
