@@ -189,3 +189,4 @@ def init_view_routes(app):
                  for row in c.fetchall()]
         conn.close()
         return render_template('tasks.html', tasks=tasks)
+    

