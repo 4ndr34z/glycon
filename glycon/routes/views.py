@@ -1,7 +1,7 @@
 ﻿from flask import render_template, request, flash, redirect, url_for, send_file, send_from_directory
 from flask_login import login_required
 import sqlite3
-import io
+import io, json
 from datetime import datetime
 from glycon.config import CONFIG
 
@@ -186,11 +186,20 @@ def init_view_routes(app):
         for row in c.fetchall():
             row_dict = dict(zip([col[0] for col in c.description], row))
             try:
-                # Parse system_info if it's stored as JSON string
-                if row_dict['system_info']:
+                # Ensure system_info is properly decoded
+                if isinstance(row_dict['system_info'], str):
+                    # Try to parse as JSON
                     row_dict['system_info'] = json.loads(row_dict['system_info'])
-            except:
+                elif isinstance(row_dict['system_info'], bytes):
+                    # Decode bytes first, then parse as JSON
+                    row_dict['system_info'] = json.loads(row_dict['system_info'].decode('utf-8'))
+                elif not row_dict['system_info']:
+                    # Handle empty/None case
+                    row_dict['system_info'] = {}
+            except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                app.logger.error(f"Error parsing system_info: {str(e)}")
                 row_dict['system_info'] = {}
+            
             cookies_data.append(row_dict)
         
         conn.close()

