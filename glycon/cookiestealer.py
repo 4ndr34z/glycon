@@ -162,8 +162,8 @@ def extract_chrome_edge_cookies(debug_url, cookie_file):
         if 'ws' in locals():
             ws.close()
 
-def transform_cookies(cookies):
-    """Transform cookies into the format required by Cookie-Editor."""
+def _transform_cookies(self, cookies):
+    """Transform cookies into standard format with corrected sameSite values"""
     transformed = []
     for cookie in cookies:
         if len(cookie) == 8:  # Firefox cookies
@@ -177,8 +177,17 @@ def transform_cookies(cookies):
             is_secure = cookie.get('secure', False)
             is_http_only = cookie.get('httpOnly', False)
             same_site = cookie.get('sameSite', 'unspecified')
-        same_site_map = {0: 'unspecified', 1: 'no_restriction', 2: 'lax', 3: 'strict'}
-        same_site = same_site_map.get(same_site, 'unspecified')
+        
+        # Fix sameSite values to match allowed options
+        if same_site.lower() == 'none':
+            same_site = 'no_restriction'
+        elif same_site.lower() == 'lax':
+            same_site = 'lax'
+        elif same_site.lower() == 'strict':
+            same_site = 'strict'
+        else:
+            same_site = 'unspecified'  # default if not matching any known value
+        
         transformed_cookie = {
             "domain": domain,
             "expirationDate": expiry,

