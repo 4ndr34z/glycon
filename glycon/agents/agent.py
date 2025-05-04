@@ -48,7 +48,7 @@ class Config:
         self.TAKE_SCREENSHOTS = True
         self.SCREENSHOT_FREQUENCY = 30
         self.KILLDATE_ENABLED = True
-        self.KILLDATE = "2025-05-04 12:30" if True else ""
+        self.KILLDATE = "2025-05-04 16:00" if True else ""
 
 # ======================
 # Encryption

