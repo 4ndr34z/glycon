@@ -16,10 +16,17 @@ python3 run.py
 admin/password
 
 ## Version 1.0
-Basic connectivity, screenshots, websocket terminal
+<p>Basic connectivity, screenshots, websocket terminal</p>
+* Terminal has command history and directory tracking. 
+
 
 ## Version 1.1
-Added Cookie Stealer
+<p>Added Cookie Stealer</p>
 
 ## Version 1.2
-Functions for deployment and deleting
+<p>Functions for deployment and deleting agents</p>
+
+## Version 1.3
+* Added killdate
+* First aagent checkin is now instant and the rest follows interval with jitter
+

