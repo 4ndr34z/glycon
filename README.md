@@ -30,3 +30,6 @@ admin/password
 * Added killdate
 * First aagent checkin is now instant and the rest follows interval with jitter
 
+## Version 1.4
+* Added Shellcode-Runner
+
