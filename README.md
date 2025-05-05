@@ -31,5 +31,5 @@ admin/password
 * First aagent checkin is now instant and the rest follows interval with jitter
 
 ## Version 1.4
-* Added Shellcode-Runner
+* Added Shellcode-Runner. Uses Donut, so Donut must be install and in PATH on the server
 
