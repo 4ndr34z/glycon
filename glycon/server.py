@@ -8,6 +8,8 @@ from glycon.routes.views import init_view_routes
 from glycon.routes.api import init_api_routes
 from glycon.routes.sockets import init_socket_handlers
 from glycon.routes.screenshots import init_screenshot_handlers  # Add this import
+import logging
+
 
 def create_app():
     app = Flask(__name__, template_folder='templates')
@@ -15,6 +17,7 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = CONFIG.max_content_length
     app.config['HOST'] = CONFIG.host
     app.config['PORT'] = CONFIG.port
+    app.logger.setLevel(logging.DEBUG)
 
     # Enable CORS for all domains
     CORS(app, resources={r"/*": {"origins": "*"}})
