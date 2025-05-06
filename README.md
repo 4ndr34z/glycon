@@ -32,4 +32,13 @@ admin/password
 
 ## Version 1.4
 * Added Shellcode-Runner. Uses Donut, so Donut must be install and in PATH on the server
+### Version 1.4.1
+* Using Donut in docker. 
+```bash
+git clone https://github.com/TheWover/donut
+cd donut
+docker build -t donut .
+```
+Known problems: Agent hangs if shellcode are run on Headless agent 
+
 

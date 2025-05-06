@@ -623,17 +623,29 @@ def init_api_routes(app, socketio):
             output_path = os.path.join(temp_dir, output_name + '.bin')
             app.logger.debug(f"Output path: {output_path}")
             
-            # Build donut command
+            # Build donut command, running in a Docker container 
+            # Convert args to proper format
+            if args is None:
+                args_str = ''
+            elif isinstance(args, list):
+                args_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in args)
+            else:
+                args_str = str(args)
+
             cmd = [
-                'donut',
-                '-e', entropy,
-                '-a', arch,
-                '-o', output_path,
-                '-f', '1',
-                '-p', args,
-                '-i', input_path
-            ]
-            app.logger.debug(f"Command: {' '.join(cmd)}") 
+            'docker', 'run', '--rm',
+            '-v', f"{temp_dir}:/workdir",
+            'donut',
+            '-e', str(entropy),
+            '-a', str(arch),
+            '-o', f"/workdir/{output_name}.bin",
+            '-f', '1',
+            '-p', f'"{args_str}"',
+            '-i', f"/workdir/{file.filename}",
+            '-t'
+        ]
+
+            app.logger.debug(f"Docker Command: {' '.join(cmd)}") 
             # Run donut
             result = subprocess.run(cmd, capture_output=True, text=True)
             app.logger.debug(f"Donut output: {result.stdout}")  
