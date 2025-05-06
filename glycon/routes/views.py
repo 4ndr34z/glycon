@@ -6,6 +6,10 @@ from datetime import datetime
 from glycon.config import CONFIG
 
 def init_view_routes(app):
+    @app.context_processor
+    def inject_config():
+        return dict(config=CONFIG)
+    
     @app.route('/')
     @login_required
     def dashboard():

@@ -39,6 +39,12 @@ git clone https://github.com/TheWover/donut
 cd donut
 docker build -t donut .
 ```
-Known problems: Agent hangs if shellcode are run on Headless agent 
+
+### Version 1.4.2
+* Added support for multiple shellcode runners; exe/dll/binary and hex
+* Fixed headless agent shellcode execution problem
+
+Know issues: When using custom shellcode, it has to be exited as thread.
+
 
 

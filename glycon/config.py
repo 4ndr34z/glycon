@@ -11,8 +11,8 @@ class Config:
         self.upload_folder = "uploads"
         self.screenshot_folder = "screenshots"
         self.max_content_length = 16 * 1024 * 1024  # 16MB
-        self.secret_key = os.urandom(24)
-
+        self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"#os.urandom(24)
+        self.version = "1.4.2"
         # Create required directories
         os.makedirs(self.upload_folder, exist_ok=True)
         #os.makedirs(self.screenshot_folder, exist_ok=True)

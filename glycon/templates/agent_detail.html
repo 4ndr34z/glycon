@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container-fluid">
+<div class="container-fluid mt-5"> 
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>
             <i class="fas fa-robot me-2"></i><span id="agent-hostname">{{ agent.hostname }}</span>
@@ -18,6 +18,7 @@
             </button>
         </div>
     </div>
+
 
     <div class="row">
         <div class="col-md-6">
@@ -83,8 +84,6 @@
                             <option value="shell">Execute Command</option>
                             <option value="persist">Install Persistence</option>
                             <option value="shellcode">Shellcode-Runner</option>
-
-                            
                         </select>
                         <button id="executeTask" class="btn btn-sm btn-primary">Execute</button>
                     </div>
@@ -165,7 +164,8 @@
         </div>
     </div>
 </div>
-<!-- Shellcode modal-->
+
+<!-- Shellcode modal -->
 <div class="modal fade" id="shellcodeModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -175,25 +175,54 @@
             </div>
             <div class="modal-body">
                 <div class="mb-3">
+                    <label class="form-label">Input Type</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="shellcodeType" id="shellcodeFileType" value="file" checked>
+                        <label class="form-check-label" for="shellcodeFileType">
+                            PE File (EXE/DLL)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="shellcodeType" id="shellcodeRawType" value="raw">
+                        <label class="form-check-label" for="shellcodeRawType">
+                            Raw Shellcode
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="mb-3" id="fileInputSection">
                     <label for="shellcodeFile" class="form-label">Binary File</label>
                     <input class="form-control" type="file" id="shellcodeFile" required>
                 </div>
-                <div class="mb-3">
-                    <label for="shellcodeEntropy" class="form-label">Entropy</label>
-                    <select class="form-select" id="shellcodeEntropy">
-                        <option value="1" selected>1</option>
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                    </select>
+                
+                <div class="mb-3 d-none" id="rawInputSection">
+                    <div class="mb-3">
+                        <label class="form-label">Raw Shellcode Input Method</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rawInputMethod" id="rawFileMethod" value="file" checked>
+                            <label class="form-check-label" for="rawFileMethod">
+                                Upload Binary File
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rawInputMethod" id="rawTextMethod" value="text">
+                            <label class="form-check-label" for="rawTextMethod">
+                                Paste Hex Code
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="rawFileUploadSection">
+                        <label for="rawShellcodeFile" class="form-label">Shellcode Binary File</label>
+                        <input class="form-control" type="file" id="rawShellcodeFile">
+                    </div>
+                    
+                    <div class="mb-3 d-none" id="rawTextInputSection">
+                        <label for="shellcodeHex" class="form-label">Hex Shellcode</label>
+                        <textarea class="form-control" id="shellcodeHex" rows="5" placeholder="Paste shellcode in hex format (e.g., fc4883e4...)"></textarea>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label for="shellcodeArch" class="form-label">Architecture</label>
-                    <select class="form-select" id="shellcodeArch">
-                        <option value="3" selected>32bit+64bit</option>
-                        <option value="1">32-bit</option>
-                        <option value="2">64-bit</option>
-                    </select>
-                </div>
+                
                 <div class="mb-3">
                     <label for="shellcodeArgs" class="form-label">Arguments</label>
                     <input type="text" class="form-control" id="shellcodeArgs" placeholder="Optional arguments">
@@ -217,6 +246,36 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Shellcode type toggle
+    document.querySelectorAll('input[name="shellcodeType"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            if (this.value === 'file') {
+                document.getElementById('fileInputSection').classList.remove('d-none');
+                document.getElementById('rawInputSection').classList.add('d-none');
+            } else {
+                document.getElementById('fileInputSection').classList.add('d-none');
+                document.getElementById('rawInputSection').classList.remove('d-none');
+                updateRawInputMethod();
+            }
+        });
+    });
+
+    // Raw input method toggle
+    document.querySelectorAll('input[name="rawInputMethod"]').forEach(radio => {
+        radio.addEventListener('change', updateRawInputMethod);
+    });
+
+    function updateRawInputMethod() {
+        const method = document.querySelector('input[name="rawInputMethod"]:checked').value;
+        if (method === 'file') {
+            document.getElementById('rawFileUploadSection').classList.remove('d-none');
+            document.getElementById('rawTextInputSection').classList.add('d-none');
+        } else {
+            document.getElementById('rawFileUploadSection').classList.add('d-none');
+            document.getElementById('rawTextInputSection').classList.remove('d-none');
+        }
+    }
+
     // Task execution handler
     const executeBtn = document.getElementById('executeTask');
     if (executeBtn) {
@@ -227,59 +286,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            if (taskType === 'shellcode') {
+                const shellcodeModal = new bootstrap.Modal(document.getElementById('shellcodeModal'));
+                shellcodeModal.show();
+                return;
+            }
+
             let taskData = {};
-            
-            // Add specific data for certain task types
             if (taskType === 'shell') {
                 const command = prompt('Enter command to execute:');
                 if (!command) return;
                 taskData = { 'cmd': command };
-            }
-            if (taskType === 'shellcode') {
-                // Show the shellcode modal
-                const shellcodeModal = new bootstrap.Modal(document.getElementById('shellcodeModal'));
-                shellcodeModal.show();
-                
-                // Handle send button
-                document.getElementById('sendShellcode').addEventListener('click', async function() {
-                    const fileInput = document.getElementById('shellcodeFile');
-                    const entropy = document.getElementById('shellcodeEntropy').value;
-                    const arch = document.getElementById('shellcodeArch').value;
-                    const args = document.getElementById('shellcodeArgs').value;
-                    
-                    if (!fileInput.files.length) {
-                        alert('Please select a binary file');
-                        return;
-                    }
-                    
-                    const formData = new FormData();
-                    formData.append('file', fileInput.files[0]);
-                    formData.append('entropy', entropy);
-                    formData.append('arch', arch);
-                    formData.append('args', args);
-                    formData.append('agent_id', "{{ agent.id }}");
-                    
-                    try {
-                        const response = await fetch('/api/shellcode', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        
-                        const data = await response.json();
-                        
-                        if (!response.ok) {
-                            throw new Error(data.message || 'Failed to generate shellcode');
-                        }
-                        
-                        alert(`Shellcode generated and sent to agent! Task ID: ${data.task_id}`);
-                        shellcodeModal.hide();
-                        refreshAgentDetail();
-                    } catch (error) {
-                        console.error('Error:', error);
-                        alert(`Failed to generate shellcode: ${error.message}`);
-                    }
-                });
-                return;
             }
 
             try {
@@ -302,16 +319,111 @@ document.addEventListener('DOMContentLoaded', function() {
                     throw new Error(data.message || 'Failed to create task');
                 }
 
-                if (data.status === 'success') {
-                    alert(`Task created successfully! Task ID: ${data.task_id}`);
-                    refreshAgentDetail();
-                } else {
-                    throw new Error(data.message || 'Unknown error');
-                }
+                alert(`Task created successfully! Task ID: ${data.task_id}`);
+                window.location.reload();
             } catch (error) {
                 console.error('Error:', error);
                 alert(`Failed to create task: ${error.message}`);
             }
+        });
+    }
+
+    // Shellcode send handler
+    document.getElementById('sendShellcode').addEventListener('click', async function() {
+    const shellcodeType = document.querySelector('input[name="shellcodeType"]:checked').value;
+    const args = document.getElementById('shellcodeArgs').value;
+    const agentId = "{{ agent.id }}";
+    
+    try {
+        let shellcodeBytes;
+        
+        if (shellcodeType === 'file') {
+            // PE file handling (using Donut)
+            const fileInput = document.getElementById('shellcodeFile');
+            if (!fileInput.files.length) {
+                throw new Error('Please select a file');
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('args', args);
+            formData.append('agent_id', agentId);
+            
+            const response = await fetch('/api/shellcode', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to generate shellcode');
+            }
+            
+            alert(`Shellcode generated and sent to agent! Task ID: ${data.task_id}`);
+            window.location.reload();
+        } else {
+            // Raw shellcode handling
+            const method = document.querySelector('input[name="rawInputMethod"]:checked').value;
+            
+            if (method === 'file') {
+                const fileInput = document.getElementById('rawShellcodeFile');
+                if (!fileInput.files.length) {
+                    throw new Error('Please select a shellcode file');
+                }
+                
+                shellcodeBytes = await readFileAsArrayBuffer(fileInput.files[0]);
+            } else {
+                const hexString = document.getElementById('shellcodeHex').value.trim();
+                if (!hexString) {
+                    throw new Error('Please enter hex shellcode');
+                }
+                
+                shellcodeBytes = new Uint8Array(hexString.match(/[0-9a-fA-F]{2}/g).map(h => parseInt(h, 16)));
+            }
+
+            // Send as regular shellcode task but with raw flag
+            const response = await fetch('/api/task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    agent_id: agentId,
+                    task_type: 'shellcode',
+                    task_data: {
+                        shellcode: Array.from(shellcodeBytes),
+                        raw: true,
+                        method: 'direct'  // Indicates direct execution
+                    }
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to send shellcode');
+            }
+            
+            alert(`Raw shellcode sent to agent! Task ID: ${data.task_id}`);
+            window.location.reload();
+        }
+        
+        bootstrap.Modal.getInstance(document.getElementById('shellcodeModal')).hide();
+    } catch (error) {
+        console.error('Error:', error);
+        alert(`Failed to process shellcode: ${error.message}`);
+    }
+});
+
+    // Helper function to read file as ArrayBuffer
+    function readFileAsArrayBuffer(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(new Uint8Array(reader.result));
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
         });
     }
 

