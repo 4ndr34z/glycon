@@ -48,9 +48,9 @@ class Config:
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 10
-        self.KILLDATE_ENABLED = False
-        self.KILLDATE = "" if False else ""
+        self.SCREENSHOT_FREQUENCY = 30
+        self.KILLDATE_ENABLED = True
+        self.KILLDATE = "2025-05-06 18:20" if True else ""
 
 # ======================
 # Encryption
