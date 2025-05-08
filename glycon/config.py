@@ -1,6 +1,7 @@
 ﻿import os
 import sqlite3
 
+
 class Config:
     def __init__(self):
         self.host = "0.0.0.0"
@@ -12,9 +13,13 @@ class Config:
         self.screenshot_folder = "screenshots"
         self.max_content_length = 16 * 1024 * 1024  # 16MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"#os.urandom(24)
-        self.version = "1.4.2"
+        self.version = "1.4.3"
+
+        
+       
         # Create required directories
         os.makedirs(self.upload_folder, exist_ok=True)
+
         #os.makedirs(self.screenshot_folder, exist_ok=True)
 
         # Initialize database

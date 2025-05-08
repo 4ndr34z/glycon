@@ -46,5 +46,14 @@ docker build -t donut .
 
 Know issues: When using custom shellcode, it has to be exited as thread.
 
+### Version 1.4.3
+Running 2 server instances. 
+1 listening on 443 using HTTPS
+1 listening on 5555 using HTTP 
+
+This to support reverse-proxy with SSL-tunnel
+Start it by setting environment variable for base_url (for the reverse-proxy setup)
+```export BASE_URL=/8b7c699211b2d90cbbf58545dd708;python3 run.py```
+
 
 
