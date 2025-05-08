@@ -6,7 +6,9 @@ import os
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 if __name__ == "__main__":
-    # Create SSL socket for HTTPS
+    base_url = os.getenv('BASE_URL', '').rstrip('/')
+    
+    # HTTPS Server (root /)
     ssl_sock = eventlet.wrap_ssl(
         eventlet.listen((app.config['HOST'], app.config['PORT'])),
         certfile='cert.pem',
@@ -14,28 +16,26 @@ if __name__ == "__main__":
         server_side=True
     )
 
-    # Create HTTP socket on port 5555
+    # HTTP Server (with base URL)
     http_sock = eventlet.listen((app.config['HOST'], 5555))
     
-    # Get base URL from environment variable or use default
-    base_url = os.getenv('BASE_URL', '')
-
-    # Run the HTTPS server
     def run_https_server():
-        eventlet.wsgi.server(ssl_sock, app, log_output=True)
+        eventlet.wsgi.server(ssl_sock, app, log_output=False)
     
-    # Run the HTTP server with potential base URL
     def run_http_server():
         if base_url:
-            # Create a new app with the base URL prefix
+            # Mount app under base_url
             prefixed_app = DispatcherMiddleware(app, {
-                base_url.rstrip('/'): app
+                base_url: app
             })
             eventlet.wsgi.server(http_sock, prefixed_app, log_output=False)
         else:
-            eventlet.wsgi.server(http_sock, app, log_output=True)
+            eventlet.wsgi.server(http_sock, app, log_output=False)
 
     # Initialize both servers
     socketio.start_background_task(run_https_server)
     socketio.start_background_task(run_http_server)
-    socketio.run(app, debug=app.config.get('DEBUG', False))
+    
+    # Correct SocketIO configuration
+    socketio.run(app, 
+                debug=app.config.get('DEBUG', False))

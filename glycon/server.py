@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request, url_for
 from flask_socketio import SocketIO
 from flask_login import LoginManager
 from flask_cors import CORS
@@ -7,9 +7,9 @@ from glycon.routes.auth import init_auth_routes
 from glycon.routes.views import init_view_routes
 from glycon.routes.api import init_api_routes
 from glycon.routes.sockets import init_socket_handlers
-from glycon.routes.screenshots import init_screenshot_handlers  # Add this import
+from glycon.routes.screenshots import init_screenshot_handlers
 import logging
-
+import os
 
 def create_app():
     app = Flask(__name__, template_folder='templates')
@@ -17,6 +17,7 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = CONFIG.max_content_length
     app.config['HOST'] = CONFIG.host
     app.config['PORT'] = CONFIG.port
+    app.config['BASE_URL'] = os.getenv('BASE_URL', '').rstrip('/')
     app.logger.setLevel(logging.DEBUG)
 
     # Enable CORS for all domains

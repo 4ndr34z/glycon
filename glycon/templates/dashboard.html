@@ -53,7 +53,7 @@
                             {% for agent in recent_agents %}
                             <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}">
                                 <td>
-                                    <a href="{{ url_for('agent_detail', agent_id=agent.id) }}">
+                                    <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}">
                                         {{ agent.hostname }}
                                     </a>
                                 </td>

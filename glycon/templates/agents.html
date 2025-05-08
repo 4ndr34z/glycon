@@ -40,7 +40,7 @@
                     {% for agent in agents %}
                     <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
                         <td>{{ agent.id[:8] }}...</td>
-                        <td><a href="{{ url_for('agent_detail', agent_id=agent.id) }}">{{ agent.hostname }}</a></td>
+                        <td><a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}">{{ agent.hostname }}</a></td>
                         <td>{{ agent.ip }}</td>
                         <td>{{ agent.os }}</td>
                         <td>{{ agent.last_seen }}</td>
@@ -52,11 +52,11 @@
                         </td>
                         <td>
                             <div class="d-flex gap-1">
-                                <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" 
+                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" 
                                    class="btn btn-sm btn-icon btn-outline-primary" title="View details">
                                     <i class="bi bi-eye"></i>
                                 </a>
-                                <a href="{{ url_for('terminal', agent_id=agent.id) }}" 
+                                <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}" 
                                    class="btn btn-sm btn-icon btn-outline-success" title="Open terminal">
                                     <i class="bi bi-terminal"></i>
                                 </a>

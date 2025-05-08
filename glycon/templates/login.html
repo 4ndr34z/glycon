@@ -9,7 +9,7 @@
             <!-- Logo and Title -->
             <div class="text-center mt-4">
                 <div class="logo-container mb-3">
-                    <img src="{{ url_for('static_files', filename='images/glycon.jpg') }}" alt="Logo" height="120" class="logo-img">
+                    <img src="{{ base_url }}{{ url_for('static_files', filename='images/glycon.jpg') }}" alt="Logo" height="120" class="logo-img">
                 </div>
                 <h2 class="portal-title">Glycon - C2</h2>
                 <p class="portal-subtitle">Secure Access Portal</p>
@@ -22,7 +22,7 @@
                 <div class="alert alert-danger">{{ error }}</div>
                 {% endif %}
                 
-                <form method="POST" action="{{ url_for('login') }}">
+                <form method="POST" action="{{ base_url }}{{ url_for('login') }}">
                     <div class="mb-3">
                         <label for="username" class="form-label">Username</label>
                         <input type="text" class="form-control input-field" id="username" name="username" required>

@@ -37,7 +37,7 @@
                                 </span>
                             </td>
                             <td>
-                                <a href="{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-decoration-none">
+                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-decoration-none">
                                     {{ task.agent_id|truncate(8) }}
                                 </a>
                             </td>
