@@ -55,5 +55,6 @@ This to support reverse-proxy with SSL-tunnel
 Start it by setting environment variable for base_url (for the reverse-proxy setup)
 ```export BASE_URL=/8b7c699211b2d90cbbf58545dd708;python3 run.py```
 
-
+### Version 1.4.4
+* Added kill-pill function
 

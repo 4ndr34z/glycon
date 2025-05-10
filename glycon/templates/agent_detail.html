@@ -13,6 +13,9 @@
             <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}" class="btn btn-primary me-2">
                 <i class="fas fa-terminal me-1"></i>Terminal
             </a>
+            <button id="killAgent" class="btn btn-danger me-2">
+                <i class="fas fa-skull me-1"></i>Kill Agent
+            </button>
             <button id="manualRefresh" class="btn btn-outline-primary">
                 <i class="fas fa-sync-alt me-1"></i>Refresh
             </button>
@@ -491,6 +494,37 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Auto-refresh every 5 seconds
     setInterval(refreshAgentDetail, 5000);
+});
+
+// Kill agent handler
+document.getElementById('killAgent').addEventListener('click', async function() {
+    if (!confirm('Are you sure you want to kill this agent? This will trigger self-destruct and cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/kill_agent', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                agent_id: "{{ agent.id }}"
+            })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.message || 'Failed to send kill command');
+        }
+
+        alert(`Kill command sent successfully! The agent will self-destruct on its next check-in.`);
+    } catch (error) {
+        console.error('Error:', error);
+        alert(`Failed to send kill command: ${error.message}`);
+    }
 });
 </script>
 {% endblock %}

