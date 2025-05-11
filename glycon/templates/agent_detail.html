@@ -495,36 +495,71 @@ document.addEventListener('DOMContentLoaded', function() {
     // Auto-refresh every 5 seconds
     setInterval(refreshAgentDetail, 5000);
 });
-
-// Kill agent handler
+//kill-pill
 document.getElementById('killAgent').addEventListener('click', async function() {
-    if (!confirm('Are you sure you want to kill this agent? This will trigger self-destruct and cannot be undone.')) {
+    const agentId = "{{ agent.id }}";
+    const killBtn = this;
+    
+    if (!confirm(`DANGER: This will immediately terminate agent ${agentId}. Continue?`)) {
         return;
     }
     
     try {
+        killBtn.disabled = true;
+        killBtn.innerHTML = '<i class="fas fa-skull-crossbones fa-spin me-1"></i>Terminating...';
+        
+        // Send kill command
         const response = await fetch('/api/kill_agent', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                agent_id: "{{ agent.id }}"
-            })
+            body: JSON.stringify({ agent_id: agentId })
         });
-
-        const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.message || 'Failed to send kill command');
+            throw new Error(await response.text());
         }
-
-        alert(`Kill command sent successfully! The agent will self-destruct on its next check-in.`);
+        
+        const data = await response.json();
+        
+        // Listen for WebSocket confirmation
+        const socket = io();
+        socket.on('agent_killed', (data) => {
+            if (data.agent_id === agentId) {
+                alert(`Agent ${agentId} successfully terminated`);
+                window.location.reload();
+            }
+        });
+        
+        // Fallback - check status every second
+        const checkStatus = setInterval(async () => {
+            const res = await fetch(`/api/agents/${agentId}/status`);
+            if (res.ok) {
+                const statusData = await res.json();
+                if (statusData.status === 'dead') {
+                    clearInterval(checkStatus);
+                    alert(`Agent ${agentId} status confirmed dead`);
+                    window.location.reload();
+                }
+            }
+        }, 1000);
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+            clearInterval(checkStatus);
+            alert('Termination command sent. Status may take a moment to update.');
+            window.location.reload();
+        }, 10000);
+        
     } catch (error) {
-        console.error('Error:', error);
-        alert(`Failed to send kill command: ${error.message}`);
+        console.error('Kill failed:', error);
+        alert(`Termination failed: ${error.message}`);
+        killBtn.disabled = false;
+        killBtn.innerHTML = '<i class="fas fa-skull me-1"></i>Kill Agent';
     }
 });
+
+
 </script>
 {% endblock %}

