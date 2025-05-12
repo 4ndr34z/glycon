@@ -51,10 +51,12 @@ Running 2 server instances.
 1 listening on 443 using HTTPS
 1 listening on 5555 using HTTP 
 
-This to support reverse-proxy with SSL-tunnel
+This to support reverse-proxy with SSL-tunnel terminated on the proxy. Forwarding to port 5555 HTTP on Glycon
 Start it by setting environment variable for base_url (for the reverse-proxy setup)
 ```export BASE_URL=/8b7c699211b2d90cbbf58545dd708;python3 run.py```
 
 ### Version 1.4.4
 * Added kill-pill function
+* Added "Trusted certificate" for agent deployment command. 
+* Changed logo
 

