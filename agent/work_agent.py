@@ -1223,6 +1223,7 @@ class WebSocketClient:
 
     def _setup_logger(self):
         self.logger = logging.getLogger('websocket')
+        self.logger = logging.getLogger('agent')
         self.logger.setLevel(logging.DEBUG)
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
