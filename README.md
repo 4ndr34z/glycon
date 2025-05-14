@@ -58,5 +58,6 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 ### Version 1.4.4
 * Added kill-pill function
 * Added "Trusted certificate" for agent deployment command. 
+* Added deployment option using winget
 * Changed logo
 

