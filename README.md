@@ -60,4 +60,5 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 * Added "Trusted certificate" for agent deployment command. 
 * Added deployment option using winget
 * Changed logo
+* Updated agent to work on Nix OS. Tested on MacOS and Linux (pip install requests;python3 -c "import requests; url='https://serverurl/a/d'; exec(requests.get(url, verify=False).text)")
 

