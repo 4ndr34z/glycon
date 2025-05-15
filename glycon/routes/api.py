@@ -2,6 +2,7 @@
 import sqlite3
 from flask import jsonify, request, Response, send_from_directory
 from flask_login import login_required
+from flask_login import current_user
 from datetime import datetime
 import json
 import base64
@@ -12,6 +13,9 @@ import uuid
 from werkzeug.security import generate_password_hash
 from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
+import traceback  # For detailed error reporting
+
+
 
 def init_api_routes(app, socketio):
     @app.route('/api/task', methods=['POST'])
@@ -144,15 +148,18 @@ def init_api_routes(app, socketio):
             current_ws_status = agent[0] if agent else 0
 
             c.execute('''INSERT OR REPLACE INTO agents 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                     (data['agent_id'],
-                      data.get('hostname', 'UNKNOWN'),
-                      data.get('ip', '0.0.0.0'),
-                      data.get('os', 'UNKNOWN'),
-                      datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ,
-                      'online',
-                      data.get('privilege', 'user'),
-                      current_ws_status))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (data['agent_id'],
+                    data.get('hostname', 'UNKNOWN'),
+                    data.get('ip', '0.0.0.0'),
+                    data.get('os', 'UNKNOWN'),
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
+                    'online',
+                    data.get('privilege', 'user'),
+                    current_ws_status,
+                    data.get('killdate'),  # New killdate field
+                    data.get('checkin_interval', 10)  # New checkin_interval field
+            ))
 
             if 'credentials' in data:
                 creds = data['credentials']
@@ -936,4 +943,92 @@ def init_api_routes(app, socketio):
             }), 500
         finally:
             if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/check_agent_status', methods=['POST'])
+    def check_agent_status():
+        # First verify the monitor token
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            if token == CONFIG.monitor_token:
+                # Bypass authentication for monitor
+                pass
+            else:
+                return jsonify({"status": "error", "message": "Invalid token"}), 401
+        else:
+            # Apply login_required for non-monitor requests
+            if not current_user.is_authenticated:
+                return jsonify({"status": "error", "message": "Authentication required"}), 401
+        
+        conn = None
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # Get current time
+            now = datetime.now()
+            
+            # Get all agents that haven't checked in within 10x their checkin interval
+            c.execute('''
+                SELECT id, last_seen, checkin_interval 
+                FROM agents 
+                WHERE status = 'online'
+            ''')
+            
+            agents = c.fetchall()
+            inactive_agents = []
+            
+            for agent in agents:
+                agent_id, last_seen_str, checkin_interval = agent
+                
+                # Clean up the datetime string by stripping whitespace
+                last_seen_str = last_seen_str.strip()
+                
+                try:
+                    # Try parsing with timezone first
+                    last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S %Z')
+                except ValueError:
+                    try:
+                        # Fall back to parsing without timezone if that fails
+                        last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+                    except ValueError as e:
+                        app.logger.error(f"Error parsing last_seen for agent {agent_id}: {str(e)}")
+                        continue
+                
+                time_diff = (now - last_seen).total_seconds()
+                
+                # Mark as inactive if last seen > 10x checkin interval
+                if time_diff > checkin_interval * 10:
+                    c.execute('''
+                        UPDATE agents 
+                        SET status = 'inactive' 
+                        WHERE id = ?
+                    ''', (agent_id,))
+                    inactive_agents.append(agent_id)
+            
+            conn.commit()
+            
+            if inactive_agents:
+                # Notify clients via websocket
+                socketio.emit('agents_inactive', {
+                    'agent_ids': inactive_agents,
+                    'message': 'Agents marked as inactive due to missed checkins'
+                })
+            
+            return jsonify({
+                "status": "success",
+                "inactive_agents": inactive_agents
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error in check_agent_status: {str(e)}")
+            if conn:
+                conn.rollback()
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
+        finally:
+            if conn:
                 conn.close()

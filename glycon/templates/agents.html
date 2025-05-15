@@ -32,6 +32,7 @@
                         <th>IP</th>
                         <th>OS</th>
                         <th>Last Seen</th>
+                        <th>KillDate</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -44,6 +45,7 @@
                         <td>{{ agent.ip }}</td>
                         <td>{{ agent.os }}</td>
                         <td>{{ agent.last_seen }}</td>
+                        <td>{{ agent.killdate }}</td>
                         <td>
                             <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %} rounded-pill">
                                 <i class="bi bi-{% if agent.status == 'online' %}check-circle{% else %}x-circle{% endif %} me-1"></i>

@@ -16,7 +16,7 @@ def init_view_routes(app):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
         
-        c.execute("SELECT COUNT(*) FROM agents")
+        c.execute("SELECT COUNT(*) FROM agents WHERE status == 'online'")
         agent_count = c.fetchone()[0]
         
         c.execute("SELECT COUNT(*) FROM tasks WHERE status='pending'")
@@ -59,7 +59,7 @@ def init_view_routes(app):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
         c.execute("SELECT * FROM agents ORDER BY last_seen DESC")
-        agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege'], row)) 
+        agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'killdate'], row)) 
                   for row in c.fetchall()]
         conn.close()
         return render_template('agents.html', agents=agents)
@@ -76,7 +76,7 @@ def init_view_routes(app):
             flash("Agent not found", "danger")
             return redirect(url_for('agents'))
         
-        agent = dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege'], agent_data))
+        agent = dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'killdate', 'checkin_interval'], agent_data))
         
         c.execute("SELECT * FROM tasks WHERE agent_id=? ORDER BY created_at DESC LIMIT 20", (agent_id,))
         tasks = [dict(zip(['id', 'agent_id', 'task_type', 'task_data', 'status', 'created_at', 'completed_at'], row)) 

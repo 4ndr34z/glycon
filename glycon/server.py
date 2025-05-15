@@ -10,6 +10,38 @@ from glycon.routes.sockets import init_socket_handlers
 from glycon.routes.screenshots import init_screenshot_handlers
 import logging
 import os
+from threading import Thread
+import time
+import json
+import traceback  # For detailed error reporting
+
+
+def agent_status_monitor(app, socketio):
+    with app.app_context():
+        while True:
+            try:
+                print("\n[Monitor] Starting agent status check...")
+               
+                client = app.test_client()
+                
+                # Makeing sure to include Content-Type header
+                response = client.post(
+                    '/api/check_agent_status',
+                    headers={
+                        'Authorization': f'Bearer {CONFIG.monitor_token}',
+                        'Content-Type': 'application/json'
+                    },
+                    data=json.dumps({}),  # Empty JSON payload
+                    content_type='application/json'
+                )
+                
+                #print(f"[Monitor] Response status: {response.status_code}")
+                #print(f"[Monitor] Response data: {response.get_json()}")
+                
+            except Exception as e:
+                print(f"\n[Monitor ERROR] {str(e)}")
+                traceback.print_exc()
+            time.sleep(60)
 
 def create_app():
     app = Flask(__name__, template_folder='templates')
@@ -19,6 +51,8 @@ def create_app():
     app.config['PORT'] = CONFIG.port
     app.config['BASE_URL'] = os.getenv('BASE_URL', '').rstrip('/')
     app.logger.setLevel(logging.DEBUG)
+
+   
 
     # Enable CORS for all domains
     CORS(app, resources={r"/*": {"origins": "*"}})
@@ -45,3 +79,8 @@ def create_app():
     return app, socketio
 
 app, socketio = create_app()
+
+# Start the agent status monitor thread
+monitor_thread = Thread(target=agent_status_monitor, args=(app, socketio))
+monitor_thread.daemon = True
+monitor_thread.start()

