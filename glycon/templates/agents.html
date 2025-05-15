@@ -39,7 +39,7 @@
                 </thead>
                 <tbody id="agentsTableBody">
                     {% for agent in agents %}
-                    <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
+                    <tr class="{% if agent.status == 'online' %}agent-online{% elif agent.status == 'inactive' %}agent-inactive{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
                         <td>{{ agent.id[:8] }}...</td>
                         <td><a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}">{{ agent.hostname }}</a></td>
                         <td>{{ agent.ip }}</td>
@@ -526,6 +526,12 @@ function escapeHtml(unsafe) {
     .agent-online {
         background-color: rgba(25, 135, 84, 0.05);
     }
+
+    
+    .agent-inactive {
+        background-color: rgba(237, 196, 74, 0.245);
+    }
+
     .agent-offline {
         background-color: rgba(220, 53, 69, 0.05);
     }

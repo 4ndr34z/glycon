@@ -59,7 +59,7 @@ def init_view_routes(app):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
         c.execute("SELECT * FROM agents ORDER BY last_seen DESC")
-        agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'killdate'], row)) 
+        agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'killdate', 'checkin_interval'], row)) 
                   for row in c.fetchall()]
         conn.close()
         return render_template('agents.html', agents=agents)

