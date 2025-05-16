@@ -1128,20 +1128,50 @@ def init_api_routes(app, socketio):
 
     @app.route('/api/download_runner/<string:runner_name>')
     def download_runner(runner_name):
+        import threading
+        import time
         runners_dir = os.path.join(app.root_path, 'runners')
         runner_path = os.path.join(runners_dir, runner_name)
         
         if not os.path.exists(runner_path):
             return jsonify({"status": "error", "message": "Runner not found"}), 404
         
-        return send_from_directory(runners_dir, runner_name, as_attachment=True)
+        response = send_from_directory(runners_dir, runner_name, as_attachment=True)
+        
+        def delete_file_later(path, delay=10):
+            def delayed_delete():
+                time.sleep(delay)
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception as e:
+                    app.logger.error(f"Error deleting runner file {path}: {str(e)}")
+            threading.Thread(target=delayed_delete).start()
+        
+        delete_file_later(runner_path)
+        return response
     
     @app.route('/api/download_shellcode/<string:shellcode_name>')
     def download_shellcode(shellcode_name):
+        import threading
+        import time
         shellcode_dir = os.path.join(app.root_path, 'shellcodes')
         shellcode_path = os.path.join(shellcode_dir, shellcode_name)
         
         if not os.path.exists(shellcode_path):
             return jsonify({"status": "error", "message": "Shellcode not found"}), 404
         
-        return send_from_directory(shellcode_dir, shellcode_name, as_attachment=True)
+        response = send_from_directory(shellcode_dir, shellcode_name, as_attachment=True)
+        
+        def delete_file_later(path, delay=10):
+            def delayed_delete():
+                time.sleep(delay)
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception as e:
+                    app.logger.error(f"Error deleting shellcode file {path}: {str(e)}")
+            threading.Thread(target=delayed_delete).start()
+        
+        delete_file_later(shellcode_path)
+        return response
