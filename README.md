@@ -70,3 +70,7 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 
 ### Version 1.4.6
 * Changed shellcode-runner. Now generates a loader-script, that is downloaded and executed in memory.
+
+### Version 1.4.7
+* Saving agent settings in database
+

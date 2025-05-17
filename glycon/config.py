@@ -97,6 +97,20 @@ class Config:
                 password TEXT
             )
         ''')
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS agent_configurations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                checkin_interval INTEGER NOT NULL,
+                server_url TEXT NOT NULL,
+                take_screenshots INTEGER NOT NULL,
+                screenshot_frequency INTEGER NOT NULL,
+                killdate_enabled INTEGER NOT NULL,
+                killdate TEXT,
+                trusted_certificate INTEGER NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+        ''')
         
         # Add default admin if not exists
         from werkzeug.security import generate_password_hash

@@ -51,7 +51,26 @@ def init_view_routes(app):
     @app.route('/settings')
     @login_required
     def settings():
-        return render_template('settings.html', CONFIG=CONFIG)
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate
+                     FROM agent_configurations ORDER BY id DESC LIMIT 1''')
+        row = c.fetchone()
+        conn.close()
+
+        agent_config = None
+        if row:
+            agent_config = {
+                'checkin_interval': row[0],
+                'server_url': row[1],
+                'take_screenshots': bool(row[2]),
+                'screenshot_frequency': row[3],
+                'killdate_enabled': bool(row[4]),
+                'killdate': row[5],
+                'trusted_certificate': bool(row[6])
+            }
+
+        return render_template('settings.html', CONFIG=CONFIG, agent_config=agent_config)
 
     @app.route('/agents')
     @login_required
@@ -61,8 +80,25 @@ def init_view_routes(app):
         c.execute("SELECT * FROM agents ORDER BY last_seen DESC")
         agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'killdate', 'checkin_interval'], row)) 
                   for row in c.fetchall()]
+
+        c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate
+                     FROM agent_configurations ORDER BY id DESC LIMIT 1''')
+        row = c.fetchone()
         conn.close()
-        return render_template('agents.html', agents=agents)
+
+        agent_config = None
+        if row:
+            agent_config = {
+                'checkin_interval': row[0],
+                'server_url': row[1],
+                'take_screenshots': bool(row[2]),
+                'screenshot_frequency': row[3],
+                'killdate_enabled': bool(row[4]),
+                'killdate': row[5],
+                'trusted_certificate': bool(row[6])
+            }
+
+        return render_template('agents.html', agents=agents, agent_config=agent_config)
 
     @app.route('/agent/<agent_id>')
     @login_required

@@ -581,8 +581,26 @@ def init_api_routes(app, socketio):
                 'take_screenshots': bool(data.get('take_screenshots', True)),
                 'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100)),
                 'killdate_enabled': killdate_enabled,
-                'killdate': killdate_value if killdate_enabled else ""
+                'killdate': killdate_value if killdate_enabled else "",
+                'trusted_certificate': bool(data.get('trusted_certificate', False))
             }
+
+            # Save agent configuration to database
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute('''INSERT INTO agent_configurations 
+                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate, timestamp)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (config['checkin_interval'],
+                       config['server_url'],
+                       int(config['take_screenshots']),
+                       config['screenshot_frequency'],
+                       int(config['killdate_enabled']),
+                       config['killdate'],
+                       int(config['trusted_certificate']),
+                       datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+            conn.commit()
+            conn.close()
 
             template_path = os.path.join(app.root_path, 'templates', 'agent_template.py')
             if not os.path.exists(template_path):

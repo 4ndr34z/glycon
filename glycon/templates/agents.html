@@ -89,40 +89,40 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label class="form-label">Check-in Interval (seconds)</label>
-                            <input type="number" class="form-control" id="checkinInterval" value="10" min="5" max="3600" required>
+                            <input type="number" class="form-control" id="checkinInterval" value="{{ agent_config.checkin_interval if agent_config else 10 }}" min="5" max="3600" required>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Server URL</label>
                             <input type="url" class="form-control" id="serverUrl" 
-                                   value="{{ request.url_root | replace('http://', 'https://') }}" required>
+                                   value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="takeScreenshots" checked>
+                                <input class="form-check-input" type="checkbox" id="takeScreenshots" {% if agent_config and agent_config.take_screenshots %}checked{% endif %}>
                                 <label class="form-check-label" for="takeScreenshots">Take Screenshots</label>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Screenshot Frequency</label>
                             <select class="form-select" id="screenshotFrequency">
-                                <option value="1">Every check-in</option>
-                                <option value="5">Every 5 check-ins</option>
-                                <option value="10" selected>Every 10 check-ins</option>
-                                <option value="30">Every 30 check-ins</option>
+                                <option value="1" {% if agent_config and agent_config.screenshot_frequency == 1 %}selected{% endif %}>Every check-in</option>
+                                <option value="5" {% if agent_config and agent_config.screenshot_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
+                                <option value="10" {% if not agent_config or agent_config.screenshot_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
+                                <option value="30" {% if agent_config and agent_config.screenshot_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
                             </select>
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label class="form-label">Kill Date</label>
-                            <input type="datetime-local" class="form-control" id="killDate">
+                            <input type="datetime-local" class="form-control" id="killDate" value="{{ agent_config.killdate|replace(' ', 'T') if agent_config and agent_config.killdate else '' }}">
                             <small class="text-muted">Agent will self-destruct after this date/time</small>
                         </div>
                         <div class="col-md-6">
                             <div class="form-check mt-4 pt-3">
-                                <input class="form-check-input" type="checkbox" id="enableKillDate">
+                                <input class="form-check-input" type="checkbox" id="enableKillDate" {% if agent_config and agent_config.killdate_enabled %}checked{% endif %}>
                                 <label class="form-check-label" for="enableKillDate">Enable Kill Date</label>
                             </div>
                         </div>
@@ -130,7 +130,7 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="trustedCertificate">
+                                <input class="form-check-input" type="checkbox" id="trustedCertificate" {% if agent_config and agent_config.trusted_certificate %}checked{% endif %}>
                                 <label class="form-check-label" for="trustedCertificate">Trusted Certificate</label>
                             </div>
                         </div>
