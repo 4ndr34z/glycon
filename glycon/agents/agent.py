@@ -8,10 +8,10 @@ def install_module(module_name, pip_name=None):
     pip_name = pip_name or module_name
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
-        print(f"Successfully installed {{module_name}}")
+        print(f"Successfully installed {{{{module_name}}}}")
         return True
     except subprocess.CalledProcessError:
-        print(f"Failed to install {{module_name}}")
+        print(f"Failed to install {{{{module_name}}}}")
         return False
 
 # List of required modules with their pip names if different
@@ -44,7 +44,7 @@ for module, pip_name in required_modules:
         else:
             __import__(module.split('.')[0])
     except ImportError:
-        print(f"Module {{module}} not found. Attempting to install...")
+        print(f"Module {{{{module}}}} not found. Attempting to install...")
         if pip_name:
             install_module(module, pip_name)
         else:
@@ -89,7 +89,7 @@ try:
     
     print("All modules imported successfully!")
 except ImportError as e:
-    print(f"Failed to import module: {{e}}")
+    print(f"Failed to import module: {{{{e}}}}")
     
 
 

