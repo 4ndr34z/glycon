@@ -12,6 +12,7 @@ build/
 develop-eggs/
 dist/
 downloads/
+agents/agent.py
 eggs/
 .eggs/
 lib/
@@ -172,4 +173,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# SQLite db
 c2.db
+c2.db-shm
+c2.db-wal
