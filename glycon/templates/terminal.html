@@ -79,6 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let commandHistory = [];
     let historyIndex = -1;
     let waitingMessage = null;
+    let keepAliveInterval = null;
 
     function cleanText(text) {
         if (typeof text !== 'string') return '';
@@ -127,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         socket = io('/terminal', {
-            reconnectionAttempts: 5,
+            reconnectionAttempts: 0, // Unlimited reconnection attempts
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
             transports: ['websocket'],
@@ -139,7 +140,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         socket.on('connect', function() {
             console.log('[Terminal] Socket connected');
-            updateConnectionStatus(false); // Set to false initially
+            updateConnectionStatus(true);
             socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
             socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
             
@@ -153,23 +154,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 terminal.appendChild(waitingDiv);
                 terminal.scrollTop = terminal.scrollHeight;
             }
+
+            // Start keep-alive ping every 25 seconds
+            if (keepAliveInterval) clearInterval(keepAliveInterval);
+            keepAliveInterval = setInterval(() => {
+                if (socket && socket.connected) {
+                    socket.emit('keep_alive', { agent_id: '{{ agent.id }}' });
+                    console.log('[Terminal] Sent keep_alive ping');
+                }
+            }, 25000);
+        });
+
+        socket.on('reconnect', () => {
+            console.log('[Terminal] Socket reconnected');
+            socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
+            socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
         });
 
         socket.on('agent_connected', function(data) {
-        console.log('[Terminal] Agent connected to WebSocket');
-        updateConnectionStatus(true);
-        const waitingMsg = document.getElementById('waiting-message');
-        if (waitingMsg) {
-            waitingMsg.remove();
-        }
-        // Request current directory after connection
-        socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
-    });
-
+            console.log('[Terminal] Agent connected to WebSocket');
+            updateConnectionStatus(true);
+            const waitingMsg = document.getElementById('waiting-message');
+            if (waitingMsg) {
+                waitingMsg.remove();
+            }
+            // Request current directory after connection
+            socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
+        });
 
         socket.on('disconnect', function() {
             console.log('[Terminal] Socket disconnected');
             updateConnectionStatus(false);
+            if (keepAliveInterval) {
+                clearInterval(keepAliveInterval);
+                keepAliveInterval = null;
+            }
         });
 
         socket.on('connect_error', function(error) {
@@ -179,6 +198,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (waitingMessage) {
                 waitingMessage.remove();
                 waitingMessage = null;
+            }
+            if (keepAliveInterval) {
+                clearInterval(keepAliveInterval);
+                keepAliveInterval = null;
             }
         });
 

@@ -91,8 +91,6 @@ try:
 except ImportError as e:
     print(f"Failed to import module: {{e}}")
     
-    
-
 
 
 # ======================
@@ -1301,7 +1299,7 @@ class WebSocketClient:
             self.socket = socketio.Client(
                 ssl_verify=False,
                 reconnection=True,
-                reconnection_attempts=5,
+                reconnection_attempts=0,  # Unlimited reconnection attempts
                 reconnection_delay=3000,
                 logger=True,
                 engineio_logger=True
@@ -1333,6 +1331,17 @@ class WebSocketClient:
             def on_disconnect():
                 self.logger.warning(f"WebSocket disconnected from {{self.namespace}}")
                 self.connected = False
+
+            # Start keep-alive ping thread
+            def keep_alive_loop():
+                while self.connected:
+                    try:
+                        self.socket.emit('keep_alive', {{'agent_id': self.agent_id}}, namespace=self.namespace)
+                        self.logger.debug("Sent keep_alive ping")
+                    except Exception as e:
+                        self.logger.error(f"Failed to send keep_alive ping: {{str(e)}}")
+                    time.sleep(25)
+            threading.Thread(target=keep_alive_loop, daemon=True).start()
 
             # Connect with timeout
             self.socket.connect(
@@ -1414,6 +1423,7 @@ class WebSocketClient:
             try:
                 self.logger.info("Disconnecting WebSocket")
                 self.socket.disconnect()
+                self.socket = None
             except Exception as e:
                 self.logger.error(f"Disconnect error: {{str(e)}}")
         self.connected = False
