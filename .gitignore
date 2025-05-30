@@ -177,3 +177,5 @@ cython_debug/
 c2.db
 c2.db-shm
 c2.db-wal
+glycon/runners/
+glycon/shellcodes/
