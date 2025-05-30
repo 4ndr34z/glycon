@@ -83,3 +83,6 @@ Start it by setting environment variable for base_url (for the reverse-proxy set
 
 ### Version 1.4.9.1
 * Fixed unstability in terminal
+
+### Version 1.4.9.2
+* Fixed shellcode-runner bug

