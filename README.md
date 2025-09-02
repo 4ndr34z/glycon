@@ -1,7 +1,7 @@
 <div align="center">
   <img src="glycon/static/images/glycon2.png" alt="Glycon Logo" width="200"/>
   <h1>🛡️ Glycon - C2 Framework</h1>
-  <p><em>Advanced Command and Control Framework for Red Team Operations</em></p>
+  <p><em>Small Command and Control Framework for Red Team Operations</em></p>
 </div>
 
 ---
@@ -233,7 +233,7 @@ python3 run.py --http-port 8080
 
 ## 🤝 Contributing
 
-We welcome contributions! Please follow these guidelines:
+Contributions are welcome! Please follow these guidelines:
 
 1. 🍴 Fork the repository
 2. 🌿 Create a feature branch (`git checkout -b feature/amazing-feature`)
