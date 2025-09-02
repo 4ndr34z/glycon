@@ -7,7 +7,7 @@ class Config:
         self.host = "0.0.0.0"
         self.port = 443
         self.database = "c2.db"
-        self.aes_key = b"32bytekey-ultra-secure-123456789"
+        self.aes_key = b"32bytekey-ultra-tecure-123456789"
         self.aes_iv = b"16byteiv-9876543"
         self.upload_folder = "uploads"
         self.screenshot_folder = "screenshots"
@@ -118,6 +118,8 @@ class Config:
                 killdate_enabled INTEGER NOT NULL,
                 killdate TEXT,
                 trusted_certificate INTEGER NOT NULL,
+                aes_key TEXT NOT NULL,
+                aes_iv TEXT NOT NULL,
                 timestamp TEXT NOT NULL
             )
         ''')
