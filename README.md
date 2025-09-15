@@ -1,7 +1,7 @@
 <div align="center">
   <img src="glycon/static/images/glycon2.png" alt="Glycon Logo" width="200"/>
   <h1>🛡️ Glycon - C2 Framework</h1>
-  <p><em>Small Command and Control Framework for Red Team Operations</em></p>
+  <p><em>Small Command and Control Framework for Red Team Operations and Pentesting</em></p>
 </div>
 
 ---
