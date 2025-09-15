@@ -69,15 +69,6 @@ cd donut
 docker build -t donut .
 ```
 
-### Docker Setup (Alternative)
-```dockerfile
-# Build the container
-docker build -t glycon .
-
-# Run the container
-docker run -p 443:443 -p 5555:5555 glycon
-```
-
 ---
 
 ## 🎯 Usage
