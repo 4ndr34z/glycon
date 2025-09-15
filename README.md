@@ -136,7 +136,6 @@ python3 run.py --http-port 8080
 - ✅ **Agent Management** - Deploy and control remote agents
 - ✅ **Real-time Terminal** - Interactive shell access with command history
 - ✅ **Screenshot Capture** - Remote desktop monitoring
-- ✅ **File Operations** - Upload/download files from agents
 - ✅ **Cookie Stealing** - Extract browser credentials
 - ✅ **Shellcode Execution** - Run custom payloads via Donut
 
@@ -153,7 +152,6 @@ python3 run.py --http-port 8080
 - 🪟 Windows agents
 - 🐧 Linux agents
 - 🍎 macOS agents
-- 🐳 Docker containerization
 
 ---
 
