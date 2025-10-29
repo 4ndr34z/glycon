@@ -157,6 +157,10 @@ python3 run.py --http-port 8080
 
 ## 🔄 Version History
 
+### Version 1.4.9.4
+- 🐛 Corrected winget deployment
+- 🥷 Updated Firefox cookiestealing
+
 ### Version 1.4.9.2
 - 🐛 Fixed shellcode-runner bug
 
