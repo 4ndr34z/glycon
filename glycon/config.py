@@ -11,9 +11,9 @@ class Config:
         self.aes_iv = b"16byteiv-9876543"
         self.upload_folder = "uploads"
         self.screenshot_folder = "screenshots"
-        self.max_content_length = 16 * 1024 * 1024  # 16MB
+        self.max_content_length = 500 * 1024 * 1024  # 500MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.version = "1.4.9.4"
+        self.version = "1.4.9.5"
         self.monitor_token = secrets.token_urlsafe(32)  
 
         
