@@ -83,10 +83,7 @@ try:
     import configparser
     import xml.etree.ElementTree as ET
     import socketio as socketio
-    try:
-        import websocket
-    except ImportError:
-        import websocket_client as websocket
+    import websocket
     import tempfile
     import multiprocessing
   
