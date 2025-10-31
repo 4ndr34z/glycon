@@ -161,7 +161,6 @@ python3 run.py --http-port 8080
 - 🐛 Fixed the shellcode runner. It now generates shellcode from executable files (with or without arguments) and loads it reflectively on the target.
 - Raw shellcode loaded from file or pasted as hex also works
 
-
 ### Version 1.4.9.4
 - 🐛 Corrected winget deployment
 - 🥷 Updated Firefox cookiestealing

