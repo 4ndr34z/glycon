@@ -105,6 +105,7 @@
                                     <th>Status</th>
                                     <th>Created</th>
                                     <th>Completed</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="tasks-container">
@@ -123,11 +124,56 @@
                                     </td>
                                     <td>{{ task.created_at }}</td>
                                     <td>{{ task.completed_at if task.completed_at else '-' }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#taskModal{{ task.id }}" data-agent-id="{{ agent.id }}">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                    </td>
                                 </tr>
+
+                                <!-- Task Detail Modal -->
+                                <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1">
+                                    <div class="modal-dialog modal-lg">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">Task #{{ task.id }} Details</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <div class="mb-3">
+                                                    <h6>Task Data</h6>
+                                                    <pre class="bg-light p-3">{{ task.task_data|tojson|safe }}</pre>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <h6>Status</h6>
+                                                    <span class="badge bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
+                                                        {{ task.status }}
+                                                    </span>
+                                                </div>
+                                                {% if task.task_type == 'shellcode' %}
+                                                <div class="mb-3">
+                                                    <h6>Shellcode Output</h6>
+                                                    <div id="shellcode-output-{{ task.id }}" class="shellcode-output-container">
+                                                        <div class="text-center">
+                                                            <div class="spinner-border spinner-border-sm" role="status">
+                                                                <span class="visually-hidden">Loading...</span>
+                                                            </div>
+                                                            <small class="text-muted">Loading shellcode output...</small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                                 {% endfor %}
                                 {% else %}
                                 <tr>
-                                    <td colspan="4" class="text-muted">No tasks found</td>
+                                    <td colspan="5" class="text-muted">No tasks found</td>
                                 </tr>
                                 {% endif %}
                             </tbody>
@@ -263,6 +309,111 @@
 {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Agent detail page loaded, setting up modal handler');
+
+    // Load shellcode output when modal is shown
+    var modals = document.querySelectorAll('.modal');
+    console.log('Modal elements found:', modals.length);
+
+    modals.forEach(function(modal) {
+        modal.addEventListener('show.bs.modal', function(e) {
+            console.log('Modal show event triggered for:', modal.id);
+            var taskId = modal.id.replace('taskModal', '');
+            console.log('Extracted task ID:', taskId);
+
+            var outputContainer = modal.querySelector('#shellcode-output-' + taskId);
+            console.log('Looking for output container:', '#shellcode-output-' + taskId, 'Found:', !!outputContainer);
+
+            if (outputContainer) {
+                console.log('Output container found, looking for agent ID...');
+                // Try to get agent ID from the button that triggered the modal
+                var triggeringButton = document.querySelector('button[data-bs-target="#' + modal.id + '"]');
+                var agentId = null;
+
+                if (triggeringButton) {
+                    agentId = triggeringButton.getAttribute('data-agent-id');
+                    console.log('Agent ID from button:', agentId);
+                }
+
+                // Fallback to looking for agent link in modal
+                if (!agentId) {
+                    var agentLink = modal.querySelector('a[href*="agent_detail"]');
+                    console.log('Agent links found:', !!agentLink);
+
+                    if (agentLink) {
+                        var href = agentLink.getAttribute('href');
+                        console.log('Agent link href:', href);
+                        agentId = href.split('/').pop();
+                        console.log('Extracted agent ID from link:', agentId);
+                    }
+                }
+
+            if (agentId) {
+                var apiUrl = '/api/shellcode_outputs/' + agentId;
+                console.log('Making API call to:', apiUrl);
+
+                fetch(apiUrl)
+                    .then(response => {
+                        console.log('Fetch response status:', response.status);
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Fetch response data:', data);
+                        if (data.status === 'success' && data.outputs && data.outputs.length > 0) {
+                            // Filter outputs for this specific task
+                            var taskOutputs = data.outputs.filter(function(output) {
+                                return output.task_id == taskId;
+                            });
+
+                            if (taskOutputs.length > 0) {
+                                var outputHtml = '<div class="shellcode-outputs">';
+                                taskOutputs.forEach(function(output) {
+                                    var statusClass = output.status === 'success' ? 'text-success' : 'text-danger';
+                                    outputHtml += '<div class="mb-2 p-2 border rounded">';
+                                    outputHtml += '<small class="text-muted">' + output.timestamp + '</small><br>';
+                                    outputHtml += '<span class="' + statusClass + '">' + output.status + '</span>';
+                                    if (output.message) {
+                                        outputHtml += ' - ' + output.message;
+                                    }
+                                    if (output.output) {
+                                        outputHtml += '<pre class="mt-1 bg-dark text-light p-2 small">' + output.output.replace(/&/g, '&amp;').replace(/</g, '<').replace(/>/g, '>') + '</pre>';
+                                    }
+                                    outputHtml += '</div>';
+                                });
+                                outputHtml += '</div>';
+                                outputContainer.innerHTML = outputHtml;
+                            } else {
+                                outputContainer.innerHTML = '<small class="text-muted">No shellcode output available for this task</small>';
+                            }
+                        } else {
+                            outputContainer.innerHTML = '<small class="text-muted">No shellcode output available</small>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Fetch error:', error);
+                        outputContainer.innerHTML = '<small class="text-danger">Failed to load shellcode output: ' + error.message + '</small>';
+                    });
+            } else {
+                console.log('No agent ID extracted');
+                outputContainer.innerHTML = '<small class="text-warning">No agent ID found</small>';
+            }
+            } else {
+                console.log('No output container found for task', taskId);
+            }
+        });
+    });
+
+    // Test modal trigger
+    var modalButtons = document.querySelectorAll('button[data-bs-toggle="modal"]');
+    modalButtons.forEach(function(button) {
+        button.addEventListener('click', function() {
+            console.log('Modal trigger button clicked, target:', button.getAttribute('data-bs-target'), 'agent-id:', button.getAttribute('data-agent-id'));
+        });
+    });
+});
+</script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Shellcode type toggle

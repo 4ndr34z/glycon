@@ -157,6 +157,9 @@ python3 run.py --http-port 8080
 
 ## 🔄 Version History
 
+### Version 1.4.9.8
+- added output from shellcode-execution
+
 ### Version 1.4.9.7
 - 🔄 Improved shellcode runner with obfuscaion and encryption.
 - 🐛 Fixed an issue where the terminal would not load properly when accessing agents through the web interface.

