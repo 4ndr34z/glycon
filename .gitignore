@@ -179,4 +179,4 @@ c2.db-shm
 c2.db-wal
 glycon/runners/
 glycon/shellcodes/
-agents/agent.py
+glycon/agents/agent.py

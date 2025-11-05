@@ -54,17 +54,17 @@
                     </td>
                         <td>
                             <div class="d-flex gap-1">
-                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" 
+                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}"
                                    class="btn btn-sm btn-icon btn-outline-primary" title="View details">
-                                    <i class="bi bi-eye"></i>
+                                    <i class="bi bi-info-circle"></i>
                                 </a>
-                                <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}" 
+                                <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}"
                                    class="btn btn-sm btn-icon btn-outline-success" title="Open terminal">
                                     <i class="bi bi-terminal"></i>
                                 </a>
-                                <button class="btn btn-sm btn-icon btn-outline-danger delete-agent" 
+                                <button class="btn btn-sm btn-icon btn-outline-danger delete-agent"
                                         data-agent-id="{{ agent.id }}" title="Delete agent">
-                                    <i class="bi bi-trash"></i>
+                                    <i class="bi bi-x-circle"></i>
                                 </button>
                             </div>
                         </td>

