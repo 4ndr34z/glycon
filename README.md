@@ -136,8 +136,10 @@ python3 run.py --http-port 8080
 - ✅ **Agent Management** - Deploy and control remote agents
 - ✅ **Real-time Terminal** - Interactive shell access with command history
 - ✅ **Screenshot Capture** - Remote desktop monitoring
-- ✅ **Cookie Stealing** - Extract browser credentials
-- ✅ **Shellcode Execution** - Run custom payloads via Donut
+- ✅ **Browser Cookie Stealing** - Extract browser cookies
+- ✅ **Browser Credential Stealing** - Extract browser credentials
+- ✅ **Browser History Stealing** - Extract browser history
+- ✅ **Shellcode Execution** - Run shellcode payloads via Donut
 
 ### Advanced Features
 - 🔐 **Dual Server Support** - HTTPS + HTTP simultaneous operation
@@ -156,6 +158,10 @@ python3 run.py --http-port 8080
 ---
 
 ## 🔄 Version History
+
+### Version 1.5
+- added browser password stealing functionality
+- added browser history stealing functionality
 
 ### Version 1.4.9.8
 - added output from shellcode-execution
