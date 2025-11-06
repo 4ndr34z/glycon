@@ -137,7 +137,33 @@ class Config:
                 timestamp TEXT
             )
         ''')
-        
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS ip_whitelist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_range TEXT NOT NULL,
+                description TEXT
+            )
+        ''')
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS blocked_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                path TEXT NOT NULL
+            )
+        ''')
+
+        # Add default local subnet ranges if not exists
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("192.168.0.0/16", "Local subnet"))
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("10.0.0.0/8", "Local subnet"))
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("172.16.0.0/12", "Local subnet"))
+
+        # Always ensure default allow all is present
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("0.0.0.0/0", "Default allow all IPv4 - remove after setup"))
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("::/0", "Default allow all IPv6 - remove after setup"))
+
         # Add default admin if not exists
         from werkzeug.security import generate_password_hash
         c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?)", 

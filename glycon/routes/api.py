@@ -12,6 +12,7 @@ import subprocess
 import uuid
 import secrets
 import random
+import ipaddress
 from werkzeug.security import generate_password_hash
 from glycon.secure_comms import SecureComms
 from glycon.config import CONFIG
@@ -1821,3 +1822,184 @@ def init_api_routes(app, socketio):
                 'status': 'error',
                 'message': str(e)
             }), 500
+
+    # IP Whitelist Management API Endpoints
+    @app.route('/api/ip_whitelist', methods=['GET'])
+    @login_required
+    def get_ip_whitelist():
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            # Ensure table exists
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS ip_whitelist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip_range TEXT NOT NULL UNIQUE,
+                    description TEXT
+                )
+            ''')
+
+            c.execute("SELECT id, ip_range, description FROM ip_whitelist ORDER BY id")
+            rows = c.fetchall()
+            conn.close()
+
+            whitelist = [{
+                'id': row[0],
+                'ip_range': row[1],
+                'description': row[2]
+            } for row in rows]
+
+            return jsonify({'status': 'success', 'whitelist': whitelist})
+        except Exception as e:
+            app.logger.error(f"Error fetching IP whitelist: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/ip_whitelist', methods=['POST'])
+    @login_required
+    def add_ip_whitelist():
+        try:
+            data = request.get_json()
+            if not data or 'ip_range' not in data:
+                return jsonify({'status': 'error', 'message': 'ip_range required'}), 400
+
+            ip_range = data['ip_range'].strip()
+            description = data.get('description', '').strip()
+
+            # Validate IP range
+            try:
+                ipaddress.ip_network(ip_range, strict=False)
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Invalid IP range format'}), 400
+
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("INSERT INTO ip_whitelist (ip_range, description) VALUES (?, ?)",
+                      (ip_range, description))
+            conn.commit()
+            whitelist_id = c.lastrowid
+            conn.close()
+
+            return jsonify({'status': 'success', 'id': whitelist_id})
+        except Exception as e:
+            app.logger.error(f"Error adding IP to whitelist: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/ip_whitelist/<int:whitelist_id>', methods=['PUT'])
+    @login_required
+    def update_ip_whitelist(whitelist_id):
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+
+            ip_range = data.get('ip_range', '').strip()
+            description = data.get('description', '').strip()
+
+            if ip_range:
+                # Validate IP range
+                try:
+                    ipaddress.ip_network(ip_range, strict=False)
+                except ValueError:
+                    return jsonify({'status': 'error', 'message': 'Invalid IP range format'}), 400
+
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            # Check if entry exists
+            c.execute("SELECT id FROM ip_whitelist WHERE id=?", (whitelist_id,))
+            if not c.fetchone():
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'Whitelist entry not found'}), 404
+
+            # Update
+            if ip_range and description:
+                c.execute("UPDATE ip_whitelist SET ip_range=?, description=? WHERE id=?",
+                          (ip_range, description, whitelist_id))
+            elif ip_range:
+                c.execute("UPDATE ip_whitelist SET ip_range=? WHERE id=?", (ip_range, whitelist_id))
+            elif description:
+                c.execute("UPDATE ip_whitelist SET description=? WHERE id=?", (description, whitelist_id))
+
+            conn.commit()
+            conn.close()
+
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            app.logger.error(f"Error updating IP whitelist: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/ip_whitelist/<int:whitelist_id>', methods=['DELETE'])
+    @login_required
+    def delete_ip_whitelist(whitelist_id):
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("DELETE FROM ip_whitelist WHERE id=?", (whitelist_id,))
+            deleted = c.rowcount
+            conn.commit()
+            conn.close()
+
+            if deleted == 0:
+                return jsonify({'status': 'error', 'message': 'Whitelist entry not found'}), 404
+
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            app.logger.error(f"Error deleting IP from whitelist: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/blocked_logs', methods=['GET'])
+    @login_required
+    def get_blocked_logs():
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("SELECT id, timestamp, ip, path FROM blocked_logs ORDER BY timestamp DESC LIMIT 100")
+            rows = c.fetchall()
+            conn.close()
+
+            logs = [{
+                'id': row[0],
+                'timestamp': row[1],
+                'ip': row[2],
+                'path': row[3]
+            } for row in rows]
+
+            return jsonify({'status': 'success', 'logs': logs})
+        except Exception as e:
+            app.logger.error(f"Error fetching blocked logs: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/blocked_logs/<int:log_id>/add_to_whitelist', methods=['POST'])
+    @login_required
+    def add_blocked_ip_to_whitelist(log_id):
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            # Get the IP from the log
+            c.execute("SELECT ip FROM blocked_logs WHERE id=?", (log_id,))
+            row = c.fetchone()
+            if not row:
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'Log entry not found'}), 404
+
+            ip = row[0]
+
+            # Check if already in whitelist
+            c.execute("SELECT id FROM ip_whitelist WHERE ip_range=?", (ip,))
+            if c.fetchone():
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'IP already in whitelist'}), 400
+
+            # Add to whitelist
+            c.execute("INSERT INTO ip_whitelist (ip_range, description) VALUES (?, ?)",
+                      (ip, f'Added from blocked log {log_id}'))
+            conn.commit()
+            whitelist_id = c.lastrowid
+            conn.close()
+
+            return jsonify({'status': 'success', 'whitelist_id': whitelist_id})
+        except Exception as e:
+            app.logger.error(f"Error adding blocked IP to whitelist: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500

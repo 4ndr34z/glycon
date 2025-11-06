@@ -70,9 +70,73 @@
             </div>
         </div>
 
-        
+
     </div>
-</div>
+
+    <!-- IP Whitelist Section -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h5 class="mb-0">IP Whitelist</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table" id="ipWhitelistTable">
+                            <thead>
+                                <tr>
+                                    <th>IP Range</th>
+                                    <th>Description</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Whitelist rows will be populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <hr>
+                    <h6>Add IP Range</h6>
+                    <form id="addIPForm">
+                        <div class="mb-3">
+                            <label for="newIPRange" class="form-label">IP Range (e.g., 192.168.1.0/24, 10.0.0.1)</label>
+                            <input type="text" class="form-control" id="newIPRange" placeholder="192.168.1.0/24" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newIPDescription" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="newIPDescription" placeholder="Local network">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add to Whitelist</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h5 class="mb-0">Blocked IP Logs</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table" id="blockedLogsTable">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>IP</th>
+                                    <th>Path</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Log rows will be populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Agent Configuration Section -->
     <div class="row mt-4">
@@ -165,7 +229,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Fetch and display users
     function fetchUsers() {
-        fetch('/api/users')
+        fetch('/api/users', { credentials: 'include' })
             .then(response => response.json())
             .then(users => {
                 const tbody = document.querySelector('#usersTable tbody');
@@ -373,6 +437,217 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial fetch of users
     fetchUsers();
+
+    // IP Whitelist functions
+    function fetchIPWhitelist() {
+        fetch('/api/ip_whitelist', { credentials: 'include' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const tbody = document.querySelector('#ipWhitelistTable tbody');
+                    tbody.innerHTML = '';
+                    data.whitelist.forEach(entry => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${entry.ip_range}</td>
+                            <td>${entry.description}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary edit-ip-btn me-2" data-id="${entry.id}" data-range="${entry.ip_range}" data-description="${entry.description}" onclick="showEditIPModal(${entry.id}, '${entry.ip_range}', '${entry.description}')">
+                                    <i class="fas fa-edit me-1"></i>Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger delete-ip-btn" data-id="${entry.id}" data-range="${entry.ip_range}" onclick="deleteIP(${entry.id})">
+                                    <i class="fas fa-trash me-1"></i>Delete
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+
+
+
+                    // Add event listeners for edit buttons
+                    document.querySelectorAll('.edit-ip-btn').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const id = this.getAttribute('data-id');
+                            const range = this.getAttribute('data-range');
+                            const description = this.getAttribute('data-description');
+                            showEditIPModal(id, range, description);
+                        });
+                    });
+
+                    // Add event listeners for delete buttons
+                    document.querySelectorAll('.delete-ip-btn').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const id = this.getAttribute('data-id');
+                            const range = this.getAttribute('data-range');
+                            if (confirm(`Are you sure you want to delete IP range "${range}"?`)) {
+                            fetch(`/api/ip_whitelist/${id}`, {
+                                method: 'DELETE',
+                                credentials: 'include'
+                            })
+                                .then(response => response.json())
+                                .then(data => {
+                                    alert(data.message || data.error);
+                                    fetchIPWhitelist();
+                                })
+                                .catch(() => {
+                                    alert('Error deleting IP range');
+                                });
+                            }
+                        });
+                    });
+                } else {
+                    console.error('Error fetching IP whitelist:', data.message);
+                }
+            })
+            .catch(() => {
+                console.error('Error fetching IP whitelist');
+            });
+    }
+
+    // Blocked logs functions
+    function fetchBlockedLogs() {
+        fetch('/api/blocked_logs', { credentials: 'include' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const tbody = document.querySelector('#blockedLogsTable tbody');
+                    tbody.innerHTML = '';
+                    data.logs.forEach(log => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${log.timestamp}</td>
+                            <td>${log.ip}</td>
+                            <td>${log.path}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-success add-to-whitelist-btn" data-ip="${log.ip}" data-log-id="${log.id}">
+                                    <i class="fas fa-plus me-1"></i>Add to Whitelist
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+
+                // Add event listeners for add to whitelist buttons
+                document.querySelectorAll('.add-to-whitelist-btn').forEach(button => {
+                    button.addEventListener('click', function() {
+                        const ip = this.getAttribute('data-ip');
+                        if (confirm(`Add ${ip} to whitelist?`)) {
+                            fetch('/api/blocked_logs/add_to_whitelist', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ip: ip})
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                alert(data.message || data.error);
+                                if (data.message) {
+                                    fetchIPWhitelist();
+                                    fetchBlockedLogs();
+                                }
+                            })
+                            .catch(() => {
+                                alert('Error adding to whitelist');
+                            });
+                        }
+                    });
+                });
+            })
+            .catch(() => {
+                console.error('Error fetching blocked logs');
+            });
+    }
+
+    // Show edit IP modal
+    function showEditIPModal(id, range, description) {
+        const modalHtml = `
+            <div class="modal fade" id="editIPModal" tabindex="-1" aria-labelledby="editIPModalLabel" aria-hidden="true">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="editIPModalLabel">Edit IP Range</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <form id="editIPForm">
+                      <div class="mb-3">
+                        <label for="editIPRangeInput" class="form-label">IP Range</label>
+                        <input type="text" class="form-control" id="editIPRangeInput" value="${range}" required>
+                      </div>
+                      <div class="mb-3">
+                        <label for="editIPDescriptionInput" class="form-label">Description</label>
+                        <input type="text" class="form-control" id="editIPDescriptionInput" value="${description}">
+                      </div>
+                      <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+        `;
+        // Append modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modal = new bootstrap.Modal(document.getElementById('editIPModal'));
+        modal.show();
+
+        // Handle form submission
+        document.getElementById('editIPForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const newRange = document.getElementById('editIPRangeInput').value;
+            const newDescription = document.getElementById('editIPDescriptionInput').value;
+            fetch(`/api/ip_whitelist/${id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include',
+                body: JSON.stringify({ip_range: newRange, description: newDescription})
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || data.error);
+                modal.hide();
+                document.getElementById('editIPModal').remove();
+                fetchIPWhitelist();
+            })
+            .catch(() => {
+                alert('Error updating IP range');
+            });
+        });
+
+        // Remove modal from DOM on hide
+        document.getElementById('editIPModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('editIPModal').remove();
+        });
+    }
+
+    // Handle add IP form submission
+    document.getElementById('addIPForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const ipRange = document.getElementById('newIPRange').value;
+        const description = document.getElementById('newIPDescription').value;
+        fetch('/api/ip_whitelist', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
+            body: JSON.stringify({ip_range: ipRange, description: description})
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(data.message || data.error);
+            if (data.message) {
+                // Clear form
+                document.getElementById('addIPForm').reset();
+                // Refresh list
+                fetchIPWhitelist();
+            }
+        })
+        .catch(() => {
+            alert('Error adding IP range');
+        });
+    });
+
+    // Initial fetch of IP whitelist and blocked logs
+    fetchIPWhitelist();
+    fetchBlockedLogs();
 });
 </script>
 {% endblock %}
