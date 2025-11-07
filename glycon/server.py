@@ -165,8 +165,16 @@ def create_app():
 
         if not allowed:
             log_blocked_ip(client_ip, request.path)
-            # For now, drop silently. Could add config for redirect URL
-            return abort(403)
+            # Check for redirect URL setting
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("SELECT value FROM settings WHERE key='redirect_url'")
+            row = c.fetchone()
+            conn.close()
+            if row and row[0]:
+                return redirect(row[0])
+            else:
+                return abort(403)
 
     def log_blocked_ip(ip, path):
         conn = sqlite3.connect(CONFIG.database)

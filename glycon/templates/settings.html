@@ -120,7 +120,9 @@
                     </div>
                     <hr>
                     <div class="d-flex justify-content-between align-items-center">
-                        <h6 class="mb-0">Add IP Range</h6>
+                        <button type="button" class="btn btn-primary btn-sm" id="addIPRangeBtn">
+                            <i class="fas fa-plus me-1"></i>Add IP Range
+                        </button>
                         <div>
                             <button type="button" class="btn btn-warning btn-sm me-2" id="deactivateDefaultsBtn">
                                 <i class="fas fa-ban me-1"></i>Deactivate Allow All
@@ -130,17 +132,17 @@
                             </button>
                         </div>
                     </div>
-                    <form id="addIPForm">
+                    <hr>
+                    <h6>Blocked IP Settings</h6>
+                    <form id="blockedIPSettingsForm">
                         <div class="mb-3">
-                            <label for="newIPRange" class="form-label">IP Range (e.g., 192.168.1.0/24, 10.0.0.1)</label>
-                            <input type="text" class="form-control" id="newIPRange" placeholder="192.168.1.0/24" required>
+                            <label for="redirectUrl" class="form-label">Redirect URL for Blocked IPs</label>
+                            <input type="url" class="form-control" id="redirectUrl" placeholder="https://example.com/blocked">
+                            <small class="text-muted">Leave empty to show default blocked page</small>
                         </div>
-                        <div class="mb-3">
-                            <label for="newIPDescription" class="form-label">Description</label>
-                            <input type="text" class="form-control" id="newIPDescription" placeholder="Local network">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Add to Whitelist</button>
+                        <button type="submit" class="btn btn-primary">Save Settings</button>
                     </form>
+
                 </div>
             </div>
         </div>
@@ -281,7 +283,31 @@
             </div>
         </div>
     </div>
-</div>
+
+    <!-- Add IP Range Modal -->
+    <div class="modal fade" id="addIPModal" tabindex="-1" aria-labelledby="addIPModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addIPModalLabel">Add New IP Range</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addIPForm">
+                        <div class="mb-3">
+                            <label for="newIPRange" class="form-label">IP Range (e.g., 192.168.1.0/24, 10.0.0.1)</label>
+                            <input type="text" class="form-control" id="newIPRange" placeholder="192.168.1.0/24" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newIPDescription" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="newIPDescription" placeholder="Local network">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add to Whitelist</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -701,6 +727,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Handle add IP range button click
+    document.getElementById('addIPRangeBtn').addEventListener('click', function() {
+        const modal = new bootstrap.Modal(document.getElementById('addIPModal'));
+        modal.show();
+    });
+
     // Handle add IP form submission
     document.getElementById('addIPForm').addEventListener('submit', function(e) {
         e.preventDefault();
@@ -718,6 +750,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert(data.message || 'IP range added successfully');
                 // Clear form
                 document.getElementById('addIPForm').reset();
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('addIPModal'));
+                modal.hide();
                 // Refresh list
                 fetchIPWhitelist();
             } else {
@@ -753,9 +788,51 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Fetch and populate general settings
+    function fetchGeneralSettings() {
+        fetch('{{ base_url }}/api/settings', { credentials: 'include' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const settings = data.settings;
+                    document.getElementById('redirectUrl').value = settings.redirect_url || '';
+                }
+            })
+            .catch(() => {
+                console.error('Error fetching general settings');
+            });
+    }
+
+    // Handle blocked IP settings form submission
+    document.getElementById('blockedIPSettingsForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const redirectUrl = document.getElementById('redirectUrl').value;
+        const data = {
+            redirect_url: redirectUrl
+        };
+        fetch('{{ base_url }}/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('Settings saved successfully');
+            } else {
+                alert(data.message || 'Error saving settings');
+            }
+        })
+        .catch(() => {
+            alert('Error saving settings');
+        });
+    });
+
     // Initial fetch of IP whitelist and blocked logs
     fetchIPWhitelist();
     fetchBlockedLogs();
+    fetchGeneralSettings();
 
     // Handle agent config form submission
     document.getElementById('agentConfigForm').addEventListener('submit', function(e) {

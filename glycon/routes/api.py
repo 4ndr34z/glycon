@@ -2077,4 +2077,44 @@ def init_api_routes(app, socketio):
             app.logger.error(f"Error reactivating default subnets: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
+    @app.route('/api/settings', methods=['GET'])
+    @login_required
+    def get_settings():
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            c.execute("SELECT key, value FROM settings")
+            rows = c.fetchall()
+            settings = {row[0]: row[1] for row in rows}
+
+            conn.close()
+
+            return jsonify({'status': 'success', 'settings': settings})
+        except Exception as e:
+            app.logger.error(f"Error getting settings: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/settings', methods=['POST'])
+    @login_required
+    def update_settings():
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            for key, value in data.items():
+                c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+            conn.commit()
+            conn.close()
+
+            return jsonify({'status': 'success', 'message': 'Settings updated successfully'})
+        except Exception as e:
+            app.logger.error(f"Error updating settings: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
 

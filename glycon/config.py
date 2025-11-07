@@ -164,6 +164,14 @@ class Config:
             )
         ''')
 
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL UNIQUE,
+                value TEXT
+            )
+        ''')
+
         # Migrate blocked_logs table if it exists with old schema
         try:
             # Check if old columns exist
