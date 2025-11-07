@@ -4,6 +4,20 @@ import eventlet.wsgi
 from OpenSSL import SSL
 import os
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
+
+class FixedDispatcherMiddleware(DispatcherMiddleware):
+    def __call__(self, environ, start_response):
+        path = environ['PATH_INFO']
+        # Sort mounts by length descending to prioritize longer prefixes
+        sorted_mounts = sorted(self.mounts.items(), key=lambda x: len(x[0]), reverse=True)
+        for mount_point, app in sorted_mounts:
+            if path.startswith(mount_point):
+                environ['SCRIPT_NAME'] = mount_point
+                environ['PATH_INFO'] = path[len(mount_point):] or '/'
+                return app(environ, start_response)
+        # If no match, return 404
+        start_response('404 Not Found', [('Content-Type', 'text/plain')])
+        return [b'Not Found']
 import argparse
 
 if __name__ == "__main__":
@@ -33,8 +47,9 @@ if __name__ == "__main__":
 
     def run_http_server():
         if base_url:
-            # Mount app under base_url
-            prefixed_app = DispatcherMiddleware(app, {
+            # Mount app under both root (/) and base_url
+            prefixed_app = FixedDispatcherMiddleware(app, {
+                '/': app,
                 base_url: app
             })
             eventlet.wsgi.server(http_sock, prefixed_app, log_output=False)

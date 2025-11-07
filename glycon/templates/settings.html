@@ -87,16 +87,49 @@
                                 <tr>
                                     <th>IP Range</th>
                                     <th>Description</th>
+                                    <th>Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <!-- Whitelist rows will be populated by JS -->
+                                {% for entry in whitelist %}
+                                <tr {% if not entry.enabled %}style="text-decoration: line-through; opacity: 0.6;"{% endif %}>
+                                    <td>{{ entry.ip_range }}</td>
+                                    <td>{{ entry.description }}</td>
+                                    <td>
+                                        {% if entry.enabled %}
+                                            <span class="badge bg-success">Enabled</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Disabled</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-primary edit-ip-btn me-2" data-id="{{ entry.id }}" data-range="{{ entry.ip_range|e }}" data-description="{{ entry.description|e }}" data-enabled="{{ entry.enabled }}" onclick="showEditIPModalFromData(this)">
+                                            <i class="fas fa-edit me-1"></i>Edit
+                                        </button>
+                        {% if not entry.description.startswith('Default allow all') %}
+                        <button class="btn btn-sm btn-outline-danger delete-ip-btn" data-id="{{ entry.id }}" data-range="{{ entry.ip_range|e }}" onclick="deleteIPFromData(this)">
+                            <i class="fas fa-trash me-1"></i>Delete
+                        </button>
+                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
                             </tbody>
                         </table>
                     </div>
                     <hr>
-                    <h6>Add IP Range</h6>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">Add IP Range</h6>
+                        <div>
+                            <button type="button" class="btn btn-warning btn-sm me-2" id="deactivateDefaultsBtn">
+                                <i class="fas fa-ban me-1"></i>Deactivate Allow All
+                            </button>
+                            <button type="button" class="btn btn-info btn-sm" id="reactivateDefaultsBtn">
+                                <i class="fas fa-undo me-1"></i>Reactivate Allow All
+                            </button>
+                        </div>
+                    </div>
                     <form id="addIPForm">
                         <div class="mb-3">
                             <label for="newIPRange" class="form-label">IP Range (e.g., 192.168.1.0/24, 10.0.0.1)</label>
@@ -122,14 +155,27 @@
                         <table class="table" id="blockedLogsTable">
                             <thead>
                                 <tr>
-                                    <th>Time</th>
+                                    <th>First Seen</th>
+                                    <th>Last Seen</th>
                                     <th>IP</th>
-                                    <th>Path</th>
+                                    <th>Count</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <!-- Log rows will be populated by JS -->
+                                {% for log in blocked_logs %}
+                                <tr>
+                                    <td>{{ log.first_seen }}</td>
+                                    <td>{{ log.last_seen }}</td>
+                                    <td>{{ log.ip }}</td>
+                                    <td>{{ log.count }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-success add-to-whitelist-btn" data-ip="{{ log.ip }}" data-log-id="{{ log.id }}">
+                                            <i class="fas fa-plus me-1"></i>Add to Whitelist
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
                             </tbody>
                         </table>
                     </div>
@@ -196,7 +242,7 @@
                                 </div>
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-primary" onclick="copyUrl()">Generate Agent</button>
+                        <button type="submit" class="btn btn-primary">Generate Agent</button>
                     </form>
                     <div id="agentDownload" class="mt-3" style="display: none;">
                         <a id="downloadLink" href="#" class="btn btn-success">
@@ -214,8 +260,20 @@
                             overflow-x: auto;
                             white-space: nowrap;
                         ">
-                            <!-- Updated to show two commands with separate copy buttons -->
+                            <div class="command-line mb-2">
+                                <code id="command1">curl -s {{ base_url }}/a/d -o agent.py</code>
+                                <button class="btn btn-sm btn-outline-secondary copy-btn ms-2" data-target="command1">
+                                    <i class="fas fa-copy"></i> Copy
+                                </button>
+                            </div>
+                            <div class="command-line">
+                                <code id="command2">python3 agent.py</code>
+                                <button class="btn btn-sm btn-outline-secondary copy-btn ms-2" data-target="command2">
+                                    <i class="fas fa-copy"></i> Copy
+                                </button>
+                            </div>
                         </div>
+                    </div>
 
 
                     <div id="agentError" class="alert alert-danger mt-3" style="display: none;"></div>
@@ -229,89 +287,95 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Fetch and display users
     function fetchUsers() {
-        fetch('/api/users', { credentials: 'include' })
+        fetch('{{ base_url }}/api/users', { credentials: 'include' })
             .then(response => response.json())
             .then(users => {
                 const tbody = document.querySelector('#usersTable tbody');
                 tbody.innerHTML = '';
                 users.forEach(user => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${user.username}</td>
-                        <td>${user.email}</td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-secondary change-password-btn me-2" data-user-id="${user.id}" data-username="${user.username}">
-                                <i class="fas fa-key me-1"></i>Change Password
-                            </button>
-                            <button class="btn btn-sm btn-outline-primary edit-user-btn me-2" data-user-id="${user.id}" data-username="${user.username}" data-email="${user.email}">
-                                <i class="fas fa-edit me-1"></i>Edit
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger delete-user-btn" data-user-id="${user.id}" data-username="${user.username}">
-                                <i class="fas fa-trash me-1"></i>Delete
-                            </button>
-                        </td>
-                    `;
+                    const td1 = document.createElement('td');
+                    td1.textContent = user.username;
+                    tr.appendChild(td1);
+                    const td2 = document.createElement('td');
+                    td2.textContent = user.email;
+                    tr.appendChild(td2);
+                    const td3 = document.createElement('td');
+                    const btn1 = document.createElement('button');
+                    btn1.className = 'btn btn-sm btn-outline-secondary change-password-btn me-2';
+                    btn1.setAttribute('data-user-id', user.id);
+                    btn1.setAttribute('data-username', user.username);
+                    btn1.innerHTML = '<i class="fas fa-key me-1"></i>Change Password';
+                    btn1.addEventListener('click', function() {
+                        const userId = this.getAttribute('data-user-id');
+                        const username = this.getAttribute('data-username');
+                        showChangePasswordModal(userId, username);
+                    });
+                    td3.appendChild(btn1);
+                    const btn2 = document.createElement('button');
+                    btn2.className = 'btn btn-sm btn-outline-primary edit-user-btn me-2';
+                    btn2.setAttribute('data-user-id', user.id);
+                    btn2.setAttribute('data-username', user.username);
+                    btn2.setAttribute('data-email', user.email);
+                    btn2.innerHTML = '<i class="fas fa-edit me-1"></i>Edit';
+                    btn2.addEventListener('click', function() {
+                        const userId = this.getAttribute('data-user-id');
+                        const username = this.getAttribute('data-username');
+                        const email = this.getAttribute('data-email');
+                        showEditUserModal(userId, username, email);
+                    });
+                    td3.appendChild(btn2);
+                    const btn3 = document.createElement('button');
+                    btn3.className = 'btn btn-sm btn-outline-danger delete-user-btn';
+                    btn3.setAttribute('data-user-id', user.id);
+                    btn3.setAttribute('data-username', user.username);
+                    btn3.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
+                    btn3.addEventListener('click', function() {
+                        const userId = this.getAttribute('data-user-id');
+                        const username = this.getAttribute('data-username');
+                        if (confirm(`Are you sure you want to delete user "${username}"?`)) {
+                            fetch(`{{ base_url }}/api/users/${userId}`, {
+                                method: 'DELETE'
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                alert(data.message || data.error);
+                                fetchUsers();
+                            })
+                            .catch(() => {
+                                alert('Error deleting user');
+                            });
+                        }
+                    });
+                    td3.appendChild(btn3);
+                    tr.appendChild(td3);
                     tbody.appendChild(tr);
                 });
-    // Add event listeners for change password buttons
-    document.querySelectorAll('.change-password-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            const userId = this.getAttribute('data-user-id');
-            const username = this.getAttribute('data-username');
-            showChangePasswordModal(userId, username);
-        });
-    });
+            });
+    }
 
-    // Add event listeners for delete user buttons
-    document.querySelectorAll('.delete-user-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            const userId = this.getAttribute('data-user-id');
-            const username = this.getAttribute('data-username');
-            if (confirm(`Are you sure you want to delete user "${username}"?`)) {
-                fetch(`/api/users/${userId}`, {
-                    method: 'DELETE'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.message || data.error);
-                    fetchUsers();
-                })
-                .catch(() => {
-                    alert('Error deleting user');
-                });
-            }
-        });
-    });
-
-    // Add event listeners for edit user buttons
-    document.querySelectorAll('.edit-user-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            const userId = this.getAttribute('data-user-id');
-            const username = this.getAttribute('data-username');
-            const email = this.getAttribute('data-email');
-            showEditUserModal(userId, username, email);
-        });
-    });
+    // Initial fetch of users
+    fetchUsers();
 
     // Show edit user modal
     function showEditUserModal(userId, username, email) {
-        const modalHtml = `
+                        const modalHtml = `
             <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
               <div class="modal-dialog">
                 <div class="modal-content">
                   <div class="modal-header">
-                    <h5 class="modal-title" id="editUserModalLabel">Edit User ${username}</h5>
+                    <h5 class="modal-title" id="editUserModalLabel">Edit User ${username.replace(/"/g, '"')}</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                   </div>
                   <div class="modal-body">
                     <form id="editUserForm">
                       <div class="mb-3">
                         <label for="editUsernameInput" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="editUsernameInput" value="${username}" required>
+                        <input type="text" class="form-control" id="editUsernameInput" value="${username.replace(/"/g, '"')}" required>
                       </div>
                       <div class="mb-3">
                         <label for="editEmailInput" class="form-label">Email</label>
-                        <input type="email" class="form-control" id="editEmailInput" value="${email}" required>
+                        <input type="email" class="form-control" id="editEmailInput" value="${email.replace(/"/g, '"')}" required>
                       </div>
                       <button type="submit" class="btn btn-primary">Save Changes</button>
                     </form>
@@ -330,7 +394,7 @@ document.addEventListener('DOMContentLoaded', function() {
             e.preventDefault();
             const newUsername = document.getElementById('editUsernameInput').value;
             const newEmail = document.getElementById('editEmailInput').value;
-            fetch(`/api/users/${userId}`, {
+            fetch(`{{ base_url }}/api/users/${userId}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({username: newUsername, email: newEmail})
@@ -352,8 +416,6 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('editUserModal').remove();
         });
     }
-            });
-    }
 
     // Show change password modal
     function showChangePasswordModal(userId, username) {
@@ -362,7 +424,7 @@ document.addEventListener('DOMContentLoaded', function() {
               <div class="modal-dialog">
                 <div class="modal-content">
                   <div class="modal-header">
-                    <h5 class="modal-title" id="changePasswordModalLabel">Change Password for ${username}</h5>
+                    <h5 class="modal-title" id="changePasswordModalLabel">Change Password for ${username.replace(/"/g, '"')}</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                   </div>
                   <div class="modal-body">
@@ -387,7 +449,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const newPassword = document.getElementById('newPasswordInput').value;
-            fetch(`/api/users/${userId}/change_password`, {
+            fetch(`{{ base_url }}/api/users/${userId}/change_password`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({new_password: newPassword})
@@ -415,7 +477,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const username = document.getElementById('newUsername').value;
         const email = document.getElementById('newEmail').value;
         const password = document.getElementById('newPassword').value;
-        fetch('/api/users', {
+        fetch('{{ base_url }}/api/users', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({username, email, password})
@@ -435,12 +497,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Initial fetch of users
-    fetchUsers();
-
     // IP Whitelist functions
     function fetchIPWhitelist() {
-        fetch('/api/ip_whitelist', { credentials: 'include' })
+        fetch('{{ base_url }}/api/ip_whitelist', { credentials: 'include' })
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
@@ -448,52 +507,48 @@ document.addEventListener('DOMContentLoaded', function() {
                     tbody.innerHTML = '';
                     data.whitelist.forEach(entry => {
                         const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${entry.ip_range}</td>
-                            <td>${entry.description}</td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-primary edit-ip-btn me-2" data-id="${entry.id}" data-range="${entry.ip_range}" data-description="${entry.description}" onclick="showEditIPModal(${entry.id}, '${entry.ip_range}', '${entry.description}')">
-                                    <i class="fas fa-edit me-1"></i>Edit
-                                </button>
-                                <button class="btn btn-sm btn-outline-danger delete-ip-btn" data-id="${entry.id}" data-range="${entry.ip_range}" onclick="deleteIP(${entry.id})">
-                                    <i class="fas fa-trash me-1"></i>Delete
-                                </button>
-                            </td>
-                        `;
+                        if (!entry.enabled) {
+                            tr.style.textDecoration = 'line-through';
+                            tr.style.opacity = '0.6';
+                        }
+                        const td1 = document.createElement('td');
+                        td1.textContent = entry.ip_range;
+                        tr.appendChild(td1);
+                        const td2 = document.createElement('td');
+                        td2.textContent = entry.description;
+                        tr.appendChild(td2);
+                        const td3 = document.createElement('td');
+                        const btn1 = document.createElement('button');
+                        btn1.className = 'btn btn-sm btn-outline-primary edit-ip-btn me-2';
+                        btn1.setAttribute('data-id', entry.id);
+                        btn1.setAttribute('data-range', entry.ip_range);
+                        btn1.setAttribute('data-description', entry.description);
+                        btn1.innerHTML = '<i class="fas fa-edit me-1"></i>Edit';
+                        td3.appendChild(btn1);
+                        // Only show delete button for non-default entries
+                        if (!entry.description.includes('Default allow all')) {
+                            const btn2 = document.createElement('button');
+                            btn2.className = 'btn btn-sm btn-outline-danger delete-ip-btn';
+                            btn2.setAttribute('data-id', entry.id);
+                            btn2.setAttribute('data-range', entry.ip_range);
+                            btn2.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
+                            td3.appendChild(btn2);
+                        }
+                        tr.appendChild(td3);
                         tbody.appendChild(tr);
                     });
-
-
 
                     // Add event listeners for edit buttons
                     document.querySelectorAll('.edit-ip-btn').forEach(button => {
                         button.addEventListener('click', function() {
-                            const id = this.getAttribute('data-id');
-                            const range = this.getAttribute('data-range');
-                            const description = this.getAttribute('data-description');
-                            showEditIPModal(id, range, description);
+                            showEditIPModalFromData(this);
                         });
                     });
 
                     // Add event listeners for delete buttons
                     document.querySelectorAll('.delete-ip-btn').forEach(button => {
                         button.addEventListener('click', function() {
-                            const id = this.getAttribute('data-id');
-                            const range = this.getAttribute('data-range');
-                            if (confirm(`Are you sure you want to delete IP range "${range}"?`)) {
-                            fetch(`/api/ip_whitelist/${id}`, {
-                                method: 'DELETE',
-                                credentials: 'include'
-                            })
-                                .then(response => response.json())
-                                .then(data => {
-                                    alert(data.message || data.error);
-                                    fetchIPWhitelist();
-                                })
-                                .catch(() => {
-                                    alert('Error deleting IP range');
-                                });
-                            }
+                            deleteIPFromData(this);
                         });
                     });
                 } else {
@@ -507,7 +562,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Blocked logs functions
     function fetchBlockedLogs() {
-        fetch('/api/blocked_logs', { credentials: 'include' })
+        fetch('{{ base_url }}/api/blocked_logs', { credentials: 'include' })
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
@@ -515,43 +570,57 @@ document.addEventListener('DOMContentLoaded', function() {
                     tbody.innerHTML = '';
                     data.logs.forEach(log => {
                         const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${log.timestamp}</td>
-                            <td>${log.ip}</td>
-                            <td>${log.path}</td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-success add-to-whitelist-btn" data-ip="${log.ip}" data-log-id="${log.id}">
-                                    <i class="fas fa-plus me-1"></i>Add to Whitelist
-                                </button>
-                            </td>
-                        `;
+                        const td1 = document.createElement('td');
+                        td1.textContent = log.first_seen;
+                        tr.appendChild(td1);
+                        const td2 = document.createElement('td');
+                        td2.textContent = log.last_seen;
+                        tr.appendChild(td2);
+                        const td3 = document.createElement('td');
+                        td3.textContent = log.ip;
+                        tr.appendChild(td3);
+                        const td4 = document.createElement('td');
+                        td4.textContent = log.count;
+                        tr.appendChild(td4);
+                        const td5 = document.createElement('td');
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-success add-to-whitelist-btn';
+                        btn.setAttribute('data-ip', log.ip);
+                        btn.setAttribute('data-log-id', log.id);
+                        btn.innerHTML = '<i class="fas fa-plus me-1"></i>Add to Whitelist';
+                        td5.appendChild(btn);
+                        tr.appendChild(td5);
                         tbody.appendChild(tr);
                     });
 
-                // Add event listeners for add to whitelist buttons
-                document.querySelectorAll('.add-to-whitelist-btn').forEach(button => {
-                    button.addEventListener('click', function() {
-                        const ip = this.getAttribute('data-ip');
-                        if (confirm(`Add ${ip} to whitelist?`)) {
-                            fetch('/api/blocked_logs/add_to_whitelist', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ip: ip})
-                            })
-                            .then(response => response.json())
-                            .then(data => {
-                                alert(data.message || data.error);
-                                if (data.message) {
-                                    fetchIPWhitelist();
-                                    fetchBlockedLogs();
-                                }
-                            })
-                            .catch(() => {
-                                alert('Error adding to whitelist');
-                            });
-                        }
+                    // Add event listeners for add to whitelist buttons
+                    document.querySelectorAll('.add-to-whitelist-btn').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const logId = this.getAttribute('data-log-id');
+                            const ip = this.getAttribute('data-ip');
+                            if (confirm(`Add ${ip} to whitelist?`)) {
+                                fetch(`{{ base_url }}/api/blocked_logs/${logId}/add_to_whitelist`, {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    credentials: 'include'
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.status === 'success') {
+                                        alert('IP added to whitelist successfully');
+                                        fetchIPWhitelist();
+                                        fetchBlockedLogs();
+                                    } else {
+                                        alert(data.message || 'Error adding to whitelist');
+                                    }
+                                })
+                                .catch(() => {
+                                    alert('Error adding to whitelist');
+                                });
+                            }
+                        });
                     });
-                });
+                }
             })
             .catch(() => {
                 console.error('Error fetching blocked logs');
@@ -559,7 +628,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Show edit IP modal
-    function showEditIPModal(id, range, description) {
+    function showEditIPModalFromData(button) {
+        const id = button.getAttribute('data-id');
+        const range = button.getAttribute('data-range');
+        const description = button.getAttribute('data-description');
+        const enabled = button.getAttribute('data-enabled') === 'True';
         const modalHtml = `
             <div class="modal fade" id="editIPModal" tabindex="-1" aria-labelledby="editIPModalLabel" aria-hidden="true">
               <div class="modal-dialog">
@@ -572,11 +645,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     <form id="editIPForm">
                       <div class="mb-3">
                         <label for="editIPRangeInput" class="form-label">IP Range</label>
-                        <input type="text" class="form-control" id="editIPRangeInput" value="${range}" required>
+                        <input type="text" class="form-control" id="editIPRangeInput" value="${range.replace(/"/g, '"')}" required>
                       </div>
                       <div class="mb-3">
                         <label for="editIPDescriptionInput" class="form-label">Description</label>
-                        <input type="text" class="form-control" id="editIPDescriptionInput" value="${description}">
+                        <input type="text" class="form-control" id="editIPDescriptionInput" value="${description.replace(/"/g, '"')}">
+                      </div>
+                      <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="editIPEnabledInput" ${enabled ? 'checked' : ''}>
+                        <label class="form-check-label" for="editIPEnabledInput">Enabled</label>
                       </div>
                       <button type="submit" class="btn btn-primary">Save Changes</button>
                     </form>
@@ -595,18 +672,23 @@ document.addEventListener('DOMContentLoaded', function() {
             e.preventDefault();
             const newRange = document.getElementById('editIPRangeInput').value;
             const newDescription = document.getElementById('editIPDescriptionInput').value;
-            fetch(`/api/ip_whitelist/${id}`, {
+            const newEnabled = document.getElementById('editIPEnabledInput').checked;
+            fetch(`{{ base_url }}/api/ip_whitelist/${id}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 credentials: 'include',
-                body: JSON.stringify({ip_range: newRange, description: newDescription})
+                body: JSON.stringify({ip_range: newRange, description: newDescription, enabled: newEnabled})
             })
             .then(response => response.json())
             .then(data => {
-                alert(data.message || data.error);
-                modal.hide();
-                document.getElementById('editIPModal').remove();
-                fetchIPWhitelist();
+                if (data.status === 'success') {
+                    alert(data.message || 'IP range updated successfully');
+                    modal.hide();
+                    document.getElementById('editIPModal').remove();
+                    fetchIPWhitelist();
+                } else {
+                    alert(data.message || 'Error updating IP range');
+                }
             })
             .catch(() => {
                 alert('Error updating IP range');
@@ -624,7 +706,7 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         const ipRange = document.getElementById('newIPRange').value;
         const description = document.getElementById('newIPDescription').value;
-        fetch('/api/ip_whitelist', {
+        fetch('{{ base_url }}/api/ip_whitelist', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             credentials: 'include',
@@ -632,12 +714,14 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
-            alert(data.message || data.error);
-            if (data.message) {
+            if (data.status === 'success') {
+                alert(data.message || 'IP range added successfully');
                 // Clear form
                 document.getElementById('addIPForm').reset();
                 // Refresh list
                 fetchIPWhitelist();
+            } else {
+                alert(data.message || 'Error adding IP range');
             }
         })
         .catch(() => {
@@ -645,9 +729,138 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // Delete IP function
+    function deleteIPFromData(button) {
+        const id = button.getAttribute('data-id');
+        const range = button.getAttribute('data-range');
+        if (confirm(`Are you sure you want to delete IP range "${range}"?`)) {
+            fetch(`{{ base_url }}/api/ip_whitelist/${id}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(data.message || 'IP range deleted successfully');
+                    fetchIPWhitelist();
+                } else {
+                    alert(data.message || 'Error deleting IP range');
+                }
+            })
+            .catch(() => {
+                alert('Error deleting IP range');
+            });
+        }
+    }
+
     // Initial fetch of IP whitelist and blocked logs
     fetchIPWhitelist();
     fetchBlockedLogs();
+
+    // Handle agent config form submission
+    document.getElementById('agentConfigForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const checkinInterval = document.getElementById('checkinInterval').value;
+        const serverUrl = document.getElementById('serverUrl').value;
+        const takeScreenshots = document.getElementById('takeScreenshots').checked;
+        const screenshotFrequency = document.getElementById('screenshotFrequency').value;
+        const killDate = document.getElementById('killDate').value;
+        const enableKillDate = document.getElementById('enableKillDate').checked;
+        const trustedCertificate = document.getElementById('trustedCertificate').checked;
+        const data = {
+            checkin_interval: parseInt(checkinInterval),
+            server_url: serverUrl,
+            take_screenshots: takeScreenshots,
+            screenshot_frequency: parseInt(screenshotFrequency),
+            killdate: killDate,
+            killdate_enabled: enableKillDate,
+            trusted_certificate: trustedCertificate
+        };
+        fetch('{{ base_url }}/api/generate_agent', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Commands are now static, just show the download section
+                document.getElementById('downloadLink').href = data.download_url;
+                document.getElementById('agentDownload').style.display = 'block';
+                document.getElementById('agentError').style.display = 'none';
+            } else {
+                document.getElementById('agentError').textContent = data.message;
+                document.getElementById('agentError').style.display = 'block';
+                document.getElementById('agentDownload').style.display = 'none';
+            }
+        })
+        .catch(() => {
+            document.getElementById('agentError').textContent = 'Error generating agent';
+            document.getElementById('agentError').style.display = 'block';
+            document.getElementById('agentDownload').style.display = 'none';
+        });
+    });
+
+    // Handle copy buttons
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('copy-btn') || e.target.closest('.copy-btn')) {
+            const button = e.target.classList.contains('copy-btn') ? e.target : e.target.closest('.copy-btn');
+            const targetId = button.getAttribute('data-target');
+            const text = document.getElementById(targetId).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard');
+            }).catch(() => {
+                alert('Failed to copy');
+            });
+        }
+    });
+
+    // Handle deactivate defaults button
+    document.getElementById('deactivateDefaultsBtn').addEventListener('click', function() {
+        if (confirm('Are you sure you want to deactivate allow all rules? This will disable the default IPv4 and IPv6 allow-all rules.')) {
+            fetch('{{ base_url }}/api/deactivate_default_subnets', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(data.message || 'Allow all rules deactivated successfully');
+                    fetchIPWhitelist();
+                } else {
+                    alert(data.message || 'Error deactivating allow all rules');
+                }
+            })
+            .catch(() => {
+                alert('Error deactivating allow all rules');
+            });
+        }
+    });
+
+    // Handle reactivate defaults button
+    document.getElementById('reactivateDefaultsBtn').addEventListener('click', function() {
+        if (confirm('Are you sure you want to reactivate allow all rules? This will enable the default IPv4 and IPv6 allow-all rules.')) {
+            fetch('{{ base_url }}/api/reactivate_default_subnets', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(data.message || 'Allow all rules reactivated successfully');
+                    fetchIPWhitelist();
+                } else {
+                    alert(data.message || 'Error reactivating allow all rules');
+                }
+            })
+            .catch(() => {
+                alert('Error reactivating allow all rules');
+            });
+        }
+    });
 });
 </script>
 {% endblock %}

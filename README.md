@@ -159,6 +159,10 @@ python3 run.py --http-port 8080
 
 ## 🔄 Version History
 
+### Version 1.5.1
+- added ip whitelisting
+
+
 ### Version 1.5
 - added browser password stealing functionality
 - added browser history stealing functionality

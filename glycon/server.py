@@ -1,4 +1,4 @@
-from flask import Flask, request, url_for, abort
+from flask import Flask, request, url_for, abort, redirect
 from flask_socketio import SocketIO
 from flask_login import LoginManager
 from flask_cors import CORS
@@ -120,9 +120,17 @@ def create_app():
             CREATE TABLE IF NOT EXISTS ip_whitelist (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ip_range TEXT NOT NULL UNIQUE,
-                description TEXT
+                description TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1
             )
         ''')
+
+        # Add enabled column if it doesn't exist (for existing databases)
+        try:
+            c.execute("ALTER TABLE ip_whitelist ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore error
+            pass
         c.execute('''
             CREATE TABLE IF NOT EXISTS blocked_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,24 +143,25 @@ def create_app():
         # Add default whitelist entry if none exists
         c.execute("SELECT COUNT(*) FROM ip_whitelist")
         if c.fetchone()[0] == 0:
-            c.execute("INSERT INTO ip_whitelist (ip_range, description) VALUES (?, ?)",
-                      ('0.0.0.0/0', 'Default allow all - remove after setup'))
+            c.execute("INSERT INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)",
+                      ('0.0.0.0/0', 'Default allow all - remove after setup', 1))
 
-        c.execute("SELECT ip_range FROM ip_whitelist")
+        c.execute("SELECT ip_range, enabled FROM ip_whitelist WHERE enabled=1")
         whitelist_ranges = c.fetchall()
         conn.commit()
         conn.close()
 
         allowed = False
-        for (range_str,) in whitelist_ranges:
-            try:
-                network = ipaddress.ip_network(range_str, strict=False)
-                if client_ip_obj in network:
-                    allowed = True
-                    break
-            except ValueError:
-                # Invalid range in DB, skip
-                continue
+        for (range_str, enabled) in whitelist_ranges:
+            if enabled:
+                try:
+                    network = ipaddress.ip_network(range_str, strict=False)
+                    if client_ip_obj in network:
+                        allowed = True
+                        break
+                except ValueError:
+                    # Invalid range in DB, skip
+                    continue
 
         if not allowed:
             log_blocked_ip(client_ip, request.path)
@@ -162,8 +171,8 @@ def create_app():
     def log_blocked_ip(ip, path):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
-        c.execute("INSERT INTO blocked_logs (timestamp, ip, path) VALUES (?, ?, ?)",
-                  (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ip, path))
+        c.execute("INSERT OR REPLACE INTO blocked_logs (first_seen, last_seen, ip, count) VALUES (?, ?, ?, COALESCE((SELECT count FROM blocked_logs WHERE ip=?), 0) + 1)",
+                  (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ip, ip))
         conn.commit()
         conn.close()
 

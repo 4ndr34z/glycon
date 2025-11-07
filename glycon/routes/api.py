@@ -1173,10 +1173,19 @@ def init_api_routes(app, socketio):
             with open(agent_path, 'w') as f:
                 f.write(agent_code)
 
+            # Generate download URLs and commands
+            base_url = request.url_root.rstrip('/')
+            download_url = f"{base_url}/a/d"
+            command1 = f"curl -s {download_url} -o agent.py"
+            command2 = f"python3 agent.py"
+
             return jsonify({
                 "status": "success",
                 "message": "Agent configuration saved",
-                "config": config
+                "config": config,
+                "download_url": download_url,
+                "command1": command1,
+                "command2": command2
             })
 
         except Exception as e:
@@ -1831,23 +1840,25 @@ def init_api_routes(app, socketio):
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
 
-            # Ensure table exists
+            # Ensure table exists and has default entries
             c.execute('''
                 CREATE TABLE IF NOT EXISTS ip_whitelist (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ip_range TEXT NOT NULL UNIQUE,
-                    description TEXT
+                    description TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1
                 )
             ''')
 
-            c.execute("SELECT id, ip_range, description FROM ip_whitelist ORDER BY id")
+            c.execute("SELECT id, ip_range, description, enabled FROM ip_whitelist ORDER BY id")
             rows = c.fetchall()
             conn.close()
 
             whitelist = [{
                 'id': row[0],
                 'ip_range': row[1],
-                'description': row[2]
+                'description': row[2],
+                'enabled': bool(row[3])
             } for row in rows]
 
             return jsonify({'status': 'success', 'whitelist': whitelist})
@@ -1874,13 +1885,21 @@ def init_api_routes(app, socketio):
 
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
-            c.execute("INSERT INTO ip_whitelist (ip_range, description) VALUES (?, ?)",
-                      (ip_range, description))
+
+            # Check if IP range already exists
+            c.execute("SELECT id FROM ip_whitelist WHERE ip_range=?", (ip_range,))
+            existing = c.fetchone()
+            if existing:
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'IP range already exists in whitelist'}), 400
+
+            c.execute("INSERT INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)",
+                      (ip_range, description, 1))
             conn.commit()
             whitelist_id = c.lastrowid
             conn.close()
 
-            return jsonify({'status': 'success', 'id': whitelist_id})
+            return jsonify({'status': 'success', 'message': 'IP range added to whitelist', 'id': whitelist_id})
         except Exception as e:
             app.logger.error(f"Error adding IP to whitelist: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1913,18 +1932,21 @@ def init_api_routes(app, socketio):
                 return jsonify({'status': 'error', 'message': 'Whitelist entry not found'}), 404
 
             # Update
+            enabled = data.get('enabled', True)
             if ip_range and description:
-                c.execute("UPDATE ip_whitelist SET ip_range=?, description=? WHERE id=?",
-                          (ip_range, description, whitelist_id))
+                c.execute("UPDATE ip_whitelist SET ip_range=?, description=?, enabled=? WHERE id=?",
+                          (ip_range, description, int(enabled), whitelist_id))
             elif ip_range:
-                c.execute("UPDATE ip_whitelist SET ip_range=? WHERE id=?", (ip_range, whitelist_id))
+                c.execute("UPDATE ip_whitelist SET ip_range=?, enabled=? WHERE id=?", (ip_range, int(enabled), whitelist_id))
             elif description:
-                c.execute("UPDATE ip_whitelist SET description=? WHERE id=?", (description, whitelist_id))
+                c.execute("UPDATE ip_whitelist SET description=?, enabled=? WHERE id=?", (description, int(enabled), whitelist_id))
+            else:
+                c.execute("UPDATE ip_whitelist SET enabled=? WHERE id=?", (int(enabled), whitelist_id))
 
             conn.commit()
             conn.close()
 
-            return jsonify({'status': 'success'})
+            return jsonify({'status': 'success', 'message': 'IP whitelist entry updated'})
         except Exception as e:
             app.logger.error(f"Error updating IP whitelist: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1943,7 +1965,7 @@ def init_api_routes(app, socketio):
             if deleted == 0:
                 return jsonify({'status': 'error', 'message': 'Whitelist entry not found'}), 404
 
-            return jsonify({'status': 'success'})
+            return jsonify({'status': 'success', 'message': 'IP range deleted from whitelist'})
         except Exception as e:
             app.logger.error(f"Error deleting IP from whitelist: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1954,15 +1976,28 @@ def init_api_routes(app, socketio):
         try:
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
-            c.execute("SELECT id, timestamp, ip, path FROM blocked_logs ORDER BY timestamp DESC LIMIT 100")
+
+            # Ensure table exists
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS blocked_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    ip TEXT NOT NULL UNIQUE,
+                    count INTEGER NOT NULL DEFAULT 1
+                )
+            ''')
+
+            c.execute("SELECT id, first_seen, last_seen, ip, count FROM blocked_logs ORDER BY last_seen DESC LIMIT 100")
             rows = c.fetchall()
             conn.close()
 
             logs = [{
                 'id': row[0],
-                'timestamp': row[1],
-                'ip': row[2],
-                'path': row[3]
+                'first_seen': row[1],
+                'last_seen': row[2],
+                'ip': row[3],
+                'count': row[4]
             } for row in rows]
 
             return jsonify({'status': 'success', 'logs': logs})
@@ -1993,8 +2028,8 @@ def init_api_routes(app, socketio):
                 return jsonify({'status': 'error', 'message': 'IP already in whitelist'}), 400
 
             # Add to whitelist
-            c.execute("INSERT INTO ip_whitelist (ip_range, description) VALUES (?, ?)",
-                      (ip, f'Added from blocked log {log_id}'))
+            c.execute("INSERT INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)",
+                      (ip, f'Added from blocked log {log_id}', 1))
             conn.commit()
             whitelist_id = c.lastrowid
             conn.close()
@@ -2003,3 +2038,43 @@ def init_api_routes(app, socketio):
         except Exception as e:
             app.logger.error(f"Error adding blocked IP to whitelist: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/deactivate_default_subnets', methods=['POST'])
+    @login_required
+    def deactivate_default_subnets():
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            # Deactivate default allow all ranges
+            c.execute("UPDATE ip_whitelist SET enabled=0 WHERE ip_range IN (?, ?) AND description LIKE 'Default allow all%'",
+                      ("0.0.0.0/0", "::/0"))
+
+            conn.commit()
+            conn.close()
+
+            return jsonify({'status': 'success', 'message': 'Default subnets deactivated'})
+        except Exception as e:
+            app.logger.error(f"Error deactivating default subnets: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/reactivate_default_subnets', methods=['POST'])
+    @login_required
+    def reactivate_default_subnets():
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            # Reactivate default allow all ranges
+            c.execute("UPDATE ip_whitelist SET enabled=1 WHERE ip_range IN (?, ?) AND description LIKE 'Default allow all%'",
+                      ("0.0.0.0/0", "::/0"))
+
+            conn.commit()
+            conn.close()
+
+            return jsonify({'status': 'success', 'message': 'Default subnets reactivated'})
+        except Exception as e:
+            app.logger.error(f"Error reactivating default subnets: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+

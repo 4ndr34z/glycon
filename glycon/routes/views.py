@@ -8,7 +8,7 @@ from glycon.config import CONFIG
 def init_view_routes(app):
     @app.context_processor
     def inject_config():
-        return dict(config=CONFIG)
+        return dict(config=CONFIG, base_url=request.script_root)
     
     @app.route('/')
     @login_required
@@ -53,9 +53,62 @@ def init_view_routes(app):
     def settings():
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
+
+        # Ensure tables exist and have default data
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS ip_whitelist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_range TEXT NOT NULL UNIQUE,
+                description TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS blocked_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                ip TEXT NOT NULL UNIQUE,
+                count INTEGER NOT NULL DEFAULT 1
+            )
+        ''')
+
+        # Remove duplicates from ip_whitelist (keep the one with smallest id)
+        c.execute('''
+            DELETE FROM ip_whitelist
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM ip_whitelist
+                GROUP BY ip_range
+            )
+        ''')
+
         c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate
                      FROM agent_configurations ORDER BY id DESC LIMIT 1''')
         row = c.fetchone()
+
+        # Fetch IP whitelist
+        c.execute("SELECT id, ip_range, description, enabled FROM ip_whitelist ORDER BY id")
+        whitelist_rows = c.fetchall()
+        whitelist = [{
+            'id': row[0],
+            'ip_range': row[1],
+            'description': row[2],
+            'enabled': bool(row[3])
+        } for row in whitelist_rows]
+
+        # Fetch blocked logs
+        c.execute("SELECT id, first_seen, last_seen, ip, count FROM blocked_logs ORDER BY last_seen DESC LIMIT 100")
+        blocked_logs_rows = c.fetchall()
+        blocked_logs = [{
+            'id': row[0],
+            'first_seen': row[1],
+            'last_seen': row[2],
+            'ip': row[3],
+            'count': row[4]
+        } for row in blocked_logs_rows]
+
+        conn.commit()
         conn.close()
 
         agent_config = None
@@ -70,7 +123,7 @@ def init_view_routes(app):
                 'trusted_certificate': bool(row[6])
             }
 
-        return render_template('settings.html', CONFIG=CONFIG, agent_config=agent_config)
+        return render_template('settings.html', CONFIG=CONFIG, agent_config=agent_config, whitelist=whitelist, blocked_logs=blocked_logs)
 
     @app.route('/agents')
     @login_required

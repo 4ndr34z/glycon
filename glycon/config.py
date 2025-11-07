@@ -141,28 +141,70 @@ class Config:
         c.execute('''
             CREATE TABLE IF NOT EXISTS ip_whitelist (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ip_range TEXT NOT NULL,
-                description TEXT
+                ip_range TEXT NOT NULL UNIQUE,
+                description TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1
             )
         ''')
+
+        # Add enabled column if it doesn't exist (for existing databases)
+        try:
+            c.execute("ALTER TABLE ip_whitelist ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore error
+            pass
 
         c.execute('''
             CREATE TABLE IF NOT EXISTS blocked_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                ip TEXT NOT NULL,
-                path TEXT NOT NULL
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                ip TEXT NOT NULL UNIQUE,
+                count INTEGER NOT NULL DEFAULT 1
             )
         ''')
 
-        # Add default local subnet ranges if not exists
-        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("192.168.0.0/16", "Local subnet"))
-        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("10.0.0.0/8", "Local subnet"))
-        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("172.16.0.0/12", "Local subnet"))
+        # Migrate blocked_logs table if it exists with old schema
+        try:
+            # Check if old columns exist
+            c.execute("SELECT timestamp, ip, path FROM blocked_logs LIMIT 1")
+            old_rows = c.fetchall()
+            if old_rows:
+                # Create new table with correct schema
+                c.execute('''
+                    CREATE TABLE blocked_logs_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        ip TEXT NOT NULL UNIQUE,
+                        count INTEGER NOT NULL DEFAULT 1
+                    )
+                ''')
+                # Migrate data
+                for row in old_rows:
+                    timestamp, ip, path = row
+                    c.execute("INSERT OR IGNORE INTO blocked_logs_new (first_seen, last_seen, ip, count) VALUES (?, ?, ?, 1)",
+                             (timestamp, timestamp, ip))
+                # Replace table
+                c.execute("DROP TABLE blocked_logs")
+                c.execute("ALTER TABLE blocked_logs_new RENAME TO blocked_logs")
+        except sqlite3.OperationalError:
+            # Table doesn't exist or already migrated
+            pass
+
+        # Remove duplicates first (keep the one with smallest id)
+        c.execute('''
+            DELETE FROM ip_whitelist
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM ip_whitelist
+                GROUP BY ip_range
+            )
+        ''')
 
         # Always ensure default allow all is present
-        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("0.0.0.0/0", "Default allow all IPv4 - remove after setup"))
-        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description) VALUES (?, ?)", ("::/0", "Default allow all IPv6 - remove after setup"))
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)", ("0.0.0.0/0", "Default allow all IPv4 - remove after setup", 1))
+        c.execute("INSERT OR IGNORE INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)", ("::/0", "Default allow all IPv6 - remove after setup", 1))
 
         # Add default admin if not exists
         from werkzeug.security import generate_password_hash
