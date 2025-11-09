@@ -1,13 +1,14 @@
 ﻿from glycon.server import app, socketio
-import eventlet
-import eventlet.wsgi
-from OpenSSL import SSL
 import os
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
+import argparse
 
 class FixedDispatcherMiddleware(DispatcherMiddleware):
     def __call__(self, environ, start_response):
         path = environ['PATH_INFO']
+        # Allow Socket.IO paths to pass through to the main app
+        if path.startswith('/socket.io/'):
+            return self.app(environ, start_response)
         # Sort mounts by length descending to prioritize longer prefixes
         sorted_mounts = sorted(self.mounts.items(), key=lambda x: len(x[0]), reverse=True)
         for mount_point, app in sorted_mounts:
@@ -18,7 +19,21 @@ class FixedDispatcherMiddleware(DispatcherMiddleware):
         # If no match, return 404
         start_response('404 Not Found', [('Content-Type', 'text/plain')])
         return [b'Not Found']
-import argparse
+
+    @property
+    def debug(self):
+        # Return the debug attribute from the first mounted app that has it
+        for mount_point, app in self.mounts.items():
+            if hasattr(app, 'debug'):
+                return app.debug
+        return False
+
+    @debug.setter
+    def debug(self, value):
+        # Set the debug attribute on all mounted apps that have it
+        for mount_point, app in self.mounts.items():
+            if hasattr(app, 'debug'):
+                app.debug = value
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Glycon server with options for SSL and HTTP port.")
@@ -28,36 +43,18 @@ if __name__ == "__main__":
 
     base_url = os.getenv('BASE_URL', '').rstrip('/')
 
+    # Prepare the app for mounting
+    if base_url:
+        prefixed_app = FixedDispatcherMiddleware(app, {
+            '/': app,
+            base_url: app
+        })
+    else:
+        prefixed_app = app
+
     if not args.no_ssl:
-        # HTTPS Server (root /)
-        ssl_sock = eventlet.wrap_ssl(
-            eventlet.listen((app.config['HOST'], app.config['PORT'])),
-            certfile='cert.pem',
-            keyfile='key.pem',
-            server_side=True
-        )
+        # HTTPS Server
+        socketio.start_background_task(lambda: socketio.run(prefixed_app, host=app.config['HOST'], port=app.config['PORT'], ssl_context=('cert.pem', 'key.pem'), debug=False))
 
-        def run_https_server():
-            eventlet.wsgi.server(ssl_sock, app, log_output=False)
-
-        socketio.start_background_task(run_https_server)
-
-    # HTTP Server (with base URL)
-    http_sock = eventlet.listen((app.config['HOST'], args.http_port))
-
-    def run_http_server():
-        if base_url:
-            # Mount app under both root (/) and base_url
-            prefixed_app = FixedDispatcherMiddleware(app, {
-                '/': app,
-                base_url: app
-            })
-            eventlet.wsgi.server(http_sock, prefixed_app, log_output=False)
-        else:
-            eventlet.wsgi.server(http_sock, app, log_output=False)
-
-    socketio.start_background_task(run_http_server)
-
-    # Correct SocketIO configuration
-    socketio.run(app,
-                debug=app.config.get('DEBUG', False))
+    # HTTP Server
+    socketio.run(prefixed_app, host=app.config['HOST'], port=args.http_port, debug=False)

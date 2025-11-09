@@ -131,7 +131,6 @@ document.addEventListener('DOMContentLoaded', function() {
             reconnectionAttempts: 0, // Unlimited reconnection attempts
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            transports: ['websocket'],
             autoConnect: false,
             query: {
                 agent_id: '{{ agent.id }}'
@@ -143,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateConnectionStatus(true);
             socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
             socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
-            
+
             // Add waiting message if it doesn't exist
             if (!document.getElementById('waiting-message')) {
                 const waitingDiv = document.createElement('div');
@@ -154,8 +153,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 terminal.appendChild(waitingDiv);
                 terminal.scrollTop = terminal.scrollHeight;
             }
-
-
         });
 
         socket.on('reconnect', () => {
@@ -195,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentDir = normalizePath(data.current_dir);
                 updatePrompt();
             }
-            
+
             if (data.command) {
                 const commandDiv = document.createElement('div');
                 commandDiv.style.color = '#00ff00';
@@ -203,7 +200,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 commandDiv.textContent = `${getPrompt()} ${data.command}`;
                 terminal.appendChild(commandDiv);
             }
-            
+
             if (data.output) {
                 const outputDiv = document.createElement('div');
                 outputDiv.style.fontFamily = 'Consolas, monospace';
@@ -212,7 +209,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 outputDiv.textContent = cleanText(data.output);
                 terminal.appendChild(outputDiv);
             }
-            
+
             if (data.error) {
                 const errorDiv = document.createElement('div');
                 errorDiv.style.color = '#ff0000';
@@ -221,7 +218,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 errorDiv.textContent = cleanText(data.error);
                 terminal.appendChild(errorDiv);
             }
-            
+
             terminal.scrollTop = terminal.scrollHeight;
         });
 
