@@ -144,6 +144,7 @@ python3 run.py --http-port 8080
 ### Advanced Features
 - 🔐 **Dual Server Support** - HTTPS + HTTP simultaneous operation
 - 🛡️ **SSL/TLS Encryption** - Secure communications
+- 🛡️ **IP Whitelisting** - Restrict server access to specified IP addresses
 - 🌐 **Reverse Proxy Ready** - Base URL support for proxy deployments
 - ⏰ **Killdate Support** - Automatic agent self-destruction
 - 📊 **Agent Monitoring** - Real-time status and health checks
@@ -160,7 +161,8 @@ python3 run.py --http-port 8080
 ## 🔄 Version History
 
 ### Version 1.5.1
-- added ip whitelisting
+- Added IP whitelisting feature to restrict access to the C2 server based on allowed IP addresses.
+- If you lock yourself out, you can reset the whitelist by running: `sqlite3 c2.db "DELETE FROM ip_whitelist;"`
 
 
 ### Version 1.5
