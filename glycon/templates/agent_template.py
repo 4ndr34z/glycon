@@ -72,6 +72,27 @@ try:
     from Crypto.Util.Padding import pad, unpad
     import requests
     import pyautogui
+    pyautogui.FAILSAFE = False
+
+    # Calculate DPI scale factor for accurate mouse positioning on high DPI displays
+    def get_scale_factor():
+        try:
+            if platform.system() == 'Windows':
+                import ctypes
+                user32 = ctypes.windll.user32
+                physical_width = user32.GetSystemMetrics(0)
+                physical_height = user32.GetSystemMetrics(1)
+                virtual_width, virtual_height = pyautogui.size()
+                scale_x = physical_width / virtual_width
+                scale_y = physical_height / virtual_height
+                return scale_x, scale_y
+            else:
+                # For other platforms, assume 1:1 scaling
+                return 1.0, 1.0
+        except:
+            return 1.0, 1.0
+
+    SCALE_X, SCALE_Y = get_scale_factor()
     if platform.system() == 'Windows':
         import winreg
         from ctypes import wintypes
@@ -1676,6 +1697,9 @@ class RemoteDesktopHandler:
         self.screenshot_thread = None
         self.screenshot_running = False
         self.quality = 'medium'
+        self.screenshot_interval = 0.5  # Faster updates: 2 FPS instead of 1 FPS
+        self.last_screenshot_hash = None
+        self.skip_identical_frames = True
         self._setup_logger()
 
     def _setup_logger(self):
@@ -1687,29 +1711,34 @@ class RemoteDesktopHandler:
 
     def connect(self):
         try:
-            self.logger.info("Connecting to Remote Desktop WebSocket")
+            self.logger.info(f"Connecting to Remote Desktop WebSocket at {{self.server_url}}")
             self.socket = socketio.Client(
                 ssl_verify=False,
                 reconnection=True,
-                reconnection_attempts=0,  # Unlimited reconnection attempts
-                reconnection_delay=3000,
-                logger=True,
-                engineio_logger=True
+                reconnection_attempts=5,  # Limited reconnection attempts
+                reconnection_delay=2000,
+                logger=False,  # Disable verbose logging
+                engineio_logger=False
             )
 
             @self.socket.on('connect', namespace='/remote_desktop')
             def on_connect():
                 self.logger.info("Remote Desktop WebSocket connected")
-                auth_data = {{
-                    'agent_id': self.agent_id,
-                    'auth_token': self.crypto.encrypt({{
+                try:
+                    auth_data = {{
                         'agent_id': self.agent_id,
-                        'timestamp': int(time.time())
-                    }})
-                }}
-                self.socket.emit('agent_connect', auth_data, namespace='/remote_desktop')
-                self.connected = True
-                self.start_screenshot_stream()
+                        'auth_token': self.crypto.encrypt({{
+                            'agent_id': self.agent_id,
+                            'timestamp': int(time.time())
+                        }})
+                    }}
+                    self.socket.emit('agent_connect', auth_data, namespace='/remote_desktop')
+                    self.connected = True
+                    self.start_screenshot_stream()
+                    self.logger.info("Remote Desktop authentication sent and streaming started")
+                except Exception as auth_error:
+                    self.logger.error(f"Failed to authenticate: {{str(auth_error)}}")
+                    self.disconnect()
 
             @self.socket.on('disconnect', namespace='/remote_desktop')
             def on_disconnect():
@@ -1717,9 +1746,17 @@ class RemoteDesktopHandler:
                 self.connected = False
                 self.stop_screenshot_stream()
 
+            @self.socket.on('connect_error', namespace='/remote_desktop')
+            def on_connect_error(data):
+                self.logger.error(f"Remote Desktop connection error: {{data}}")
+                self.connected = False
+                self.stop_screenshot_stream()
+
             @self.socket.on('change_quality', namespace='/remote_desktop')
             def on_change_quality(data):
                 self.quality = data.get('quality', 'medium')
+                # Reset screenshot hash when quality changes to force update
+                self.last_screenshot_hash = None
                 self.logger.info(f"Quality changed to: {{self.quality}}")
 
             @self.socket.on('stop_screenshots', namespace='/remote_desktop')
@@ -1728,18 +1765,29 @@ class RemoteDesktopHandler:
                 self.stop_screenshot_stream()
                 self.connected = False
 
+            @self.socket.on('ping', namespace='/remote_desktop')
+            def on_ping(data):
+                # Respond to ping to keep connection alive
+                try:
+                    self.socket.emit('pong', {{'timestamp': int(time.time())}}, namespace='/remote_desktop')
+                except:
+                    pass
+
             @self.socket.on('mouse_move', namespace='/remote_desktop')
             def on_mouse_move(data):
                 try:
                     x = data.get('x')
                     y = data.get('y')
                     if x is not None and y is not None:
-                        # Clamp coordinates to screen size
+                        # Apply DPI scaling correction
+                        x_scaled = int(x * SCALE_X)
+                        y_scaled = int(y * SCALE_Y)
+                        # Clamp coordinates to screen size to prevent fail-safe
                         screen_width, screen_height = pyautogui.size()
-                        x = max(0, min(int(x), screen_width - 1))
-                        y = max(0, min(int(y), screen_height - 1))
-                        pyautogui.moveTo(x, y)
-                        self.logger.debug(f"Mouse moved to ({{x}}, {{y}})")
+                        x_scaled = max(0, min(x_scaled, screen_width - 1))
+                        y_scaled = max(0, min(y_scaled, screen_height - 1))
+                        pyautogui.moveTo(x_scaled, y_scaled)
+                        self.logger.debug(f"Mouse moved to ({{x_scaled}}, {{y_scaled}}) [original: ({{x}}, {{y}})]")
                 except Exception as e:
                     self.logger.error(f"Mouse move failed: {{str(e)}}")
 
@@ -1750,12 +1798,15 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     button = data.get('button', 'left')
                     if x is not None and y is not None:
-                        # Clamp coordinates to screen size
+                        # Apply DPI scaling correction
+                        x_scaled = int(x * SCALE_X)
+                        y_scaled = int(y * SCALE_Y)
+                        # Clamp coordinates to screen size to prevent fail-safe
                         screen_width, screen_height = pyautogui.size()
-                        x = max(0, min(int(x), screen_width - 1))
-                        y = max(0, min(int(y), screen_height - 1))
-                        pyautogui.click(x, y, button=button)
-                        self.logger.debug(f"Mouse clicked at ({{x}}, {{y}}) with {{button}} button")
+                        x_scaled = max(0, min(x_scaled, screen_width - 1))
+                        y_scaled = max(0, min(y_scaled, screen_height - 1))
+                        pyautogui.click(x_scaled, y_scaled, button=button)
+                        self.logger.debug(f"Mouse clicked at ({{x_scaled}}, {{y_scaled}}) [original: ({{x}}, {{y}})] with {{button}} button")
                 except Exception as e:
                     self.logger.error(f"Mouse click failed: {{str(e)}}")
 
@@ -1766,16 +1817,19 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     direction = data.get('direction', 'down')
                     if x is not None and y is not None:
-                        # Clamp coordinates to screen size
+                        # Apply DPI scaling correction
+                        x_scaled = int(x * SCALE_X)
+                        y_scaled = int(y * SCALE_Y)
+                        # Clamp coordinates to screen size to prevent fail-safe
                         screen_width, screen_height = pyautogui.size()
-                        x = max(0, min(int(x), screen_width - 1))
-                        y = max(0, min(int(y), screen_height - 1))
+                        x_scaled = max(0, min(x_scaled, screen_width - 1))
+                        y_scaled = max(0, min(y_scaled, screen_height - 1))
                         # Move mouse to position first
-                        pyautogui.moveTo(x, y)
+                        pyautogui.moveTo(x_scaled, y_scaled)
                         # Scroll: positive for up, negative for down
                         clicks = 3 if direction == 'down' else -3
-                        pyautogui.scroll(clicks, x, y)
-                        self.logger.debug(f"Mouse scrolled {{direction}} at ({{x}}, {{y}})")
+                        pyautogui.scroll(clicks, x_scaled, y_scaled)
+                        self.logger.debug(f"Mouse scrolled {{direction}} at ({{x_scaled}}, {{y_scaled}}) [original: ({{x}}, {{y}})]")
                 except Exception as e:
                     self.logger.error(f"Mouse scroll failed: {{str(e)}}")
 
@@ -1842,8 +1896,16 @@ class RemoteDesktopHandler:
             # Parse server_url to separate base URL and socket.io path
             from urllib.parse import urlparse
             parsed_url = urlparse(self.server_url)
-            base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
-            socketio_path = f"{{parsed_url.path}}/socket.io" if parsed_url.path and parsed_url.path != '/' else '/socket.io'
+            if parsed_url.path and parsed_url.path != '/':
+                # If there's a path, include it in base_url and use default socketio_path
+                base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}{{parsed_url.path}}"
+                socketio_path = '/socket.io'
+            else:
+                # No path, use default
+                base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
+                socketio_path = '/socket.io'
+
+            self.logger.info(f"Connecting to base_url: {{base_url}}, socketio_path: {{socketio_path}}")
 
             self.socket.connect(
                 base_url,
@@ -1852,7 +1914,8 @@ class RemoteDesktopHandler:
                     'User-Agent': self.config.USER_AGENT,
                     'X-Agent-ID': self.agent_id
                 }},
-                namespaces=['/remote_desktop']
+                namespaces=['/remote_desktop'],
+                transports=['websocket', 'polling']  # Allow fallback to polling
             )
 
             return True
@@ -1871,8 +1934,10 @@ class RemoteDesktopHandler:
 
     def stop_screenshot_stream(self):
         self.screenshot_running = False
-        if self.screenshot_thread:
-            self.screenshot_thread.join(timeout=1)
+        if self.screenshot_thread and self.screenshot_thread.is_alive():
+            self.screenshot_thread.join(timeout=2)  # Increased timeout
+            if self.screenshot_thread.is_alive():
+                self.logger.warning("Screenshot thread did not stop gracefully")
             self.screenshot_thread = None
         self.logger.info("Screenshot stream stopped")
 
@@ -1881,87 +1946,99 @@ class RemoteDesktopHandler:
             try:
                 screenshot_data = self._take_screenshot()
                 if screenshot_data and self.socket and self.connected:
-                    self.socket.emit('screenshot_update', {{
-                        'agent_id': self.agent_id,
-                        'screenshot': screenshot_data
-                    }}, namespace='/remote_desktop')
-                time.sleep(1)  # Send screenshot every second
+                    # Skip identical frames if enabled
+                    if self.skip_identical_frames:
+                        current_hash = hash(screenshot_data)
+                        if current_hash == self.last_screenshot_hash:
+                            time.sleep(self.screenshot_interval)
+                            continue
+                        self.last_screenshot_hash = current_hash
+
+                    # Check if socket is still connected before emitting
+                    if self.socket and self.socket.connected:
+                        try:
+                            self.socket.emit('screenshot_update', {{
+                                'agent_id': self.agent_id,
+                                'screenshot': screenshot_data
+                            }}, namespace='/remote_desktop')
+                        except Exception as emit_error:
+                            self.logger.warning(f"Screenshot emit failed: {{str(emit_error)}}")
+                            # If emit fails, stop the loop to prevent hanging
+                            break
+                    else:
+                        self.logger.warning("Socket not connected, stopping screenshot loop")
+                        break
+                time.sleep(self.screenshot_interval)
             except Exception as e:
                 self.logger.error(f"Screenshot loop error: {{str(e)}}")
-                time.sleep(2)
+                time.sleep(self.screenshot_interval)
 
     def _take_screenshot(self):
-        """Take screenshot using pyautogui with mss fallback"""
+        """Take screenshot using optimized MSS for better performance"""
         try:
-            # Try pyautogui first
+            # Use MSS directly for better performance
+            import mss
+            import mss.tools
+
+            with mss.mss() as sct:
+                monitor = sct.monitors[0]  # Primary monitor
+                screenshot = sct.grab(monitor)
+
+                # Apply quality settings to raw pixels for better performance
+                if self.quality == 'low':
+                    # Convert to PIL Image and resize to 50%
+                    img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                    new_width = int(img.width * 0.5)
+                    new_height = int(img.height * 0.5)
+                    img = img.resize((new_width, new_height), Image.LANCZOS)
+                    buffered = io.BytesIO()
+                    img.save(buffered, format="JPEG", quality=60, optimize=True)
+                    buffered.seek(0)
+                    return base64.b64encode(buffered.read()).decode('utf-8')
+                elif self.quality == 'high':
+                    # Convert directly to PNG for high quality (better compression than JPEG for screenshots)
+                    png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
+                    return base64.b64encode(png_bytes).decode('utf-8')
+                else:  # medium
+                    # Convert to PIL Image and resize to 75%
+                    img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                    new_width = int(img.width * 0.75)
+                    new_height = int(img.height * 0.75)
+                    img = img.resize((new_width, new_height), Image.LANCZOS)
+                    buffered = io.BytesIO()
+                    img.save(buffered, format="JPEG", quality=70, optimize=True)
+                    buffered.seek(0)
+                    return base64.b64encode(buffered.read()).decode('utf-8')
+
+        except ImportError:
+            # Fallback to pyautogui if MSS not available
+            self.logger.warning("MSS not available, falling back to pyautogui")
             try:
                 screenshot = pyautogui.screenshot()
 
                 # Apply quality settings
                 if self.quality == 'low':
-                    # Resize to 50% for low quality
                     new_width = int(screenshot.width * 0.5)
                     new_height = int(screenshot.height * 0.5)
                     screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
+                    buffered = io.BytesIO()
+                    screenshot.save(buffered, format="JPEG", quality=60, optimize=True)
                 elif self.quality == 'high':
-                    # Keep original size for high quality
-                    pass
+                    buffered = io.BytesIO()
+                    screenshot.save(buffered, format="PNG", optimize=True)
                 else:  # medium
-                    # Resize to 75% for medium quality
                     new_width = int(screenshot.width * 0.75)
                     new_height = int(screenshot.height * 0.75)
                     screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
+                    buffered = io.BytesIO()
+                    screenshot.save(buffered, format="JPEG", quality=70, optimize=True)
 
-                buffered = io.BytesIO()
-                screenshot.save(buffered, format="JPEG", quality=70)
                 buffered.seek(0)
                 return base64.b64encode(buffered.read()).decode('utf-8')
 
             except Exception as e:
-                self.logger.warning(f"PyAutoGUI screenshot failed: {{str(e)}}, trying MSS fallback")
-
-                # Fallback to MSS
-                try:
-                    import mss
-                    import mss.tools
-
-                    with mss.mss() as sct:
-                        monitor = sct.monitors[0]  # Primary monitor
-                        screenshot = sct.grab(monitor)
-
-                        # Apply quality settings to raw pixels
-                        if self.quality == 'low':
-                            # Convert to PIL Image and resize
-                            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-                            new_width = int(img.width * 0.5)
-                            new_height = int(img.height * 0.5)
-                            img = img.resize((new_width, new_height), Image.LANCZOS)
-                            buffered = io.BytesIO()
-                            img.save(buffered, format="PNG", optimize=True)
-                            buffered.seek(0)
-                            return base64.b64encode(buffered.read()).decode('utf-8')
-                        elif self.quality == 'high':
-                            # Convert directly to PNG
-                            png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
-                            return base64.b64encode(png_bytes).decode('utf-8')
-                        else:  # medium
-                            # Convert to PIL Image and resize to 75%
-                            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-                            new_width = int(img.width * 0.75)
-                            new_height = int(img.height * 0.75)
-                            img = img.resize((new_width, new_height), Image.LANCZOS)
-                            buffered = io.BytesIO()
-                            img.save(buffered, format="JPEG", quality=70)
-                            buffered.seek(0)
-                            return base64.b64encode(buffered.read()).decode('utf-8')
-
-                except ImportError:
-                    self.logger.error("MSS not available for screenshot fallback")
-                    return None
-                except Exception as mss_error:
-                    self.logger.error(f"MSS screenshot failed: {{str(mss_error)}}")
-                    return None
-
+                self.logger.error(f"PyAutoGUI screenshot failed: {{str(e)}}")
+                return None
         except Exception as e:
             self.logger.error(f"Unexpected error during screenshot capture: {{str(e)}}")
             return None

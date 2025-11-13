@@ -126,22 +126,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getImageCoordinates(clientX, clientY) {
-        if (!imageRect) {
-            imageRect = screenshotImg.getBoundingClientRect();
-        }
+        const divRect = remoteDesktop.getBoundingClientRect();
+        const imgRect = screenshotImg.getBoundingClientRect();
 
-        const scaleX = screenshotImg.naturalWidth / imageRect.width;
-        const scaleY = screenshotImg.naturalHeight / imageRect.height;
+        // Position relative to the image
+        const xImg = clientX - imgRect.left;
+        const yImg = clientY - imgRect.top;
 
-        const x = Math.round((clientX - imageRect.left) * scaleX);
-        const y = Math.round((clientY - imageRect.top) * scaleY);
+        const scaleX = screenshotImg.naturalWidth / imgRect.width;
+        const scaleY = screenshotImg.naturalHeight / imgRect.height;
+
+        // Calculate coordinates on original screen
+        const x = Math.round(xImg * scaleX);
+        const y = Math.round(yImg * scaleY);
 
         return { x, y };
     }
 
-    function updateMouseCursor(x, y) {
-        mouseCursor.style.left = (x - 8) + 'px';
-        mouseCursor.style.top = (y - 8) + 'px';
+    function updateMouseCursor(x, y, imgRect, divRect) {
+        // Position the cursor dot relative to the div, accounting for image position
+        mouseCursor.style.left = (imgRect.left - divRect.left + x) + 'px';
+        mouseCursor.style.top = (imgRect.top - divRect.top + y) + 'px';
+        mouseCursor.style.display = 'block';
     }
 
     function initializeSocket() {
@@ -238,8 +244,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!isControlling || !socket) return;
 
         const coords = getImageCoordinates(e.clientX, e.clientY);
-        updateMouseCursor(e.clientX, e.clientY);
 
+        // Update cursor position relative to the image within the div
+        const imgRect = screenshotImg.getBoundingClientRect();
+        const divRect = remoteDesktop.getBoundingClientRect();
+        updateMouseCursor(e.clientX - imgRect.left, e.clientY - imgRect.top, imgRect, divRect);
+
+        // Send coordinates to agent
         socket.emit('mouse_move', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
