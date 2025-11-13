@@ -1734,6 +1734,10 @@ class RemoteDesktopHandler:
                     x = data.get('x')
                     y = data.get('y')
                     if x is not None and y is not None:
+                        # Clamp coordinates to screen size
+                        screen_width, screen_height = pyautogui.size()
+                        x = max(0, min(int(x), screen_width - 1))
+                        y = max(0, min(int(y), screen_height - 1))
                         pyautogui.moveTo(x, y)
                         self.logger.debug(f"Mouse moved to ({{x}}, {{y}})")
                 except Exception as e:
@@ -1746,6 +1750,10 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     button = data.get('button', 'left')
                     if x is not None and y is not None:
+                        # Clamp coordinates to screen size
+                        screen_width, screen_height = pyautogui.size()
+                        x = max(0, min(int(x), screen_width - 1))
+                        y = max(0, min(int(y), screen_height - 1))
                         pyautogui.click(x, y, button=button)
                         self.logger.debug(f"Mouse clicked at ({{x}}, {{y}}) with {{button}} button")
                 except Exception as e:
@@ -1758,6 +1766,10 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     direction = data.get('direction', 'down')
                     if x is not None and y is not None:
+                        # Clamp coordinates to screen size
+                        screen_width, screen_height = pyautogui.size()
+                        x = max(0, min(int(x), screen_width - 1))
+                        y = max(0, min(int(y), screen_height - 1))
                         # Move mouse to position first
                         pyautogui.moveTo(x, y)
                         # Scroll: positive for up, negative for down
@@ -1783,6 +1795,20 @@ class RemoteDesktopHandler:
                             pyautogui.press('esc')
                         elif key == ' ':
                             pyautogui.press('space')
+                        elif key == 'ArrowUp':
+                            pyautogui.press('up')
+                        elif key == 'ArrowDown':
+                            pyautogui.press('down')
+                        elif key == 'ArrowLeft':
+                            pyautogui.press('left')
+                        elif key == 'ArrowRight':
+                            pyautogui.press('right')
+                        elif key == 'Shift':
+                            pyautogui.keyDown('shift')
+                        elif key == 'Control':
+                            pyautogui.keyDown('ctrl')
+                        elif key == 'Alt':
+                            pyautogui.keyDown('alt')
                         elif len(key) == 1:
                             # Regular character
                             pyautogui.press(key)
@@ -1801,8 +1827,14 @@ class RemoteDesktopHandler:
                 try:
                     key = data.get('key')
                     if key:
-                        # For most keys, release is handled automatically by press
-                        # Only special handling needed for modifier keys if required
+                        # Handle key releases for modifiers
+                        if key == 'Shift':
+                            pyautogui.keyUp('shift')
+                        elif key == 'Control':
+                            pyautogui.keyUp('ctrl')
+                        elif key == 'Alt':
+                            pyautogui.keyUp('alt')
+                        # For other keys, release is handled automatically
                         self.logger.debug(f"Key released: {{key}}")
                 except Exception as e:
                     self.logger.error(f"Keyboard release failed: {{str(e)}}")

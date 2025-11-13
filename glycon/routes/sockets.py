@@ -379,6 +379,11 @@ def init_socket_handlers(socketio):
                 conn.commit()
                 conn.close()
 
+                # Emit stop_screenshots to agent to stop immediately
+                emit('stop_screenshots', {
+                    'agent_id': agent_id
+                }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
                 # Emit disconnect events
                 emit('status', {
                     'status': 'disconnected',
