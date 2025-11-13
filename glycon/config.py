@@ -40,6 +40,7 @@ class Config:
                 status TEXT,
                 privilege TEXT,
                 ws_connected INTEGER DEFAULT 0,
+                rd_connected INTEGER DEFAULT 0,
                 killdate TEXT DEFAULT NULL,
                 checkin_interval INTEGER DEFAULT 10
             )

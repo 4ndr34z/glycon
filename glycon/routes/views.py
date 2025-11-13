@@ -4,12 +4,14 @@ import sqlite3
 import io, json
 from datetime import datetime
 from glycon.config import CONFIG
+import os
 
 def init_view_routes(app):
     @app.context_processor
     def inject_config():
-        return dict(config=CONFIG, base_url=request.script_root)
+        return dict(config=CONFIG, base_url='')
     
+    @app.route('/8b7c6/')
     @app.route('/')
     @login_required
     def dashboard():
@@ -131,7 +133,7 @@ def init_view_routes(app):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
         c.execute("SELECT * FROM agents ORDER BY last_seen DESC")
-        agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'killdate', 'checkin_interval'], row)) 
+        agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'rd_connected', 'killdate', 'checkin_interval'], row))
                   for row in c.fetchall()]
 
         c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate
@@ -165,7 +167,7 @@ def init_view_routes(app):
             flash("Agent not found", "danger")
             return redirect(url_for('agents'))
         
-        agent = dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'killdate', 'checkin_interval'], agent_data))
+        agent = dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'rd_connected', 'killdate', 'checkin_interval'], agent_data))
         
         c.execute("SELECT * FROM tasks WHERE agent_id=? ORDER BY created_at DESC LIMIT 20", (agent_id,))
         tasks = [dict(zip(['id', 'agent_id', 'task_type', 'task_data', 'status', 'created_at', 'completed_at'], row)) 
@@ -194,11 +196,11 @@ def init_view_routes(app):
         c.execute("SELECT * FROM agents WHERE id=?", (agent_id,))
         agent_data = c.fetchone()
         conn.close()
-        
+
         if not agent_data:
             flash("Agent not found", "danger")
             return redirect(url_for('agents'))
-        
+
         agent = {
             'id': agent_data[0],
             'hostname': agent_data[1],
@@ -207,10 +209,36 @@ def init_view_routes(app):
             'last_seen': agent_data[4],
             'status': agent_data[5],
             'privilege': agent_data[6],
-            'ws_connected': False  # We'll update this later with actual status
+            'rd_connected': agent_data[8] if len(agent_data) > 8 else False  # rd_connected field
         }
-        
+
         return render_template('terminal.html', agent=agent)
+
+    @app.route('/remote_desktop/<agent_id>')
+    @login_required
+    def remote_desktop(agent_id):
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        c.execute("SELECT * FROM agents WHERE id=?", (agent_id,))
+        agent_data = c.fetchone()
+        conn.close()
+
+        if not agent_data:
+            flash("Agent not found", "danger")
+            return redirect(url_for('agents'))
+
+        agent = {
+            'id': agent_data[0],
+            'hostname': agent_data[1],
+            'ip': agent_data[2],
+            'os': agent_data[3],
+            'last_seen': agent_data[4],
+            'status': agent_data[5],
+            'privilege': agent_data[6],
+            'rd_connected': agent_data[8] if len(agent_data) > 8 else False  # rd_connected field
+        }
+
+        return render_template('remote_desktop.html', agent=agent)
 
     @app.route('/screenshot/<int:screenshot_id>')
     @login_required

@@ -6,7 +6,7 @@ import argparse
 class FixedDispatcherMiddleware(DispatcherMiddleware):
     def __call__(self, environ, start_response):
         path = environ['PATH_INFO']
-        # Allow Socket.IO paths to pass through to the main app
+        # Allow Socket.IO paths to pass through to the main app regardless of BASE_URL
         if path.startswith('/socket.io/'):
             return self.app(environ, start_response)
         # Sort mounts by length descending to prioritize longer prefixes

