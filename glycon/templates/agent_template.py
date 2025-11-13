@@ -1728,10 +1728,84 @@ class RemoteDesktopHandler:
                 self.stop_screenshot_stream()
                 self.connected = False
 
-            @self.socket.on('change_quality', namespace='/remote_desktop')
-            def on_change_quality(data):
-                self.quality = data.get('quality', 'medium')
-                self.logger.info(f"Quality changed to: {{self.quality}}")
+            @self.socket.on('mouse_move', namespace='/remote_desktop')
+            def on_mouse_move(data):
+                try:
+                    x = data.get('x')
+                    y = data.get('y')
+                    if x is not None and y is not None:
+                        pyautogui.moveTo(x, y)
+                        self.logger.debug(f"Mouse moved to ({{x}}, {{y}})")
+                except Exception as e:
+                    self.logger.error(f"Mouse move failed: {{str(e)}}")
+
+            @self.socket.on('mouse_click', namespace='/remote_desktop')
+            def on_mouse_click(data):
+                try:
+                    x = data.get('x')
+                    y = data.get('y')
+                    button = data.get('button', 'left')
+                    if x is not None and y is not None:
+                        pyautogui.click(x, y, button=button)
+                        self.logger.debug(f"Mouse clicked at ({{x}}, {{y}}) with {{button}} button")
+                except Exception as e:
+                    self.logger.error(f"Mouse click failed: {{str(e)}}")
+
+            @self.socket.on('mouse_scroll', namespace='/remote_desktop')
+            def on_mouse_scroll(data):
+                try:
+                    x = data.get('x')
+                    y = data.get('y')
+                    direction = data.get('direction', 'down')
+                    if x is not None and y is not None:
+                        # Move mouse to position first
+                        pyautogui.moveTo(x, y)
+                        # Scroll: positive for up, negative for down
+                        clicks = 3 if direction == 'down' else -3
+                        pyautogui.scroll(clicks, x, y)
+                        self.logger.debug(f"Mouse scrolled {{direction}} at ({{x}}, {{y}})")
+                except Exception as e:
+                    self.logger.error(f"Mouse scroll failed: {{str(e)}}")
+
+            @self.socket.on('keyboard_press', namespace='/remote_desktop')
+            def on_keyboard_press(data):
+                try:
+                    key = data.get('key')
+                    if key:
+                        # Handle special keys
+                        if key == 'Enter':
+                            pyautogui.press('enter')
+                        elif key == 'Backspace':
+                            pyautogui.press('backspace')
+                        elif key == 'Tab':
+                            pyautogui.press('tab')
+                        elif key == 'Escape':
+                            pyautogui.press('esc')
+                        elif key == ' ':
+                            pyautogui.press('space')
+                        elif len(key) == 1:
+                            # Regular character
+                            pyautogui.press(key)
+                        else:
+                            # Try to handle as special key
+                            try:
+                                pyautogui.press(key.lower())
+                            except:
+                                self.logger.warning(f"Unknown key: {{key}}")
+                        self.logger.debug(f"Key pressed: {{key}}")
+                except Exception as e:
+                    self.logger.error(f"Keyboard press failed: {{str(e)}}")
+
+            @self.socket.on('keyboard_release', namespace='/remote_desktop')
+            def on_keyboard_release(data):
+                try:
+                    key = data.get('key')
+                    if key:
+                        # For most keys, release is handled automatically by press
+                        # Only special handling needed for modifier keys if required
+                        self.logger.debug(f"Key released: {{key}}")
+                except Exception as e:
+                    self.logger.error(f"Keyboard release failed: {{str(e)}}")
 
             # Parse server_url to separate base URL and socket.io path
             from urllib.parse import urlparse
