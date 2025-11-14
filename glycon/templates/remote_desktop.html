@@ -95,6 +95,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentQuality = 'medium';
     let isControlling = false;
     let imageRect = null;
+    let scale_factors = null;
+    let screen_info = null;
 
     function updateConnectionStatus(connected) {
         isConnected = connected;
@@ -133,18 +135,30 @@ document.addEventListener('DOMContentLoaded', function() {
         const xImg = clientX - imgRect.left;
         const yImg = clientY - imgRect.top;
 
+        // Calculate coordinates on virtual screen (what pyautogui sees)
         const scaleX = screenshotImg.naturalWidth / imgRect.width;
         const scaleY = screenshotImg.naturalHeight / imgRect.height;
 
-        // Calculate coordinates on original screen
-        const x = Math.round(xImg * scaleX);
-        const y = Math.round(yImg * scaleY);
+        const virtualX = Math.round(xImg * scaleX);
+        const virtualY = Math.round(yImg * scaleY);
 
-        return { x, y };
+        // Apply DPI scaling to get physical coordinates
+        let physicalX = Math.round(virtualX * (screen_info ? screen_info.scale_x : 1));
+        let physicalY = Math.round(virtualY * (screen_info ? screen_info.scale_y : 1));
+
+        // Apply progressive correction to align click with cursor
+        const correctionFactor = 0.35; // Reduced factor
+        const correctionX = physicalX * correctionFactor;
+        const correctionY = physicalY * correctionFactor;
+        physicalX += correctionX;
+        physicalY += correctionY;
+
+        return { x: physicalX, y: physicalY };
     }
 
     function updateMouseCursor(x, y, imgRect, divRect) {
         // Position the cursor dot relative to the div, accounting for image position
+        // x, y are display coordinates (relative to image)
         mouseCursor.style.left = (imgRect.left - divRect.left + x) + 'px';
         mouseCursor.style.top = (imgRect.top - divRect.top + y) + 'px';
         mouseCursor.style.display = 'block';
@@ -226,6 +240,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateConnectionStatus(false);
             }
         });
+
+        socket.on('scale_factors', function(data) {
+            console.log('[Remote Desktop] Scale factors received:', data);
+            scale_factors = data;
+        });
+
+        socket.on('screen_info', function(data) {
+            console.log('[Remote Desktop] Screen info received:', data);
+            screen_info = data;
+        });
+
+        socket.on('mouse_position', function(data) {
+            if (data.x !== undefined && data.y !== undefined && screen_info) {
+                // Convert physical coordinates back to display coordinates for cursor
+                const imgRect = screenshotImg.getBoundingClientRect();
+                const divRect = remoteDesktop.getBoundingClientRect();
+                const scaleX = screenshotImg.naturalWidth / imgRect.width;
+                const scaleY = screenshotImg.naturalHeight / imgRect.height;
+
+                // Physical coordinates are already scaled, convert to display
+                let displayX = data.x / scaleX;
+                let displayY = data.y / scaleY;
+
+                // Apply progressive correction to align cursor with click
+                const correctionFactor = 0.35; // Reduced factor
+                const correctionX = displayX * correctionFactor;
+                const correctionY = displayY * correctionFactor;
+                displayX -= correctionX;
+                displayY -= correctionY;
+
+                updateMouseCursor(displayX, displayY, imgRect, divRect);
+            }
+        });
     }
 
     function showAlert(message, type = 'info') {
@@ -245,17 +292,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const coords = getImageCoordinates(e.clientX, e.clientY);
 
-        // Update cursor position relative to the image within the div
-        const imgRect = screenshotImg.getBoundingClientRect();
-        const divRect = remoteDesktop.getBoundingClientRect();
-        updateMouseCursor(e.clientX - imgRect.left, e.clientY - imgRect.top, imgRect, divRect);
-
-        // Send coordinates to agent
+        // Send physical coordinates to agent
         socket.emit('mouse_move', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
             y: coords.y
         });
+
+        // Update cursor position locally
+        const imgRect = screenshotImg.getBoundingClientRect();
+        const divRect = remoteDesktop.getBoundingClientRect();
+        updateMouseCursor(e.clientX - imgRect.left, e.clientY - imgRect.top, imgRect, divRect);
     }
 
     function handleMouseClick(e) {
@@ -265,6 +312,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const coords = getImageCoordinates(e.clientX, e.clientY);
         const button = e.button === 2 ? 'right' : 'left';
 
+        // Send click with physical coordinates
         socket.emit('mouse_click', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
@@ -280,6 +328,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const coords = getImageCoordinates(e.clientX, e.clientY);
         const delta = e.deltaY > 0 ? 'down' : 'up';
 
+        // Send scroll with physical coordinates
         socket.emit('mouse_scroll', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
