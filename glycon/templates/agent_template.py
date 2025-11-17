@@ -1799,15 +1799,21 @@ class RemoteDesktopHandler:
                     x = data.get('x')
                     y = data.get('y')
                     if x is not None and y is not None:
-                        # Apply DPI scaling correction (multiply to convert from virtual to physical)
-                        x_scaled = int(x * SCALE_X)
-                        y_scaled = int(y * SCALE_Y)
-                        # Clamp coordinates to screen size to prevent fail-safe
+                        # Frontend sends coordinates in screenshot resolution
+                        # These coordinates should match pyautogui.size() exactly
+                        x_screen = int(x)
+                        y_screen = int(y)
+                        
+                        # Get actual screen size
                         screen_width, screen_height = pyautogui.size()
-                        x_scaled = max(0, min(x_scaled, screen_width - 1))
-                        y_scaled = max(0, min(y_scaled, screen_height - 1))
-                        pyautogui.moveTo(x_scaled, y_scaled)
-                        self.logger.debug(f"Mouse moved to ({{x_scaled}}, {{y_scaled}}) [original: ({{x}}, {{y}})]")
+                        
+                        # Clamp coordinates to screen bounds
+                        x_screen = max(0, min(x_screen, screen_width - 1))
+                        y_screen = max(0, min(y_screen, screen_height - 1))
+                        
+                        # Move mouse directly - no scaling needed
+                        pyautogui.moveTo(x_screen, y_screen)
+                        self.logger.debug(f"Mouse moved to ({{x_screen}}, {{y_screen}}) [screen: {{screen_width}}x{{screen_height}}]")
                 except Exception as e:
                     self.logger.error(f"Mouse move failed: {{str(e)}}")
 
@@ -1818,15 +1824,20 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     button = data.get('button', 'left')
                     if x is not None and y is not None:
-                        # Apply DPI scaling correction (multiply to convert from virtual to physical)
-                        x_scaled = int(x * SCALE_X)
-                        y_scaled = int(y * SCALE_Y)
-                        # Clamp coordinates to screen size to prevent fail-safe
+                        # Frontend sends coordinates in screenshot resolution
+                        x_screen = int(x)
+                        y_screen = int(y)
+                        
+                        # Get actual screen size
                         screen_width, screen_height = pyautogui.size()
-                        x_scaled = max(0, min(x_scaled, screen_width - 1))
-                        y_scaled = max(0, min(y_scaled, screen_height - 1))
-                        pyautogui.click(x_scaled, y_scaled, button=button)
-                        self.logger.debug(f"Mouse clicked at ({{x_scaled}}, {{y_scaled}}) [original: ({{x}}, {{y}})] with {{button}} button")
+                        
+                        # Clamp coordinates to screen bounds
+                        x_screen = max(0, min(x_screen, screen_width - 1))
+                        y_screen = max(0, min(y_screen, screen_height - 1))
+                        
+                        # Click directly - no scaling needed
+                        pyautogui.click(x_screen, y_screen, button=button)
+                        self.logger.debug(f"Mouse clicked at ({{x_screen}}, {{y_screen}}) with {{button}} button [screen: {{screen_width}}x{{screen_height}}]")
                 except Exception as e:
                     self.logger.error(f"Mouse click failed: {{str(e)}}")
 
@@ -1837,19 +1848,24 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     direction = data.get('direction', 'down')
                     if x is not None and y is not None:
-                        # Apply DPI scaling correction (multiply to convert from virtual to physical)
-                        x_scaled = int(x * SCALE_X)
-                        y_scaled = int(y * SCALE_Y)
-                        # Clamp coordinates to screen size to prevent fail-safe
+                        # Frontend sends coordinates in screenshot resolution
+                        x_screen = int(x)
+                        y_screen = int(y)
+                        
+                        # Get actual screen size
                         screen_width, screen_height = pyautogui.size()
-                        x_scaled = max(0, min(x_scaled, screen_width - 1))
-                        y_scaled = max(0, min(y_scaled, screen_height - 1))
+                        
+                        # Clamp coordinates to screen bounds
+                        x_screen = max(0, min(x_screen, screen_width - 1))
+                        y_screen = max(0, min(y_screen, screen_height - 1))
+                        
                         # Move mouse to position first
-                        pyautogui.moveTo(x_scaled, y_scaled)
+                        pyautogui.moveTo(x_screen, y_screen)
+                        
                         # Scroll: positive for up, negative for down
                         clicks = 3 if direction == 'down' else -3
-                        pyautogui.scroll(clicks, x_scaled, y_scaled)
-                        self.logger.debug(f"Mouse scrolled {{direction}} at ({{x_scaled}}, {{y_scaled}}) [original: ({{x}}, {{y}})]")
+                        pyautogui.scroll(clicks, x_screen, y_screen)
+                        self.logger.debug(f"Mouse scrolled {{direction}} at ({{x_screen}}, {{y_screen}}) [screen: {{screen_width}}x{{screen_height}}]")
                 except Exception as e:
                     self.logger.error(f"Mouse scroll failed: {{str(e)}}")
 

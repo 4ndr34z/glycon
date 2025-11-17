@@ -136,24 +136,41 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function getImageCoordinates(clientX, clientY) {
         const imgRect = screenshotImg.getBoundingClientRect();
-        const divRect = remoteDesktop.getBoundingClientRect();
 
-        // Position relative to the image
+        // Position relative to the image (in browser pixels)
         const xImg = clientX - imgRect.left;
         const yImg = clientY - imgRect.top;
 
-        // Calculate coordinates on virtual screen
-        const scaleX = screenshotImg.naturalWidth / imgRect.width;
-        const scaleY = screenshotImg.naturalHeight / imgRect.height;
+        // Use actual screen resolution from screen_info if available
+        let actualScreenWidth, actualScreenHeight;
+        
+        if (screen_info && screen_info.width && screen_info.height) {
+            // Use screen_info if available
+            actualScreenWidth = screen_info.width;
+            actualScreenHeight = screen_info.height;
+        } else {
+            // Fallback: Calculate from naturalWidth/Height and quality setting
+            // Medium quality = 75% of original, so multiply by 1.333 (4/3)
+            // Low quality = 50% of original, so multiply by 2
+            // High quality = 100% of original, so multiply by 1
+            const qualityFactor = currentQuality === 'low' ? 2.0 : (currentQuality === 'high' ? 1.0 : 1.3333);
+            actualScreenWidth = Math.round(screenshotImg.naturalWidth * qualityFactor);
+            actualScreenHeight = Math.round(screenshotImg.naturalHeight * qualityFactor);
+            console.log(`[Coordinates] Using fallback calculation: naturalWidth=${screenshotImg.naturalWidth}, quality=${currentQuality}, factor=${qualityFactor}`);
+        }
 
-        const virtualX = Math.round(xImg * scaleX);
-        const virtualY = Math.round(yImg * scaleY);
+        // Calculate scale factors between displayed image and actual screen resolution
+        const scaleX = actualScreenWidth / imgRect.width;
+        const scaleY = actualScreenHeight / imgRect.height;
 
-        // Apply DPI scaling to get physical coordinates
-        let physicalX = Math.round(virtualX * (screen_info ? screen_info.scale_x : 1));
-        let physicalY = Math.round(virtualY * (screen_info ? screen_info.scale_y : 1));
+        // Convert browser coordinates to actual screen coordinates
+        const screenX = Math.round(xImg * scaleX);
+        const screenY = Math.round(yImg * scaleY);
 
-        return { x: physicalX, y: physicalY };
+        console.log(`[Coordinates] Display: (${Math.round(xImg)}, ${Math.round(yImg)}) -> Screen: (${screenX}, ${screenY}) [Display: ${Math.round(imgRect.width)}x${Math.round(imgRect.height)}, Screen: ${actualScreenWidth}x${actualScreenHeight}]`);
+
+        // Return coordinates in actual screen resolution
+        return { x: screenX, y: screenY };
     }
 
     function updateMouseCursor(x, y, imgRect, divRect) {
@@ -259,6 +276,7 @@ document.addEventListener('DOMContentLoaded', function() {
         socket.on('screen_info', function(data) {
             console.log('[Remote Desktop] Screen info received:', data);
             screen_info = data;
+            console.log('[Remote Desktop] Screen info set - width:', screen_info.width, 'height:', screen_info.height);
         });
 
         socket.on('mouse_position', function(data) {
