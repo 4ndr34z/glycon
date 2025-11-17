@@ -97,6 +97,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let imageRect = null;
     let scale_factors = null;
     let screen_info = null;
+    let autoReconnectTimeout = null;
 
     function updateConnectionStatus(connected) {
         isConnected = connected;
@@ -111,6 +112,12 @@ document.addEventListener('DOMContentLoaded', function() {
             screenshotImg.style.display = 'block';
             mouseCursor.style.display = 'block';
             isControlling = true;
+            
+            // Clear any pending auto-reconnect
+            if (autoReconnectTimeout) {
+                clearTimeout(autoReconnectTimeout);
+                autoReconnectTimeout = null;
+            }
         } else {
             rdConnectionStatus.textContent = 'Disconnected';
             rdConnectionStatus.className = 'badge bg-danger me-2';
@@ -128,14 +135,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getImageCoordinates(clientX, clientY) {
-        const divRect = remoteDesktop.getBoundingClientRect();
         const imgRect = screenshotImg.getBoundingClientRect();
+        const divRect = remoteDesktop.getBoundingClientRect();
 
         // Position relative to the image
         const xImg = clientX - imgRect.left;
         const yImg = clientY - imgRect.top;
 
-        // Calculate coordinates on virtual screen (what pyautogui sees)
+        // Calculate coordinates on virtual screen
         const scaleX = screenshotImg.naturalWidth / imgRect.width;
         const scaleY = screenshotImg.naturalHeight / imgRect.height;
 
@@ -145,13 +152,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Apply DPI scaling to get physical coordinates
         let physicalX = Math.round(virtualX * (screen_info ? screen_info.scale_x : 1));
         let physicalY = Math.round(virtualY * (screen_info ? screen_info.scale_y : 1));
-
-        // Apply progressive correction to align click with cursor
-        const correctionFactor = 0.35; // Reduced factor
-        const correctionX = physicalX * correctionFactor;
-        const correctionY = physicalY * correctionFactor;
-        physicalX += correctionX;
-        physicalY += correctionY;
 
         return { x: physicalX, y: physicalY };
     }
@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         socket = io('/remote_desktop', {
-            reconnectionAttempts: 0, // Unlimited reconnection attempts
+            reconnectionAttempts: 5,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
             autoConnect: false,
@@ -201,9 +201,19 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        socket.on('disconnect', function() {
-            console.log('[Remote Desktop] Socket disconnected');
+        socket.on('disconnect', function(reason) {
+            console.log('[Remote Desktop] Socket disconnected:', reason);
             updateConnectionStatus(false);
+            
+            // Auto-reconnect after delay if it was an unexpected disconnect
+            if (reason !== 'io client disconnect' && reason !== 'io server disconnect') {
+                autoReconnectTimeout = setTimeout(() => {
+                    if (!isConnected) {
+                        console.log('[Remote Desktop] Attempting auto-reconnect...');
+                        socket.connect();
+                    }
+                }, 5000);
+            }
         });
 
         socket.on('connect_error', function(error) {
@@ -263,16 +273,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 let displayX = data.x / scaleX;
                 let displayY = data.y / scaleY;
 
-                // Apply progressive correction to align cursor with click
-                const correctionFactor = 0.35; // Reduced factor
-                const correctionX = displayX * correctionFactor;
-                const correctionY = displayY * correctionFactor;
-                displayX -= correctionX;
-                displayY -= correctionY;
-
                 updateMouseCursor(displayX, displayY, imgRect, divRect);
             }
         });
+
+        // Add ping/pong for connection health
+        setInterval(() => {
+            if (socket && socket.connected) {
+                socket.emit('ping', { timestamp: Date.now() });
+            }
+        }, 30000);
     }
 
     function showAlert(message, type = 'info') {

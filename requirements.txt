@@ -3,6 +3,7 @@ azure-core==1.33.0
 azure-identity==1.13.0
 azure-mgmt-core==1.5.0
 azure-mgmt-resource==23.0.1
+azure-storage-blob
 bidict==0.23.1
 blinker==1.9.0
 certifi==2025.1.31

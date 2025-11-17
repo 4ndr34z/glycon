@@ -123,7 +123,6 @@ except ImportError as e:
 
 # ======================
 # Configuration
-# Importaint! The config class needs to have single curly braces. Everything else should have double, to escape the jinja rendering.
 # ======================
 class Config:
     def __init__(self):
@@ -1684,7 +1683,7 @@ if platform.system() == 'Windows':
 
 
 # ======================
-# Remote Desktop Handler
+# Remote Desktop Handler (FIXED VERSION)
 # ======================
 class RemoteDesktopHandler:
     def __init__(self, agent_id, crypto, server_url, config):
@@ -1734,6 +1733,27 @@ class RemoteDesktopHandler:
                     }}
                     self.socket.emit('agent_connect', auth_data, namespace='/remote_desktop')
                     self.connected = True
+                    
+                    # Send screen information immediately after connection (FIXED)
+                    try:
+                        screen_width, screen_height = pyautogui.size()
+                        self.socket.emit('screen_info', {{
+                            'agent_id': self.agent_id,
+                            'width': screen_width,
+                            'height': screen_height,
+                            'scale_x': SCALE_X,
+                            'scale_y': SCALE_Y
+                        }}, namespace='/remote_desktop')
+                        
+                        self.socket.emit('scale_factors', {{
+                            'agent_id': self.agent_id,
+                            'scale_x': SCALE_X,
+                            'scale_y': SCALE_Y
+                        }}, namespace='/remote_desktop')
+                        self.logger.info("Screen info sent to remote desktop")
+                    except Exception as screen_error:
+                        self.logger.error(f"Failed to send screen info: {{str(screen_error)}}")
+                    
                     self.start_screenshot_stream()
                     self.logger.info("Remote Desktop authentication sent and streaming started")
                 except Exception as auth_error:
@@ -1779,7 +1799,7 @@ class RemoteDesktopHandler:
                     x = data.get('x')
                     y = data.get('y')
                     if x is not None and y is not None:
-                        # Apply DPI scaling correction
+                        # Apply DPI scaling correction (multiply to convert from virtual to physical)
                         x_scaled = int(x * SCALE_X)
                         y_scaled = int(y * SCALE_Y)
                         # Clamp coordinates to screen size to prevent fail-safe
@@ -1798,7 +1818,7 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     button = data.get('button', 'left')
                     if x is not None and y is not None:
-                        # Apply DPI scaling correction
+                        # Apply DPI scaling correction (multiply to convert from virtual to physical)
                         x_scaled = int(x * SCALE_X)
                         y_scaled = int(y * SCALE_Y)
                         # Clamp coordinates to screen size to prevent fail-safe
@@ -1817,7 +1837,7 @@ class RemoteDesktopHandler:
                     y = data.get('y')
                     direction = data.get('direction', 'down')
                     if x is not None and y is not None:
-                        # Apply DPI scaling correction
+                        # Apply DPI scaling correction (multiply to convert from virtual to physical)
                         x_scaled = int(x * SCALE_X)
                         y_scaled = int(y * SCALE_Y)
                         # Clamp coordinates to screen size to prevent fail-safe
@@ -1942,6 +1962,9 @@ class RemoteDesktopHandler:
         self.logger.info("Screenshot stream stopped")
 
     def _screenshot_loop(self):
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
         while self.screenshot_running and self.connected:
             try:
                 screenshot_data = self._take_screenshot()
@@ -1961,16 +1984,23 @@ class RemoteDesktopHandler:
                                 'agent_id': self.agent_id,
                                 'screenshot': screenshot_data
                             }}, namespace='/remote_desktop')
+                            consecutive_errors = 0  # Reset error counter on success
                         except Exception as emit_error:
-                            self.logger.warning(f"Screenshot emit failed: {{str(emit_error)}}")
-                            # If emit fails, stop the loop to prevent hanging
-                            break
+                            consecutive_errors += 1
+                            self.logger.warning(f"Screenshot emit failed ({{consecutive_errors}}/5): {{str(emit_error)}}")
+                            if consecutive_errors >= max_consecutive_errors:
+                                self.logger.error("Too many consecutive errors, stopping screenshot loop")
+                                break
                     else:
                         self.logger.warning("Socket not connected, stopping screenshot loop")
                         break
                 time.sleep(self.screenshot_interval)
             except Exception as e:
-                self.logger.error(f"Screenshot loop error: {{str(e)}}")
+                consecutive_errors += 1
+                self.logger.error(f"Screenshot loop error ({{consecutive_errors}}/5): {{str(e)}}")
+                if consecutive_errors >= max_consecutive_errors:
+                    self.logger.error("Too many consecutive errors, stopping screenshot loop")
+                    break
                 time.sleep(self.screenshot_interval)
 
     def _take_screenshot(self):
