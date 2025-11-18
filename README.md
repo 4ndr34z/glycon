@@ -160,6 +160,9 @@ python3 run.py --http-port 8080
 
 ## 🔄 Version History
 
+### Version 1.5.2
+- Developed a "Remote Desktop" prototype to serve as a high-impact presentation asset for engaging management and securing buy-in.  
+
 ### Version 1.5.1
 - Added IP whitelisting feature to restrict access to the C2 server based on allowed IP addresses.
 - If you lock yourself out, you can reset the whitelist by running: `sqlite3 c2.db "DELETE FROM ip_whitelist;"`

@@ -243,6 +243,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.screenshot) {
                 screenshotImg.src = 'data:image/png;base64,' + data.screenshot;
                 lastUpdate.textContent = new Date().toLocaleTimeString();
+                // Remove waiting message when first screenshot arrives
+                const waitingMsg = document.getElementById('waiting-message');
+                if (waitingMsg) {
+                    waitingMsg.remove();
+                }
                 // Update image rect when screenshot changes
                 setTimeout(() => {
                     imageRect = screenshotImg.getBoundingClientRect();
@@ -420,6 +425,18 @@ document.addEventListener('DOMContentLoaded', function() {
             screenshotImg.src = '';
             lastUpdate.textContent = 'Connecting...';
 
+            // Show waiting message
+            const waitingDiv = document.createElement('div');
+            waitingDiv.id = 'waiting-message';
+            waitingDiv.style.color = '#ffff00';
+            waitingDiv.style.fontFamily = 'Consolas, monospace';
+            waitingDiv.textContent = 'Waiting for beacon connection...';
+            waitingDiv.style.position = 'absolute';
+            waitingDiv.style.top = '50%';
+            waitingDiv.style.left = '50%';
+            waitingDiv.style.transform = 'translate(-50%, -50%)';
+            document.getElementById('remote-desktop').appendChild(waitingDiv);
+
             fetch('/api/task', {
                 method: 'POST',
                 headers: {
@@ -440,6 +457,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     showAlert('Failed to start Remote Desktop: ' + (data.message || 'Unknown error'), 'danger');
                     lastUpdate.textContent = 'Never';
+                    // Remove waiting message on failure
+                    const waitingMsg = document.getElementById('waiting-message');
+                    if (waitingMsg) {
+                        waitingMsg.remove();
+                    }
                 }
             });
         }
@@ -464,14 +486,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (isConnected) {
         socket.connect();
-    } else {
-        // Add waiting message if not connected
-        const waitingDiv = document.createElement('div');
-        waitingDiv.id = 'waiting-message';
-        waitingDiv.style.color = '#ffff00';
-        waitingDiv.style.fontFamily = 'Consolas, monospace';
-        waitingDiv.textContent = 'Waiting for beacon connection...';
-        document.getElementById('remote-desktop').appendChild(waitingDiv);
     }
 });
 </script>

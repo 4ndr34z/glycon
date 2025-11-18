@@ -5,7 +5,14 @@ import sqlite3
 from datetime import datetime
 import json
 import os
+import logging
 from glycon.secure_comms import SecureComms
+
+# Suppress SocketIO packet logs
+logging.getLogger('socketio').setLevel(logging.CRITICAL)
+logging.getLogger('engineio').setLevel(logging.CRITICAL)
+logging.getLogger('socketio.server').setLevel(logging.CRITICAL)
+logging.getLogger('engineio.server').setLevel(logging.CRITICAL)
 
 def init_socket_handlers(socketio):
     active_agents = {}
@@ -513,7 +520,6 @@ def init_socket_handlers(socketio):
             return
         # Allow screenshot updates from any agent that is connected to remote_desktop namespace
         # The agent should have been authenticated when it connected
-        print(f"[SocketIO] Forwarding screenshot update from agent {agent_id}")
         # Forward the screenshot to the remote desktop UI room
         emit('screenshot_update', data, room=f"remote_desktop_{agent_id}", namespace='/remote_desktop')
 
@@ -541,7 +547,6 @@ def init_socket_handlers(socketio):
             if not agent_id or x is None or y is None:
                 print("[SocketIO] mouse_move event missing agent_id, x, or y")
                 return
-            print(f"[SocketIO] Forwarding mouse move to agent {agent_id}: ({x}, {y})")
             emit('mouse_move', {
                 'x': x,
                 'y': y,
@@ -558,7 +563,6 @@ def init_socket_handlers(socketio):
             if not agent_id or x is None or y is None:
                 print("[SocketIO] mouse_click event missing agent_id, x, or y")
                 return
-            print(f"[SocketIO] Forwarding mouse click to agent {agent_id}: ({x}, {y}) button={button}")
             emit('mouse_click', {
                 'x': x,
                 'y': y,
@@ -576,7 +580,6 @@ def init_socket_handlers(socketio):
             if not agent_id or x is None or y is None:
                 print("[SocketIO] mouse_scroll event missing agent_id, x, or y")
                 return
-            print(f"[SocketIO] Forwarding mouse scroll to agent {agent_id}: ({x}, {y}) direction={direction}")
             emit('mouse_scroll', {
                 'x': x,
                 'y': y,

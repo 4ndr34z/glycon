@@ -1969,10 +1969,12 @@ class RemoteDesktopHandler:
         self.logger.info("Screenshot stream started")
 
     def stop_screenshot_stream(self):
+        if not self.screenshot_running:
+            return
         self.screenshot_running = False
         if self.screenshot_thread and self.screenshot_thread.is_alive():
             self.screenshot_thread.join(timeout=2)  # Increased timeout
-            if self.screenshot_thread.is_alive():
+            if self.screenshot_thread and self.screenshot_thread.is_alive():
                 self.logger.warning("Screenshot thread did not stop gracefully")
             self.screenshot_thread = None
         self.logger.info("Screenshot stream stopped")
