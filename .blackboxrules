@@ -1,0 +1,1 @@
+always edit agent_template.py, not agent.py, because agent.py is generated from agent_template.py.

