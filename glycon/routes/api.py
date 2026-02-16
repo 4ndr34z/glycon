@@ -768,11 +768,11 @@ def init_api_routes(app, socketio):
 
             if agent_id:
                 c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
-                             FROM webcam_captures wc JOIN agents a ON wc.agent_id = a.id
+                             FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
                              WHERE wc.agent_id=? ORDER BY wc.timestamp DESC LIMIT 50''', (agent_id,))
             else:
                 c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
-                             FROM webcam_captures wc JOIN agents a ON wc.agent_id = a.id
+                             FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
                              ORDER BY wc.timestamp DESC LIMIT 50''')
 
             captures = [dict(zip(['id', 'timestamp', 'hostname', 'agent_id'], row))

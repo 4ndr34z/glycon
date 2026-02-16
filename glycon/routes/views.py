@@ -180,13 +180,18 @@ def init_view_routes(app):
         c.execute("SELECT id, timestamp FROM screenshots WHERE agent_id=? ORDER BY timestamp DESC LIMIT 5", (agent_id,))
         screenshots = [dict(zip(['id', 'timestamp'], row)) for row in c.fetchall()]
         
+        # Get recent webcam captures for this agent
+        c.execute("SELECT id, timestamp FROM webcam_captures WHERE agent_id=? ORDER BY timestamp DESC LIMIT 5", (agent_id,))
+        webcam_captures = [dict(zip(['id', 'timestamp'], row)) for row in c.fetchall()]
+        
         conn.close()
         
         return render_template('agent_detail.html', 
                              agent=agent, 
                              tasks=tasks, 
                              creds=creds,
-                             screenshots=screenshots)
+                             screenshots=screenshots,
+                             webcam_captures=webcam_captures)
 
     @app.route('/terminal/<agent_id>')
     @login_required
@@ -309,11 +314,11 @@ def init_view_routes(app):
 
         if agent_id:
             c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
-                         FROM webcam_captures wc JOIN agents a ON wc.agent_id = a.id
+                         FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
                          WHERE wc.agent_id=? ORDER BY wc.timestamp DESC LIMIT 50''', (agent_id,))
         else:
             c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
-                         FROM webcam_captures wc JOIN agents a ON wc.agent_id = a.id
+                         FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
                          ORDER BY wc.timestamp DESC LIMIT 50''')
 
         captures = [dict(zip(['id', 'timestamp', 'hostname', 'agent_id'], row))

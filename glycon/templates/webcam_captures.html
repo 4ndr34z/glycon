@@ -13,9 +13,13 @@
                 </a>
                 <div class="card-body">
                     <h6 class="card-subtitle mb-2 text-muted">
+                        {% if capture.hostname %}
                         <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=capture.agent_id) }}" class="text-decoration-none">
                             {{ capture.hostname }}
                         </a>
+                        {% else %}
+                        <span class="text-muted">Unknown Agent</span>
+                        {% endif %}
                     </h6>
                     <p class="card-text text-muted small">
                         <i class="far fa-clock me-1"></i>{{ capture.timestamp }}

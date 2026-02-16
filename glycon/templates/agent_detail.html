@@ -86,7 +86,20 @@
                     </a>
                 </div>
                 <div class="card-body" id="webcam-section">
-                    <p class="text-muted">Webcam captures will appear here when captured</p>
+                    {% if webcam_captures %}
+                    <div class="row" id="webcam-container">
+                        {% for capture in webcam_captures %}
+                        <div class="col-md-6 mb-3">
+                            <a href="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}" data-lightbox="webcam-{{ agent.id }}">
+                                <img src="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}" class="img-fluid rounded" alt="Webcam Capture">
+                            </a>
+                            <p class="small text-muted mt-1">{{ capture.timestamp }}</p>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No webcam captures available</p>
+                    {% endif %}
                 </div>
             </div>
         </div>
