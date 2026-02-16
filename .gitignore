@@ -181,3 +181,5 @@ glycon/runners/
 glycon/shellcodes/
 glycon/agents/agent.py
 TODO.md
+.blackboxrules
+./continue

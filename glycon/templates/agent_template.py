@@ -1119,7 +1119,29 @@ class SystemUtils:
                 logger.error("Failed to open webcam - device not available on any index/backend")
                 return None
             
-            # Read a frame from the webcam
+            # Set camera properties to fix exposure/auto-gain issues that cause black images
+            # These settings help force the camera to capture a proper image
+            logger.debug("Setting camera properties for better capture")
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_BRIGHTNESS, 128)  # Mid-range brightness
+            cap.set(cv2.CAP_PROP_CONTRAST, 128)     # Mid-range contrast
+            cap.set(cv2.CAP_PROP_SATURATION, 128)   # Mid-range saturation
+            cap.set(cv2.CAP_PROP_GAIN, 64)          # Some gain to help with low light
+            cap.set(cv2.CAP_PROP_EXPOSURE, -5)      # Try to set exposure (may not work on all cameras)
+            
+            # Allow camera to warm up - many cameras need a few frames to adjust exposure/white balance
+            logger.debug("Warming up camera (allowing it to adjust exposure/white balance)")
+            warmup_frames = 10
+            for i in range(warmup_frames):
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning("Warmup frame " + str(i+1) + "/" + str(warmup_frames) + " failed")
+                else:
+                    logger.debug("Warmup frame " + str(i+1) + "/" + str(warmup_frames) + " captured successfully")
+                time.sleep(0.2)  # Small delay between warmup frames
+            
+            # Read the actual frame to capture
             logger.debug("Reading frame from webcam")
             ret, frame = cap.read()
             
@@ -1132,15 +1154,33 @@ class SystemUtils:
             
             logger.debug(f"Captured frame with shape: {{frame.shape}}")
             
+            # Note: Brightness validation disabled for debugging
+            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # avg_brightness = cv2.mean(gray)[0]
+            # logger.debug("Frame average brightness: " + str(avg_brightness))
+            # if avg_brightness < 1:
+            #     logger.error("Captured frame is too dark (avg brightness: " + str(avg_brightness) + ") - possible camera issue")
+            #     return None
+            
             # Encode the frame as JPEG
             logger.debug("Encoding frame to JPEG")
             _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            
+            # Validate encoded buffer
+            if buffer is None or len(buffer) == 0:
+                logger.error("Failed to encode frame to JPEG - buffer is empty")
+                return None
             
             # Convert to base64
             logger.debug("Encoding to base64")
             webcam_data = base64.b64encode(buffer).decode('utf-8')
             
-            logger.info("Webcam capture successful")
+            # Validate base64 data
+            if not webcam_data or len(webcam_data) < 100:
+                logger.error("Base64 encoding seems invalid (length: " + str(len(webcam_data) if webcam_data else 0) + ")")
+                return None
+            
+            logger.info("Webcam capture successful - image size: " + str(len(webcam_data)) + " bytes")
             return webcam_data
             
         except Exception as e:
