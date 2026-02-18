@@ -182,3 +182,4 @@ glycon/shellcodes/
 glycon/agents/agent.py
 TODO.md
 .DS_Store
+*/__pycache__/*
