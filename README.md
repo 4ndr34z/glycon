@@ -136,6 +136,8 @@ python3 run.py --http-port 8080
 - ✅ **Agent Management** - Deploy and control remote agents
 - ✅ **Real-time Terminal** - Interactive shell access with command history
 - ✅ **Screenshot Capture** - Remote desktop monitoring
+- ✅ **Webcam Capture** - Check if someone is at the remote machine, before taking over the Remote Desktop
+- ✅ **Remote Desktop** - Interactive remote desktop 
 - ✅ **Browser Cookie Stealing** - Extract browser cookies
 - ✅ **Browser Credential Stealing** - Extract browser credentials
 - ✅ **Browser History Stealing** - Extract browser history
@@ -159,6 +161,10 @@ python3 run.py --http-port 8080
 ---
 
 ## 🔄 Version History
+
+### Version 1.5.3
+- Fixed bug in Remote desktop
+- Added webcam capture
 
 ### Version 1.5.2
 - Developed a "Remote Desktop" prototype to serve as a high-impact presentation asset for engaging management and securing buy-in.  
