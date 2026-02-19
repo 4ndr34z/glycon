@@ -1,2 +1,0 @@
-always edit agent_template.py, not agent.py, because agent.py is generated from agent_template.py.
- { and } characters need to be escaped for Jinja2 in agent_template. don't escape in the config class
