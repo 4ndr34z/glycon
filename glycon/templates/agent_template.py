@@ -114,6 +114,22 @@ try:
   
     
     print("All modules imported successfully!")
+
+    # Hide the console window on Windows to prevent it from blocking SendInput().
+    # When the agent is launched from cmd.exe, the visible console window causes
+    # Windows to silently block pyautogui's SendInput() calls (returns 0 events
+    # injected), which makes remote desktop mouse clicks non-functional.
+    # Hiding the window detaches the process from the console's input thread,
+    # allowing SendInput() to inject events freely into the global input stream.
+    if platform.system() == 'Windows':
+        try:
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE = 0
+                print("Console window hidden (fixes SendInput blocking for remote desktop)")
+        except Exception as hide_err:
+            print(f"Could not hide console window: {{hide_err}}")
+
 except ImportError as e:
     print(f"Failed to import module: {{e}}")
     
