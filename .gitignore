@@ -181,5 +181,10 @@ glycon/runners/
 glycon/shellcodes/
 glycon/agents/agent.py
 TODO.md
+<<<<<<< HEAD
 .DS_Store
 */__pycache__/*
+=======
+.blackboxrules
+./continue
+>>>>>>> dev
