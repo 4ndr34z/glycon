@@ -47,6 +47,12 @@
                 <button class="btn btn-primary" type="button" id="send-command">
                     <i class="fas fa-paper-plane me-1"></i>Send
                 </button>
+                <button class="btn btn-warning" type="button" id="kill-process" title="Kill specific process by ID">
+                    <i class="fas fa-times me-1"></i>Kill Process
+                </button>
+                <button class="btn btn-danger" type="button" id="kill-all-processes" title="Kill all running processes">
+                    <i class="fas fa-skull me-1"></i>Kill All
+                </button>
             </div>
         </div>
     </div>
@@ -67,6 +73,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const terminal = document.getElementById('terminal');
     const commandInput = document.getElementById('command-input');
     const sendButton = document.getElementById('send-command');
+    const killProcessButton = document.getElementById('kill-process');
+    const killAllProcessesButton = document.getElementById('kill-all-processes');
     const dirPrompt = document.getElementById('dir-prompt');
     const wsControl = document.getElementById('wsControl');
     const wsStatusText = document.getElementById('wsStatusText');
@@ -193,11 +201,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 updatePrompt();
             }
 
+            if (data.running) {
+                // Show process ID when command starts running
+                const runningDiv = document.createElement('div');
+                runningDiv.style.color = '#ffff00';
+                runningDiv.style.fontFamily = 'Consolas, monospace';
+                runningDiv.className = 'running-process-line';
+                runningDiv.innerHTML = `[Process <span class="running-process-id">${data.process_id}</span> running in background...]`;
+                terminal.appendChild(runningDiv);
+            }
+
             if (data.command) {
                 const commandDiv = document.createElement('div');
                 commandDiv.style.color = '#00ff00';
                 commandDiv.style.fontFamily = 'Consolas, monospace';
+                commandDiv.className = 'command-text';
                 commandDiv.textContent = `${getPrompt()} ${data.command}`;
+                if (data.process_id) {
+                    commandDiv.textContent += ` [PID: ${data.process_id}]`;
+                }
                 terminal.appendChild(commandDiv);
             }
 
@@ -342,6 +364,75 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Event listeners
     sendButton.addEventListener('click', sendCommand);
+    
+    killProcessButton.addEventListener('click', function() {
+        // Show list of running processes if any
+        const runningProcesses = document.querySelectorAll('.running-process-id');
+        if (runningProcesses.length > 0) {
+            let message = 'Enter the process ID to kill:\n\n';
+            runningProcesses.forEach(el => {
+                const processId = el.textContent;
+                const commandEl = el.closest('.terminal-line')?.previousElementSibling?.querySelector('.command-text');
+                const command = commandEl ? commandEl.textContent : 'Unknown command';
+                message += `Process ${processId}: ${command}\n`;
+            });
+            message += '\nOr enter a specific process ID:';
+            const processId = prompt(message);
+            if (processId) {
+                try {
+                    socket.emit('kill_process', {
+                        agent_id: '{{ agent.id }}',
+                        process_id: processId
+                    });
+                    showAlert('Kill command sent for process: ' + processId, 'warning');
+                } catch (e) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.style.color = '#ff0000';
+                    errorDiv.style.fontFamily = 'Consolas, monospace';
+                    errorDiv.textContent = `Error sending kill command: ${e.message}`;
+                    terminal.appendChild(errorDiv);
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+            }
+        } else {
+            const processId = prompt('Enter the process ID to kill (check terminal output for process ID):');
+            if (processId) {
+                try {
+                    socket.emit('kill_process', {
+                        agent_id: '{{ agent.id }}',
+                        process_id: processId
+                    });
+                    showAlert('Kill command sent for process: ' + processId, 'warning');
+                } catch (e) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.style.color = '#ff0000';
+                    errorDiv.style.fontFamily = 'Consolas, monospace';
+                    errorDiv.textContent = `Error sending kill command: ${e.message}`;
+                    terminal.appendChild(errorDiv);
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+            }
+        }
+    });
+    
+    killAllProcessesButton.addEventListener('click', function() {
+        if (confirm('Are you sure you want to kill ALL running processes on this agent?')) {
+            try {
+                socket.emit('kill_process', {
+                    agent_id: '{{ agent.id }}',
+                    process_id: 'ALL'
+                });
+                showAlert('Kill all processes command sent', 'danger');
+            } catch (e) {
+                const errorDiv = document.createElement('div');
+                errorDiv.style.color = '#ff0000';
+                errorDiv.style.fontFamily = 'Consolas, monospace';
+                errorDiv.textContent = `Error sending kill command: ${e.message}`;
+                terminal.appendChild(errorDiv);
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+        }
+    });
     
     commandInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') sendCommand();

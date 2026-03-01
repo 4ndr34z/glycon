@@ -226,6 +226,22 @@ def init_socket_handlers(socketio):
                 'current_dir': current_dir
             }, room=f"agent_{agent_id}", namespace='/terminal')
 
+    @socketio.on('kill_process', namespace='/terminal')
+    def handle_kill_process(data):
+        """Forward kill process command to agent"""
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            process_id = data.get('process_id')
+            if not agent_id:
+                print("[SocketIO] kill_process event missing agent_id")
+                return
+            print(f"[SocketIO] Forwarding kill_process to agent {agent_id}: process_id={process_id}")
+            # Forward the kill command to the agent's room
+            emit('kill_process', {
+                'agent_id': agent_id,
+                'process_id': process_id
+            }, room=f"agent_{agent_id}", namespace='/terminal')
+
     @socketio.on('command_result', namespace='/terminal')
     def handle_command_result(data):
         agent_id = data.get('agent_id')
