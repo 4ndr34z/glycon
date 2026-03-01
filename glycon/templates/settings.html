@@ -225,6 +225,23 @@
                         </div>
                         <div class="row mb-3">
                             <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="takeWebcam" {% if agent_config and agent_config.take_webcam %}checked{% endif %}>
+                                    <label class="form-check-label" for="takeWebcam">Take Webcam Captures</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Webcam Capture Frequency</label>
+                                    <select class="form-select" id="webcamFrequency">
+                                    <option value="1" {% if agent_config and agent_config.webcam_frequency == 1 %}selected{% endif %}>Every check-in</option>
+                                    <option value="5" {% if agent_config and agent_config.webcam_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
+                                    <option value="10" {% if not agent_config or agent_config.webcam_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
+                                    <option value="30" {% if agent_config and agent_config.webcam_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
                                 <label class="form-label">Kill Date</label>
                                 <input type="datetime-local" class="form-control" id="killDate" value="{{ agent_config.killdate|replace(' ', 'T') if agent_config and agent_config.killdate else '' }}">
                                 <small class="text-muted">Agent will self-destruct after this date/time</small>
@@ -841,6 +858,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const serverUrl = document.getElementById('serverUrl').value;
         const takeScreenshots = document.getElementById('takeScreenshots').checked;
         const screenshotFrequency = document.getElementById('screenshotFrequency').value;
+        const takeWebcam = document.getElementById('takeWebcam').checked;
+        const webcamFrequency = document.getElementById('webcamFrequency').value;
         const killDate = document.getElementById('killDate').value;
         const enableKillDate = document.getElementById('enableKillDate').checked;
         const trustedCertificate = document.getElementById('trustedCertificate').checked;
@@ -849,6 +868,8 @@ document.addEventListener('DOMContentLoaded', function() {
             server_url: serverUrl,
             take_screenshots: takeScreenshots,
             screenshot_frequency: parseInt(screenshotFrequency),
+            take_webcam: takeWebcam,
+            webcam_frequency: parseInt(webcamFrequency),
             killdate: killDate,
             killdate_enabled: enableKillDate,
             trusted_certificate: trustedCertificate

