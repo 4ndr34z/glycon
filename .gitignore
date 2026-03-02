@@ -8,6 +8,7 @@ glycon/runners/
 glycon/shellcodes/
 glycon/agents/agent.py
 agents/agent.py
+glycon/uploads/
 TODO.md
 
 # ==========================================
