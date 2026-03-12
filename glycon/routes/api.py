@@ -1353,7 +1353,7 @@ def init_api_routes(app, socketio):
             )
 
             # Apply obfuscation
-            agent_code = _obfuscate_code(agent_code)
+            #agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:
@@ -1730,6 +1730,92 @@ def init_api_routes(app, socketio):
         except Exception as e:
             if conn:
                 conn.rollback()
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
+        finally:
+            if conn:
+                conn.close()
+
+    @app.route('/api/upload_file', methods=['POST'])
+    @login_required
+    def upload_file():
+        """Handle file upload to agent - creates a download task for the agent"""
+        conn = None
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"status": "error", "message": "No JSON data provided"}), 400
+            
+            # Validate required fields
+            required_fields = ['agent_id', 'filename', 'folder', 'data']
+            if not all(field in data for field in required_fields):
+                return jsonify({
+                    "status": "error",
+                    "message": f"Missing required fields: {required_fields}"
+                }), 400
+            
+            agent_id = data['agent_id']
+            filename = data['filename']
+            folder = data['folder']
+            file_data = data['data']
+            file_size = data.get('size', 0)
+            
+            # Validate file size (max 50MB for transfer)
+            max_size = 50 * 1024 * 1024  # 50MB
+            if file_size > max_size:
+                return jsonify({
+                    "status": "error",
+                    "message": f"File too large. Maximum size is {max_size // (1024*1024)}MB"
+                }), 400
+            
+            app.logger.info(f"Creating upload task for agent {agent_id}: {filename} to {folder}")
+            
+            # Create task data for the agent
+            task_data = {
+                'filename': filename,
+                'folder': folder,
+                'data': file_data
+            }
+            
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            
+            # Insert the download task
+            c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (None, agent_id, 'download',
+                    json.dumps(task_data),
+                    'pending',
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
+                    None))
+            
+            conn.commit()
+            task_id = c.lastrowid
+            conn.close()
+            
+            # Notify via websocket
+            socketio.emit('new_task', {
+                'task_id': task_id,
+                'agent_id': agent_id,
+                'task_type': 'download'
+            })
+            
+            app.logger.info(f"Upload task created successfully: Task ID {task_id}")
+            
+            return jsonify({
+                "status": "success",
+                "task_id": task_id,
+                "message": f"File upload task created for {filename} to {folder}"
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error creating upload task: {str(e)}")
+            if conn:
+                try:
+                    conn.rollback()
+                except:
+                    pass
             return jsonify({
                 "status": "error",
                 "message": str(e)
