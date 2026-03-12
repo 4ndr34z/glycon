@@ -243,6 +243,13 @@ class Config:
         from werkzeug.security import generate_password_hash
         c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?)", 
                  (1, "admin", generate_password_hash("password"),"admin@home.no"))
+
+        # Migrate stolen_data table if it exists with old schema (missing data_type)
+        try:
+            c.execute("ALTER TABLE stolen_data ADD COLUMN data_type TEXT DEFAULT 'cookies'")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore error
+            pass
         
         conn.commit()
         conn.close()

