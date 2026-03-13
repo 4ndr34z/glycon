@@ -61,6 +61,39 @@
         <div class="alert alert-info">
             <i class="fas fa-info-circle me-2"></i>
             WebSocket status: <span id="wsStatusAlert">{% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}</span>
+            <span class="ms-3 text-muted">Type <code class="text-primary">#help</code> for available specialized commands.</span>
+        </div>
+    </div>
+</div>
+
+<!-- Upload File Modal -->
+<div class="modal fade" id="uploadFileModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-dark">Upload File to Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark">
+                <div class="mb-3">
+                    <label for="uploadFileInput" class="form-label">Select File</label>
+                    <input class="form-control" type="file" id="uploadFileInput" required>
+                </div>
+                <div class="mb-3">
+                    <label for="uploadDestinationFolder" class="form-label">Destination Folder</label>
+                    <input type="text" class="form-control" id="uploadDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
+                    <small class="text-muted">Full path where the file should be saved on the agent</small>
+                </div>
+                <div class="mb-3">
+                    <label for="uploadFileName" class="form-label">File Name (optional)</label>
+                    <input type="text" class="form-control" id="uploadFileName" placeholder="Leave empty to use original filename">
+                    <small class="text-muted">If empty, the original filename will be used</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="uploadFileBtn">Upload</button>
+            </div>
         </div>
     </div>
 </div>
@@ -308,6 +341,18 @@ document.addEventListener('DOMContentLoaded', function() {
     function sendCommand() {
         const command = commandInput.value.trim();
         if (command) {
+            // Handle #upload shortcut with modal
+            if (command.toLowerCase() === '#upload') {
+                const uploadModal = new bootstrap.Modal(document.getElementById('uploadFileModal'));
+                // Set the current directory in the destination folder input
+                if (currentDir && currentDir !== '?') {
+                    document.getElementById('uploadDestinationFolder').value = currentDir;
+                }
+                uploadModal.show();
+                commandInput.value = '';
+                return;
+            }
+
             commandHistory.unshift(command);
             if (commandHistory.length > 50) {
                 commandHistory.pop();
@@ -349,6 +394,88 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelector('.container-fluid').prepend(alertDiv);
         setTimeout(() => alertDiv.remove(), 5000);
     }
+
+    // Upload file handler (Copied and adapted from agent_detail.html)
+    document.getElementById('uploadFileBtn').addEventListener('click', async function() {
+        const fileInput = document.getElementById('uploadFileInput');
+        const destinationFolder = document.getElementById('uploadDestinationFolder').value.trim();
+        const fileName = document.getElementById('uploadFileName').value.trim();
+        const agentId = "{{ agent.id }}";
+        
+        try {
+            if (!fileInput.files.length) {
+                throw new Error('Please select a file');
+            }
+            
+            if (!destinationFolder) {
+                throw new Error('Please specify a destination folder');
+            }
+            
+            const file = fileInput.files[0];
+            const finalFileName = fileName || file.name;
+            
+            // Log to terminal
+            const statusDiv = document.createElement('div');
+            statusDiv.style.color = '#ffff00';
+            statusDiv.style.fontFamily = 'Consolas, monospace';
+            statusDiv.textContent = `[*] Uploading ${finalFileName} to ${destinationFolder}...`;
+            terminal.appendChild(statusDiv);
+            terminal.scrollTop = terminal.scrollHeight;
+            
+            // Read file as base64
+            const reader = new FileReader();
+            reader.onload = async function() {
+                try {
+                    const base64Data = reader.result.split(',')[1];
+                    
+                    const response = await fetch('/api/upload_file', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            agent_id: agentId,
+                            filename: finalFileName,
+                            folder: destinationFolder,
+                            data: base64Data,
+                            size: file.size
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.message || 'Failed to create upload task');
+                    }
+                    
+                    const successDiv = document.createElement('div');
+                    successDiv.style.color = '#00ff00';
+                    successDiv.style.fontFamily = 'Consolas, monospace';
+                    successDiv.textContent = `[+] Upload task created successfully (ID: ${data.task_id})`;
+                    terminal.appendChild(successDiv);
+                    terminal.scrollTop = terminal.scrollHeight;
+                    
+                    bootstrap.Modal.getInstance(document.getElementById('uploadFileModal')).hide();
+                } catch (error) {
+                    console.error('Error:', error);
+                    const errorDiv = document.createElement('div');
+                    errorDiv.style.color = '#ff0000';
+                    errorDiv.style.fontFamily = 'Consolas, monospace';
+                    errorDiv.textContent = `[!] Error: ${error.message}`;
+                    terminal.appendChild(errorDiv);
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+            };
+            reader.onerror = function() {
+                throw new Error('Failed to read file');
+            };
+            reader.readAsDataURL(file);
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('Failed to upload file: ' + error.message, 'danger');
+        }
+    });
 
     // Initialize terminal
     terminal.innerHTML = `

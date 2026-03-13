@@ -3470,7 +3470,32 @@ class Agent:
                 self._log_info(f"Received task type: {{task_type}}")
             
             # Handle different task types from web interface
-            if task_type == "websocket":
+            if task_type == "execute_python":
+                code = task.get("data", {{}}).get("code", "")
+                if not code:
+                    return {{
+                        "status": "error",
+                        "message": "No Python code provided"
+                    }}
+                
+                self._log_info("Executing Python code in memory")
+                try:
+                    # Execute the code in a new scope
+                    local_vars = {{}}
+                    exec(code, globals(), local_vars)
+                    return {{
+                        "status": "success",
+                        "message": "Python script executed successfully",
+                        "output": str(local_vars.get('result', 'Execution completed'))
+                    }}
+                except Exception as e:
+                    self._log_error(f"Python execution error: {{str(e)}}")
+                    return {{
+                        "status": "error",
+                        "message": f"Python execution failed: {{str(e)}}"
+                    }}
+
+            elif task_type == "websocket":
                 action = task.get("action") or task.get("data", {{}}).get("action")
                 if not action:
                     self._log_error("WebSocket task missing action parameter")

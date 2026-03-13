@@ -20,7 +20,7 @@
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.7+
+- Python 3.11+
 - Virtual environment support
 
 ### Installation
@@ -142,6 +142,7 @@ python3 run.py --http-port 8080
 - ✅ **Browser Credential Stealing** - Extract browser credentials
 - ✅ **Browser History Stealing** - Extract browser history
 - ✅ **Shellcode Execution** - Run shellcode payloads via Donut
+- ✅ **Python In-Memory Execution** - Execute arbitrary Python scripts directly in agent memory
 
 ### Advanced Features
 - 🔐 **Dual Server Support** - HTTPS + HTTP simultaneous operation
@@ -152,6 +153,11 @@ python3 run.py --http-port 8080
 - 📊 **Agent Monitoring** - Real-time status and health checks
 - 🎯 **Keylogger** - Capture keystrokes from agents
 - 📁 **Database Storage** - Persistent data storage for all operations
+- ⌨️ **Terminal Shortcuts** - Execute C2 tasks directly from the terminal with `#` commands (e.g., `#screenshot`, `#upload`, `#creds`)
+- 📂 **Bidirectional File Transfer** - Upload files via dialog or exfiltrate via terminal command
+- 🦊 **Live Browser Looting** - Custom mozLz4 decompressor for Firefox session extraction
+- 🎭 **Fake Ransomware Module** - Deploy a professional-looking, full-screen ransom note with a live countdown timer and automatic `explorer.exe` lockdown.
+- 🧹 **Anti-Translation** - Built-in protection to prevent browser translation popups from breaking the ransomware immersion.
 
 ### Supported Platforms
 - 🪟 Windows agents
@@ -161,6 +167,21 @@ python3 run.py --http-port 8080
 ---
 
 ## 🔄 Version History
+
+### Version 2.0 (Current)
+- 🎭 **Ransomware Module**: Added `#fakeransom` command to simulate a high-impact ransomware attack with countdown timer and UI lockdown.
+- 🧹 **System Recovery**: Added `#clearransom` to restore the target system, restart explorer, and clean up evidence.
+- ⌨️ **Expanded Help System**: Integrated `#help` directly into the terminal for better discoverability.
+- 📝 **In-Memory Python**: Agents now support `execute_python` task type, allowing for arbitrary code execution without disk artifacts.
+- 🛡️ **Stealth Improvements**: Enhanced explorer lockdown logic for ransomware scenarios.
+
+### Version 1.9
+- ⌨️ **Enhanced Terminal**: Added `#` shortcuts for all C2 tasks (screenshot, creds, webcam, etc.)
+- 📂 **Interactive Uploads**: Terminal `#upload` now opens a file picker for local files.
+- 📤 **File Exfiltration**: Added `#exfiltrate` command for easy file retrieval from agents.
+- 🦊 **Firefox Session Recovery**: Implemented custom mozLz4 decompression to extract cookies from active Firefox sessions.
+- 🍪 **Universal Cookie Export**: Standardized JSON format for easy import into browser extensions.
+- 🛠️ **Stability**: Fixed Base64 logging overhead and improved agent template compatibility.
 
 ### Version 1.5.3
 - Fixed bug in Remote desktop
@@ -284,6 +305,13 @@ black .
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+  <p><strong>⚠️ Disclaimer:</strong> This tool is for educational and authorized testing purposes only. Use responsibly and in compliance with applicable laws.</p>
+  <p>Made with ❤️ for the cybersecurity community</p>
+</div>
 
 ---
 

