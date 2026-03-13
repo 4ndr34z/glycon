@@ -199,7 +199,7 @@ def init_socket_handlers(socketio):
     @socketio.on('execute_command', namespace='/terminal')
     def handle_execute_command(data):
         if current_user.is_authenticated:
-            agent_id = data.get('command')
+            agent_id = data.get('agent_id')
             command = data.get('command')
             if not agent_id or not command:
                 print("[SocketIO] execute_command event missing agent_id or command")

@@ -2946,6 +2946,7 @@ class WebSocketClient:
                 engineio_logger=True
             )
 
+            self._setup_event_handlers()
             # Add connection verification timeout
             connection_timeout = 10  # seconds
             connected_event = threading.Event()
@@ -2962,7 +2963,6 @@ class WebSocketClient:
                         }})
                     }}
                     self.socket.emit('agent_connect', auth_data, namespace=self.namespace)
-                    self._setup_event_handlers()
                     self.connected = True
                     connected_event.set()
                 except Exception as e:

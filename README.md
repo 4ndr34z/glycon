@@ -146,6 +146,7 @@ python3 run.py --http-port 8080
 
 ### Advanced Features
 - 🔐 **Dual Server Support** - HTTPS + HTTP simultaneous operation
+- 🛡️ **Privilege Escalation** - Elevate to `NT AUTHORITY\SYSTEM` using `#getsystem`
 - 🛡️ **SSL/TLS Encryption** - Secure communications
 - 🛡️ **IP Whitelisting** - Restrict server access to specified IP addresses
 - 🌐 **Reverse Proxy Ready** - Base URL support for proxy deployments
@@ -159,8 +160,8 @@ python3 run.py --http-port 8080
 - 🎭 **Fake Ransomware Module** - Deploy a professional-looking, full-screen ransom note with a live countdown timer and automatic `explorer.exe` lockdown.
 
 ### Supported Platforms
-- 🪟 Windows agents
-- 🐧 Linux agents
+- 🪟 Windows agents (Full support + Elevation)
+- 🐧 Linux agents (Basic support + Root detection)
 - 🍎 macOS agents
 
 ---
@@ -168,6 +169,8 @@ python3 run.py --http-port 8080
 ## 🔄 Version History
 
 ### Version 2.0 (Current)
+- ⚡ **Privilege Escalation**: Added `#getsystem` to elevate administrative agents to `NT AUTHORITY\SYSTEM` via a transient Windows Service.
+- 🛡️ **Visual Privilege Indicators**: Added icons to the agent list to distinguish between `User`, `Administrator`, and `SYSTEM` sessions.
 - 🎭 **Ransomware Module**: Added `#fakeransom` command to simulate a high-impact ransomware attack with countdown timer and UI lockdown.
 - 🧹 **System Recovery**: Added `#clearransom` to restore the target system, restart explorer, and clean up artifacts.
 - ⌨️ **Expanded Help System**: Integrated `#help` directly into the terminal for better discoverability.
