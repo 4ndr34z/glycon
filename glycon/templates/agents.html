@@ -29,6 +29,7 @@
                     <tr>
                         <th>ID</th>
                         <th>Hostname</th>
+                        <th>Priv</th>
                         <th>IP</th>
                         <th>OS</th>
                         <th>Last Seen</th>
@@ -42,6 +43,15 @@
                     <tr class="{% if agent.status == 'online' %}agent-online{% elif agent.status == 'inactive' %}agent-inactive{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
                         <td>{{ agent.id[:8] }}...</td>
                         <td><a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}">{{ agent.hostname }}</a></td>
+                        <td>
+                            {% if agent.privilege.lower() == 'system' %}
+                                <i class="bi bi-shield-fill-check text-danger" title="SYSTEM Privileges"></i>
+                            {% elif agent.privilege.lower() == 'admin' %}
+                                <i class="bi bi-shield-check text-warning" title="Administrative Privileges"></i>
+                            {% else %}
+                                <i class="bi bi-person text-secondary" title="User Privileges"></i>
+                            {% endif %}
+                        </td>
                         <td>{{ agent.ip }}</td>
                         <td>{{ agent.os }}</td>
                         <td>{{ agent.last_seen }}</td>

