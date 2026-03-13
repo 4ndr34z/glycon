@@ -157,7 +157,6 @@ python3 run.py --http-port 8080
 - 📂 **Bidirectional File Transfer** - Upload files via dialog or exfiltrate via terminal command
 - 🦊 **Live Browser Looting** - Custom mozLz4 decompressor for Firefox session extraction
 - 🎭 **Fake Ransomware Module** - Deploy a professional-looking, full-screen ransom note with a live countdown timer and automatic `explorer.exe` lockdown.
-- 🧹 **Anti-Translation** - Built-in protection to prevent browser translation popups from breaking the ransomware immersion.
 
 ### Supported Platforms
 - 🪟 Windows agents
@@ -170,10 +169,10 @@ python3 run.py --http-port 8080
 
 ### Version 2.0 (Current)
 - 🎭 **Ransomware Module**: Added `#fakeransom` command to simulate a high-impact ransomware attack with countdown timer and UI lockdown.
-- 🧹 **System Recovery**: Added `#clearransom` to restore the target system, restart explorer, and clean up evidence.
+- 🧹 **System Recovery**: Added `#clearransom` to restore the target system, restart explorer, and clean up artifacts.
 - ⌨️ **Expanded Help System**: Integrated `#help` directly into the terminal for better discoverability.
 - 📝 **In-Memory Python**: Agents now support `execute_python` task type, allowing for arbitrary code execution without disk artifacts.
-- 🛡️ **Stealth Improvements**: Enhanced explorer lockdown logic for ransomware scenarios.
+- 🛡️ **Stealth Improvements**: Enhanced explorer lockdown logic for ransomware simulation scenarios.
 
 ### Version 1.9
 - ⌨️ **Enhanced Terminal**: Added `#` shortcuts for all C2 tasks (screenshot, creds, webcam, etc.)
