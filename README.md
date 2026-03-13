@@ -138,6 +138,7 @@ python3 run.py --http-port 8080
 - ✅ **Screenshot Capture** - Remote desktop monitoring
 - ✅ **Webcam Capture** - Check if someone is at the remote machine, before taking over the Remote Desktop
 - ✅ **Remote Desktop** - Interactive remote desktop 
+- ✅ **User Spawning** - Spawn agents as other users with `#spawnas`
 - ✅ **Browser Cookie Stealing** - Extract browser cookies
 - ✅ **Browser Credential Stealing** - Extract browser credentials
 - ✅ **Browser History Stealing** - Extract browser history
@@ -168,7 +169,12 @@ python3 run.py --http-port 8080
 
 ## 🔄 Version History
 
-### Version 2.0 (Current)
+### Version 2.1 (Current)
+- 🎭 **User Masquerading**: Added `#spawnas <user>` to spawn a new agent process under a different user's context (Requires SYSTEM or Administrator privileges).
+- 🥷 **Stealth Elevation**: Updated `#getsystem` and `#spawnas` to utilize `pythonw.exe` for truly headless background execution, eliminating visible console windows.
+- 🧹 **Artifact Management**: Refined the `#spawnas` mechanism to use transient scheduled tasks and masqueraded temporary files (`.log`) for reliable execution across different user profiles.
+
+### Version 2.0
 - ⚡ **Privilege Escalation**: Added `#getsystem` to elevate administrative agents to `NT AUTHORITY\SYSTEM` via a transient Windows Service.
 - 🛡️ **Visual Privilege Indicators**: Added icons to the agent list to distinguish between `User`, `Administrator`, and `SYSTEM` sessions.
 - 🎭 **Ransomware Module**: Added `#fakeransom` command to simulate a high-impact ransomware attack with countdown timer and UI lockdown.
