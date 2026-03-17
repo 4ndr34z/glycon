@@ -125,10 +125,17 @@ document.addEventListener('DOMContentLoaded', function() {
     function cleanText(text) {
         if (typeof text !== 'string') return '';
         
+        // Use a broader check for ANSI codes that includes \u001b, \x1B, and the raw character
+        const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(text);
+        
+        if (hasAnsi) return text;
+
         // First replace common encoding artifacts
         text = text.replace(/ÿ/g, ' ')
-                   .replace(/\x00/g, '')  // Remove null bytes
-                   .replace(/[^\x20-\x7E\r\n\t]/g, ' '); // Replace non-printable chars
+                   .replace(/\x00/g, ''); // Remove null bytes
+        
+        // Replace non-printable chars but preserve ESC for potential codes
+        text = text.replace(/[^\x20-\x7E\x1B\u001b\r\n\t]/g, ' ');
         
         // Fix directory listing formatting
         if (text.includes('Directory of')) {
@@ -139,6 +146,64 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         return text;
+    }
+
+    function renderText(text, container) {
+        if (!text) return;
+
+        // broader regex for ANSI
+        const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(text);
+        
+        if (!hasAnsi) {
+            container.textContent = cleanText(text);
+            return;
+        }
+
+        const escapeHtml = (unsafe) => {
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        };
+
+        const ansiToHtml = (str) => {
+            // Split by any variation of ESC [
+            const parts = str.split(/[\x1B\u001b]\[/);
+            let result = escapeHtml(parts[0]);
+
+            for (let i = 1; i < parts.length; i++) {
+                const part = parts[i];
+                const match = part.match(/^([0-9;]*)m([\s\S]*)/);
+                
+                if (match) {
+                    const codes = match[1].split(';');
+                    const content = escapeHtml(match[2]);
+                    let styles = [];
+                    
+                    codes.forEach(code => {
+                        if (code === '0' || code === '') styles = []; 
+                        else if (code === '31') styles.push('color: #ff5555; font-weight: bold;');
+                        else if (code === '32') styles.push('color: #50fa7b;');
+                        else if (code === '33') styles.push('color: #f1fa8c;');
+                        else if (code === '34') styles.push('color: #8be9fd;');
+                        else if (code === '1') styles.push('font-weight: bold;');
+                    });
+
+                    if (styles.length > 0) {
+                        result += `<span style="${styles.join(' ')}">${content}</span>`;
+                    } else {
+                        result += content;
+                    }
+                } else {
+                    result += escapeHtml(part);
+                }
+            }
+            return result;
+        };
+
+        container.innerHTML = ansiToHtml(text);
     }
 
     function normalizePath(path) {
@@ -268,7 +333,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 outputDiv.style.fontFamily = 'Consolas, monospace';
                 outputDiv.style.whiteSpace = 'pre-wrap';
                 outputDiv.style.color = '#ffffff';
-                outputDiv.textContent = cleanText(data.output);
+                renderText(data.output, outputDiv);
                 terminal.appendChild(outputDiv);
             }
 
@@ -277,7 +342,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 errorDiv.style.color = '#ff0000';
                 errorDiv.style.fontFamily = 'Consolas, monospace';
                 errorDiv.style.whiteSpace = 'pre-wrap';
-                errorDiv.textContent = cleanText(data.error);
+                renderText(data.error, errorDiv);
                 terminal.appendChild(errorDiv);
             }
 
