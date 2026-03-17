@@ -1,8 +1,79 @@
 {% extends "base.html" %}
 
 {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Real-time updates via Socket.IO
+    const socket = io();
+
+    function updateCounters() {
+        const pending = document.querySelectorAll('tbody tr .badge-status-pending').length;
+        const executing = document.querySelectorAll('tbody tr .badge-status-executing').length;
+        const completed = document.querySelectorAll('tbody tr .badge-status-completed').length;
+        
+        const badges = document.querySelectorAll('.card-header .badge');
+        badges.forEach(b => {
+            if (b.textContent.includes('Pending')) b.textContent = `Pending: ${pending}`;
+            if (b.textContent.includes('Executing')) b.textContent = `Executing: ${executing}`;
+            if (b.textContent.includes('Completed')) b.textContent = `Completed: ${completed}`;
+        });
+    }
+
+    socket.on('new_task', function(data) {
+        console.log('New task via socket:', data);
+        if (document.getElementById(`task-row-${data.task_id}`)) return;
+        
+        const tbody = document.querySelector('table tbody');
+        const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        const row = document.createElement('tr');
+        row.id = `task-row-${data.task_id}`;
+        row.innerHTML = `
+            <td>${data.task_id}</td>
+            <td><span class="badge bg-primary">${data.task_type}</span></td>
+            <td><a href="/agent_detail/${data.agent_id}" class="text-decoration-none">${data.agent_id.substring(0, 8)}</a></td>
+            <td><span class="badge bg-primary badge-status-pending">pending</span></td>
+            <td>${now}</td>
+            <td class="completed-at">-</td>
+            <td>
+                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#taskModal${data.task_id}" data-agent-id="${data.agent_id}">
+                    <i class="fas fa-info-circle"></i>
+                </button>
+            </td>
+        `;
+        tbody.insertBefore(row, tbody.firstChild);
+        updateCounters();
+    });
+
+    socket.on('task_executing', function(data) {
+        console.log('Task executing via socket:', data);
+        const row = document.getElementById(`task-row-${data.task_id}`);
+        if (row) {
+            const badge = row.querySelector('[class*="badge-status-"]');
+            if (badge) {
+                badge.className = 'badge bg-warning badge-status-executing';
+                badge.textContent = 'executing';
+                updateCounters();
+            }
+        }
+    });
+
+    socket.on('task_complete', function(data) {
+        console.log('Task complete via socket:', data);
+        const row = document.getElementById(`task-row-${data.task_id}`);
+        if (row) {
+            const badge = row.querySelector('[class*="badge-status-"]');
+            if (badge) {
+                badge.className = 'badge bg-success badge-status-completed';
+                badge.textContent = 'completed';
+                
+                const completedAt = row.querySelector('.completed-at');
+                if (completedAt) completedAt.textContent = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                
+                updateCounters();
+            }
+        }
+    });
     console.log('Tasks page loaded, setting up modal handler');
 
     // Load shellcode output when modal is shown
@@ -137,7 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </thead>
                     <tbody>
                         {% for task in tasks %}
-                        <tr>
+                        <tr id="task-row-{{ task.id }}">
                             <td>{{ task.id }}</td>
                             <td>
                                 <span class="badge bg-{{ 'info' if task.task_type == 'shell' else 'primary' }}">
@@ -150,12 +221,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 </a>
                             </td>
                             <td>
-                                <span class="badge bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
+                                <span class="badge badge-status-{{ task.status }} bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
                                     {{ task.status }}
                                 </span>
                             </td>
                             <td>{{ task.created_at }}</td>
-                            <td>{{ task.completed_at if task.completed_at else '-' }}</td>
+                            <td class="completed-at">{{ task.completed_at if task.completed_at else '-' }}</td>
                             <td>
                                 <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#taskModal{{ task.id }}" data-agent-id="{{ task.agent_id }}">
                                     <i class="fas fa-info-circle"></i>
