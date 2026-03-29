@@ -147,6 +147,11 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link {% if request.path == url_for('arsenal') %}active{% endif %}" href="{{ url_for('arsenal') }}">
+                        <i class="fas fa-tools me-2"></i>Arsenal
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link {% if request.path == url_for('screenshots') %}active{% endif %}" href="{{ url_for('screenshots') }}">
                         <i class="fas fa-camera me-2"></i>Screenshots
                     </a>

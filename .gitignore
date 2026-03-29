@@ -9,7 +9,9 @@ glycon/shellcodes/
 glycon/agents/agent.py
 agents/agent.py
 glycon/uploads/
+uploads/arsenal
 TODO.md
+todo.md
 
 # ==========================================
 # PYTHON (Byte-code, Pakker, Miljø)

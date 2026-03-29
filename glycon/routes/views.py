@@ -11,7 +11,7 @@ def init_view_routes(app):
     def inject_config():
         return dict(config=CONFIG, base_url='')
     
-    @app.route('/8b7c6/')
+    @app.route('/')
     @app.route('/')
     @login_required
     def dashboard():
@@ -389,4 +389,21 @@ def init_view_routes(app):
                  for row in c.fetchall()]
         conn.close()
         return render_template('tasks.html', tasks=tasks)
+
+    @app.route('/arsenal')
+    @login_required
+    def arsenal():
+        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
+        os.makedirs(arsenal_dir, exist_ok=True)
+        files = []
+        for filename in os.listdir(arsenal_dir):
+            file_path = os.path.join(arsenal_dir, filename)
+            if os.path.isfile(file_path):
+                stat = os.stat(file_path)
+                files.append({
+                    'name': filename,
+                    'size': stat.st_size,
+                    'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                })
+        return render_template('arsenal.html', files=files)
     

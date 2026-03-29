@@ -90,14 +90,30 @@ def create_app():
     @app.before_request
     def check_ip_whitelist():
         # Skip IP check for API endpoints that agents use (they should be authenticated differently)
-        if (request.path.startswith('/api/checkin') or
-            request.path.startswith('/api/task_result') or
-            request.path.startswith('/api/shellcode_output') or
-            request.path.startswith('/api/killdate_reached') or
-            request.path.startswith('/api/agent_terminated') or
-            request.path.startswith('/api/verify_termination') or
-            request.path in ['/login', '/logout', '/static']):
+                # Handle dynamic prefix for agent endpoints
+        path = request.path
+        # List of agent endpoints to bypass whitelist
+        agent_endpoints = [
+            '/api/checkin', 
+            '/api/task_result', 
+            '/api/shellcode_output', 
+            '/api/killdate_reached', 
+            '/api/agent_terminated', 
+            '/api/verify_termination',
+            '/login',
+            '/logout',
+            '/static'
+        ]
+        
+        is_agent_path = False
+        for ep in agent_endpoints:
+            if path.endswith(ep):
+                is_agent_path = True
+                break
+        
+        if is_agent_path:
             return
+
 
         # Get client IP (handle X-Forwarded-For for proxies)
         client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)

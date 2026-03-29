@@ -1718,10 +1718,7 @@ class SystemUtils:
                 return {{'status': 'error', 'message': 'File not found'}}
             
             # Use MAX_UPLOAD_SIZE if available, else default to 100MB
-            try:
-                max_size = Config.MAX_UPLOAD_SIZE
-            except:
-                max_size = 100 * 1024 * 1024
+            max_size = 10 * 1024 * 1024
 
             if os.path.getsize(filepath) > max_size:
                 return {{'status': 'error', 'message': 'File too large'}}
@@ -1738,7 +1735,6 @@ class SystemUtils:
         except Exception as e:
             return {{'status': 'error', 'message': str(e)}}
 
-    @staticmethod
     @staticmethod
     def download_file(filename, data, folder=None):
         try:

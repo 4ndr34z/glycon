@@ -97,6 +97,39 @@
         </div>
     </div>
 </div>
+
+<!-- Arsenal Upload Modal -->
+<div class="modal fade" id="arsenalUploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-dark">Arsenal Upload to Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark">
+                <div class="mb-3">
+                    <label for="arsenalFileSelect" class="form-label">Select File from Arsenal</label>
+                    <select class="form-select" id="arsenalFileSelect" required>
+                        <option value="">Loading files...</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="arsenalDestinationFolder" class="form-label">Destination Folder</label>
+                    <input type="text" class="form-control" id="arsenalDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
+                    <small class="text-muted">Full path where the file should be saved on the agent</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Or Upload New File to Arsenal & Send</label>
+                    <input class="form-control" type="file" id="newArsenalFile">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="arsenalUploadBtn">Send to Agent</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -414,13 +447,55 @@ document.addEventListener('DOMContentLoaded', function() {
         const command = commandInput.value.trim();
         if (command) {
             // Handle #upload shortcut with modal
-            if (command.toLowerCase() === '#upload') {
-                const uploadModal = new bootstrap.Modal(document.getElementById('uploadFileModal'));
+            if (command.toLowerCase().startsWith('#upload')) {
+                const parts = command.split(' ');
+                const arsenalModal = new bootstrap.Modal(document.getElementById('arsenalUploadModal'));
+                
                 // Set the current directory in the destination folder input
                 if (currentDir && currentDir !== '?') {
-                    document.getElementById('uploadDestinationFolder').value = currentDir;
+                    document.getElementById('arsenalDestinationFolder').value = currentDir;
                 }
-                uploadModal.show();
+
+                if (parts.length > 1) {
+                    const filename = parts[1];
+                    const folder = parts.length > 2 ? parts[2] : currentDir;
+                    document.getElementById('arsenalDestinationFolder').value = folder;
+                    
+                    // Pre-select file in dropdown if it exists
+                    fetch('/api/arsenal/list')
+                        .then(r => r.json())
+                        .then(data => {
+                            const select = document.getElementById('arsenalFileSelect');
+                            select.innerHTML = '<option value="">Select a file</option>';
+                            let found = false;
+                            if (data.status === 'success' && data.files) {
+                                data.files.forEach(f => {
+                                    const selected = f === filename ? 'selected' : '';
+                                    if (f === filename) found = true;
+                                    select.innerHTML += `<option value="${f}" ${selected}>${f}</option>`;
+                                });
+                            }
+                            if (!found && filename) {
+                                // Add as temporary option if not found
+                                select.innerHTML += `<option value="${filename}" selected>${filename} (Not found in Arsenal!)</option>`;
+                            }
+                        });
+                } else {
+                    // Just #upload, show normal arsenal modal
+                    fetch('/api/arsenal/list')
+                        .then(r => r.json())
+                        .then(data => {
+                            const select = document.getElementById('arsenalFileSelect');
+                            select.innerHTML = '<option value="">Select a file</option>';
+                            if (data.status === 'success' && data.files) {
+                                data.files.forEach(f => {
+                                    select.innerHTML += `<option value="${f}">${f}</option>`;
+                                });
+                            }
+                        });
+                }
+                
+                arsenalModal.show();
                 commandInput.value = '';
                 return;
             }
@@ -564,6 +639,97 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event listeners
     sendButton.addEventListener('click', sendCommand);
     
+    // Arsenal upload handler
+    document.getElementById('arsenalUploadBtn').addEventListener('click', async function() {
+        const fileSelect = document.getElementById('arsenalFileSelect');
+        const newFile = document.getElementById('newArsenalFile');
+        const destinationFolder = document.getElementById('arsenalDestinationFolder').value.trim();
+        const agentId = "{{ agent.id }}";
+        
+        try {
+            if (!destinationFolder) {
+                throw new Error('Please specify a destination folder');
+            }
+
+            let filename = '';
+            let fileData = '';
+
+            if (newFile.files.length > 0) {
+                // Upload new file to arsenal first
+                const file = newFile.files[0];
+                filename = file.name;
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const uploadResp = await fetch('/api/arsenal/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const uploadData = await uploadResp.json();
+                if (uploadData.status !== 'success') throw new Error('Failed to upload file to arsenal');
+                
+                // Read file as base64 for the agent task
+                const reader = new FileReader();
+                reader.onload = async function() {
+                    const base64Data = reader.result.split(',')[1];
+                    await createArsenalTask(agentId, filename, destinationFolder, base64Data);
+                };
+                reader.readAsDataURL(file);
+                return;
+            } else if (fileSelect.value) {
+                filename = fileSelect.value;
+                // Fetch file from arsenal and convert to base64
+                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${filename}`);
+                const blob = await fileResp.blob();
+                const reader = new FileReader();
+                reader.onload = async function() {
+                    const base64Data = reader.result.split(',')[1];
+                    await createArsenalTask(agentId, filename, destinationFolder, base64Data);
+                };
+                reader.readAsDataURL(blob);
+                return;
+            } else {
+                throw new Error('Please select a file or upload a new one');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showAlert('Failed: ' + error.message, 'danger');
+        }
+    });
+
+    async function createArsenalTask(agentId, filename, folder, base64Data) {
+        try {
+            const response = await fetch('/api/upload_file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    agent_id: agentId,
+                    filename: filename,
+                    folder: folder,
+                    data: base64Data,
+                    size: (base64Data.length * 3) / 4
+                })
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to create task');
+            
+            const successDiv = document.createElement('div');
+            successDiv.style.color = '#00ff00';
+            successDiv.style.fontFamily = 'Consolas, monospace';
+            successDiv.textContent = `[+] Arsenal upload task created successfully (ID: ${data.task_id})`;
+            terminal.appendChild(successDiv);
+            terminal.scrollTop = terminal.scrollHeight;
+            
+            bootstrap.Modal.getInstance(document.getElementById('arsenalUploadModal')).hide();
+        } catch (error) {
+            showAlert('Failed: ' + error.message, 'danger');
+        }
+    }
+
     killProcessButton.addEventListener('click', function() {
         // Show list of running processes if any
         const runningProcesses = document.querySelectorAll('.running-process-id');
