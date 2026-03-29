@@ -101,6 +101,15 @@ class Config:
         ''')
 
         c.execute('''
+            CREATE TABLE IF NOT EXISTS audio_captures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                audio BLOB,
+                timestamp TEXT NOT NULL
+            )
+        ''')
+
+        c.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT UNIQUE,

