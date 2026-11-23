@@ -70,6 +70,16 @@
                             <span>Arsenal</span>
                         </a>
                     </li>
+                    <li>
+                        {% set active = request.path == url_for('vaporlink_view') %}
+                        <a href="{{ url_for('vaporlink_view') }}" class="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            <span class="flex items-center gap-3">
+                                {{ icon('vaporlink', 'w-4 h-4 shrink-0') }}
+                                <span>VaporLink Pivot</span>
+                            </span>
+                            <span class="px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">SOCKS5</span>
+                        </a>
+                    </li>
                 </ul>
             </div>
 

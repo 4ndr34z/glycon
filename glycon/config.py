@@ -13,8 +13,16 @@ class Config:
         self.screenshot_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'screenshots'))
         self.max_content_length = 500 * 1024 * 1024  # 500MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.version = "2.1.3"
         self.monitor_token = secrets.token_urlsafe(32)  
+
+    @property
+    def version(self) -> str:
+        try:
+            from bump_version import get_version
+            return get_version()
+        except Exception:
+            return "2.1.4"
+
 
         
        

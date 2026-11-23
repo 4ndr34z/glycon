@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EdgeNode Gateway — System Status</title>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --card: #111827;
+            --border: #1f2937;
+            --text: #f3f4f6;
+            --muted: #9ca3af;
+            --accent: #10b981;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1.5rem;
+        }
+        .container {
+            max-width: 540px;
+            width: 100%;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+        .title { font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em; }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--accent);
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 0.35rem 0.75rem;
+            border-radius: 9999px;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--accent);
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .metric {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .metric-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .metric-val { font-size: 1.1rem; font-weight: 600; margin-top: 0.35rem; }
+        .footer {
+            font-size: 0.8rem;
+            color: var(--muted);
+            text-align: center;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title">EdgeNode Telemetry Gateway</div>
+            <div class="badge"><span class="dot"></span> Operational</div>
+        </div>
+        <div class="metrics">
+            <div class="metric">
+                <div class="metric-label">API Ingress</div>
+                <div class="metric-val">Healthy (99.99%)</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">TLS Termination</div>
+                <div class="metric-val">TLS 1.3 Active</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Stream Engine</div>
+                <div class="metric-val">Async v2.4</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Region</div>
+                <div class="metric-val">eu-north-1</div>
+            </div>
+        </div>
+        <div class="footer">
+            EdgeNode Core Infrastructure &bull; All services running normally.
+        </div>
+    </div>
+</body>
+</html>

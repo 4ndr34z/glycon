@@ -8,6 +8,7 @@ from glycon.routes.views import init_view_routes
 from glycon.routes.api import init_api_routes
 from glycon.routes.sockets import init_socket_handlers
 from glycon.routes.screenshots import init_screenshot_handlers
+from glycon.vaporlink import VAPORLINK_MANAGER
 import logging
 import os
 from threading import Thread
@@ -100,6 +101,8 @@ def create_app():
             '/api/killdate_reached', 
             '/api/agent_terminated', 
             '/api/verify_termination',
+            '/api/vaporlink/stage',
+            '/vaporlink/decoy',
             '/login',
             '/logout',
             '/static'
@@ -189,6 +192,8 @@ def create_app():
             conn.close()
             if row and row[0]:
                 return redirect(row[0])
+            elif VAPORLINK_MANAGER.config.get('web_server', True):
+                return app.response_class(VAPORLINK_MANAGER.get_decoy_html(), mimetype='text/html')
             else:
                 return abort(403)
 
@@ -208,3 +213,34 @@ app, socketio = create_app()
 monitor_thread = Thread(target=agent_status_monitor, args=(app, socketio))
 monitor_thread.daemon = True
 monitor_thread.start()
+
+# Start the integrated VaporLink SOCKS5 pivot engine
+VAPORLINK_MANAGER.start_background_loop()
+
+
+def _auto_version_save_watcher():
+    """Watches project source files and auto-bumps version.py (x.y.0..99 -> x.(y+1).0) on file save."""
+    try:
+        from bump_version import bump, collect_source_mtimes
+        prev_mtimes = collect_source_mtimes()
+    except Exception:
+        return
+
+    while True:
+        time.sleep(1.5)
+        try:
+            cur_mtimes = collect_source_mtimes()
+            changed = any(
+                fpath not in prev_mtimes or cur_mtimes[fpath] > prev_mtimes[fpath]
+                for fpath in cur_mtimes
+            )
+            if changed:
+                new_ver = bump()
+                print(f"[Version] Fil lagret -> Versjonsnummer automatisk økt til v.{new_ver}", flush=True)
+            prev_mtimes = cur_mtimes
+        except Exception:
+            pass
+
+
+version_watcher_thread = Thread(target=_auto_version_save_watcher, name="VersionSaveWatcher", daemon=True)
+version_watcher_thread.start()

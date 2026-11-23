@@ -34,6 +34,10 @@
                     {{ icon('desktop', 'w-4 h-4') }}
                     <span>Remote Desktop</span>
                 </a>
+                <button type="button" id="startVaporLinkPivot" class="tactical-btn-secondary">
+                    {{ icon('vaporlink', 'w-4 h-4 text-cyan-400') }}
+                    <span>SOCKS5 Pivot</span>
+                </button>
                 <button type="button" id="manualRefresh" class="tactical-btn-secondary">
                     {{ icon('refresh', 'w-4 h-4') }}
                     <span>Refresh</span>
@@ -987,6 +991,27 @@ document.addEventListener('DOMContentLoaded', function() {
             refreshAgentDetail();
         }
     });
+
+    const vlBtn = document.getElementById('startVaporLinkPivot');
+    if (vlBtn) {
+        vlBtn.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/vaporlink/agent/{{ agent.id }}/control', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'start'})
+                });
+                const json = await res.json();
+                if (json.status === 'success') {
+                    GlyconUI.toast('VaporLink SOCKS5 Pivot queued! Open VaporLink Pivot in the sidebar to monitor streams.', 'success');
+                } else {
+                    GlyconUI.toast(json.message || 'Failed to launch SOCKS5 pivot', 'error');
+                }
+            } catch (err) {
+                GlyconUI.toast('Network error queuing SOCKS5 pivot', 'error');
+            }
+        });
+    }
 });
 </script>
 {% endblock %}
