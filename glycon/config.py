@@ -4,8 +4,8 @@ import sqlite3, secrets
 
 class Config:
     def __init__(self):
-        self.host = "0.0.0.0"
-        self.port = 443
+        self.host = os.getenv("GLYCON_HOST", "0.0.0.0")
+        self.port = int(os.getenv("GLYCON_HTTPS_PORT", "443"))
         self.database = "c2.db"
         self.aes_key = b"32bytekey-ultra-tecure-123456789"
         self.aes_iv = b"16byteiv-9876543"
