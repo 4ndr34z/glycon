@@ -107,3 +107,7 @@ docs/_build/
 profile_default/
 ipython_config.py
 donut/
+.agents/
+.gemini/
+.venv/
+node_modules/

@@ -1,135 +1,134 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon %}
+
+{% block title %}Screenshots{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-5"> 
-    <h2 class="mb-4"><i class="fas fa-camera me-2"></i>Screenshots</h2>
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-100">Captured Screenshots</h1>
+            <p class="text-sm text-slate-400 mt-0.5">Visual desktop captures collected from active beacons (click any image to inspect full-screen)</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="px-3 py-1 rounded-full text-xs font-mono bg-slate-900 border border-slate-800 text-slate-300">
+                Total: {{ screenshots|length }}
+            </span>
+        </div>
+    </div>
 
-    <div class="row" id="screenshots-container">
+    <!-- Gallery Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5" id="screenshots-container">
         {% for screenshot in screenshots %}
-        <div class="col-md-4 col-lg-3 mb-4 screenshot-card" data-screenshot-id="{{ screenshot.id }}">
-            <div class="card shadow-sm h-100">
-                <a href="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" data-lightbox="screenshots">
-                    <img src="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" class="card-img-top" alt="Screenshot">
-                </a>
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">
-                        <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=screenshot.agent_id) }}" class="text-decoration-none">
-                            {{ screenshot.hostname }}
-                        </a>
-                    </h6>
-                    <p class="card-text text-muted small">
-                        <i class="far fa-clock me-1"></i>{{ screenshot.timestamp }}
-                    </p>
-                    <button class="btn btn-sm btn-outline-danger delete-screenshot" 
-                            data-screenshot-id="{{ screenshot.id }}">
-                        <i class="fas fa-trash-alt"></i> Delete
-                    </button>
+        <div class="tactical-card group flex flex-col screenshot-card" data-screenshot-id="{{ screenshot.id }}">
+            <a href="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+               data-lightbox="screenshots"
+               data-title="{{ screenshot.hostname }} — {{ screenshot.timestamp }}"
+               class="relative block aspect-video bg-slate-950 overflow-hidden">
+                <img src="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                     alt="Screenshot">
+                <div class="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span class="px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-700 text-xs font-medium text-slate-100 flex items-center gap-1.5">
+                        {{ icon('eye', 'w-4 h-4 text-emerald-400') }}
+                        <span>View Fullscreen</span>
+                    </span>
                 </div>
+            </a>
+            <div class="p-4 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=screenshot.agent_id) }}"
+                       class="text-sm font-semibold text-emerald-400 hover:text-emerald-300 hover:underline truncate block">
+                        {{ screenshot.hostname }}
+                    </a>
+                    <p class="text-xs font-mono text-slate-400 flex items-center gap-1.5 mt-1 caption">
+                        {{ icon('clock', 'w-3.5 h-3.5 text-slate-500') }}
+                        <span>{{ screenshot.timestamp }}</span>
+                    </p>
+                </div>
+                <button type="button"
+                        class="p-2 rounded-lg bg-slate-800/80 text-rose-400 hover:bg-rose-500/20 border border-slate-700/80 hover:border-rose-500/40 transition-colors delete-screenshot shrink-0"
+                        data-screenshot-id="{{ screenshot.id }}"
+                        title="Delete Screenshot">
+                    {{ icon('trash', 'w-4 h-4') }}
+                </button>
             </div>
+        </div>
+        {% else %}
+        <div class="col-span-full tactical-card p-12 text-center">
+            <div class="w-12 h-12 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-400 mx-auto mb-3">
+                {{ icon('camera', 'w-6 h-6') }}
+            </div>
+            <h3 class="text-base font-semibold text-slate-200">No Screenshots Captured</h3>
+            <p class="text-xs text-slate-400 mt-1">Queue a screenshot task on an active agent to populate this gallery.</p>
         </div>
         {% endfor %}
     </div>
 </div>
 {% endblock %}
 
-{% block extra_css %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/css/lightbox.min.css">
-{% endblock %}
-
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
 <script>
-// Initialize lightbox after ensuring jQuery is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize lightbox if available
-    if (window.lightbox) {
-        lightbox.option({
-            'resizeDuration': 200,
-            'wrapAround': true,
-            'albumLabel': "Screenshot %1 of %2"
-        });
-    }
-
-    // Connect to Socket.IO with error handling
     let socket;
     try {
         socket = io('/screenshots');
-        console.log('Socket.IO connected successfully');
     } catch (e) {
         console.error('Socket.IO connection failed:', e);
-        alert('Real-time features disabled. Please refresh the page.');
-        return;
     }
 
-    // Improved delete handler with event delegation
-    document.getElementById('screenshots-container').addEventListener('click', function(e) {
+    document.getElementById('screenshots-container').addEventListener('click', async function(e) {
         const deleteBtn = e.target.closest('.delete-screenshot');
-        if (deleteBtn) {
-            const screenshotId = deleteBtn.dataset.screenshotId;
-            if (confirm('Are you sure you want to delete this screenshot?')) {
-                deleteScreenshot(screenshotId, socket);
-            }
+        if (!deleteBtn) return;
+
+        const screenshotId = deleteBtn.dataset.screenshotId;
+        const confirmed = await GlyconUI.confirm({
+            title: 'Delete Screenshot',
+            message: 'Are you sure you want to permanently delete this screenshot?',
+            confirmText: 'Delete Screenshot',
+            variant: 'danger'
+        });
+        if (confirmed) {
+            deleteScreenshot(screenshotId, socket);
         }
     });
 
-    // Handle server responses
-    socket.on('screenshot_deleted', function(data) {
-        const card = document.querySelector(`[data-screenshot-id="${data.screenshot_id}"]`);
-        if (card) {
-            card.remove();
-            showNotification('Screenshot deleted successfully', 'success');
-        }
-    });
-
-    socket.on('screenshots_error', function(data) {
-        console.error('Server error:', data.error);
-        showNotification(data.error, 'error');
-    });
-
-    async function deleteScreenshot(id, socket) {
-    try {
-        // First try WebSocket
-        if (socket && socket.connected) {
-            socket.emit('delete_screenshot', { screenshot_id: id });
-            return;
-        }
-        
-        // Fallback to HTTP
-        const response = await fetch(`/api/screenshots/${id}`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
+    if (socket) {
+        socket.on('screenshot_deleted', function(data) {
+            const card = document.querySelector(`[data-screenshot-id="${data.screenshot_id}"]`);
+            if (card) {
+                card.remove();
+                GlyconUI.toast('Deleted', 'Screenshot deleted', 'success');
             }
         });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || 'Failed to delete screenshot');
-        }
-        
-        // Manually remove the element if WebSocket didn't notify us
-        const card = document.querySelector(`[data-screenshot-id="${id}"]`);
-        if (card) {
-            card.remove();
-        }
-        showNotification('Screenshot deleted successfully', 'success');
-        
-    } catch (error) {
-        console.error('Delete failed:', error);
-        showNotification('Delete failed: ' + error.message, 'error');
-    }
-}
 
-    function showNotification(message, type) {
-        // Simple notification - replace with your preferred UI
-        const alert = document.createElement('div');
-        alert.className = `alert alert-${type} fixed-top mx-auto mt-3`;
-        alert.style.width = '300px';
-        alert.style.zIndex = '1000';
-        alert.textContent = message;
-        document.body.appendChild(alert);
-        setTimeout(() => alert.remove(), 3000);
+        socket.on('screenshots_error', function(data) {
+            GlyconUI.toast('Error', data.error, 'danger');
+        });
+    }
+
+    async function deleteScreenshot(id, socket) {
+        try {
+            if (socket && socket.connected) {
+                socket.emit('delete_screenshot', { screenshot_id: id });
+                return;
+            }
+
+            const response = await fetch(`/api/screenshots/${id}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to delete screenshot');
+            }
+
+            document.querySelector(`[data-screenshot-id="${id}"]`)?.remove();
+            GlyconUI.toast('Deleted', 'Screenshot deleted successfully', 'success');
+        } catch (error) {
+            GlyconUI.toast('Delete Failed', error.message, 'danger');
+        }
     }
 });
 </script>

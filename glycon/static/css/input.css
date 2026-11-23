@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-200;
+  }
+
+  /* Custom dark tactical scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-950;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-800 rounded-full border-2 border-slate-950 hover:bg-slate-700;
+  }
+}
+
+@layer components {
+  .tactical-card {
+    @apply bg-slate-900/80 backdrop-blur-md border border-slate-800/80 rounded-xl shadow-lg overflow-hidden;
+  }
+
+  .tactical-card-header {
+    @apply px-5 py-4 border-b border-slate-800/80 bg-slate-900/50 flex items-center justify-between gap-4;
+  }
+
+  .tactical-input {
+    @apply w-full bg-slate-950/90 border border-slate-800 rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500/70 focus:ring-2 focus:ring-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tactical-select {
+    @apply bg-slate-950/90 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500/70 focus:ring-2 focus:ring-emerald-500/20 transition-all;
+  }
+
+  .tactical-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 active:bg-emerald-700 shadow-sm shadow-emerald-950/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tactical-btn-cyan {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-500 active:bg-cyan-700 shadow-sm shadow-cyan-950/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tactical-btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-rose-600/90 text-white hover:bg-rose-500 active:bg-rose-700 shadow-sm shadow-rose-950/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tactical-btn-warning {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-amber-600/90 text-white hover:bg-amber-500 active:bg-amber-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tactical-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium bg-slate-800/90 text-slate-200 border border-slate-700/80 hover:bg-slate-700/80 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tactical-btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent hover:border-slate-700/70 transition-all;
+  }
+
+  .tactical-table {
+    @apply w-full text-left border-collapse text-sm;
+  }
+
+  .tactical-table thead th {
+    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400 bg-slate-950/60 border-b border-slate-800/80 select-none;
+  }
+
+  .tactical-table tbody tr {
+    @apply border-b border-slate-800/50 hover:bg-slate-800/35 transition-colors;
+  }
+
+  .tactical-table tbody td {
+    @apply px-4 py-3 text-slate-200 align-middle;
+  }
+
+  /* Agent status row highlights */
+  tr.agent-online {
+    @apply bg-emerald-500/[0.03] hover:bg-emerald-500/[0.08];
+  }
+  tr.agent-inactive {
+    @apply bg-amber-500/[0.03] hover:bg-amber-500/[0.08];
+  }
+  tr.agent-offline {
+    @apply bg-rose-500/[0.02] hover:bg-rose-500/[0.06] text-slate-400;
+  }
+
+  /* Resizable table column handle */
+  .resizable-table th {
+    position: relative;
+    min-width: 60px;
+  }
+  .resizable-table th .resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    opacity: 0;
+    transition: opacity 0.15s;
+    background: rgba(16, 185, 129, 0.35);
+  }
+  .resizable-table th:hover .resize-handle,
+  .resizable-table th.resizing .resize-handle {
+    opacity: 1;
+  }
+}

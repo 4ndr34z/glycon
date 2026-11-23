@@ -1,219 +1,221 @@
+{% from "macros.html" import icon %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="{{ url_for('static', filename='images/glycon2.png') }}" type="image/jpeg">
-    <title>Glycon - Command & Control Server</title>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Custom CSS -->
-    <style>
-        body {
-            position: relative;
-            min-height: 100vh;
-            padding-bottom: 40px;
-        }
-        .sidebar {
-            position: fixed;
-            top: 56px;
-            bottom: 0;
-            left: 0;
-            z-index: 100;
-            padding: 20px 0;
-            background-color: #343a40;
-            color: white;
-        }
-        .sidebar-sticky {
-            position: relative;
-            height: calc(100vh - 56px);
-            overflow-x: hidden;
-            overflow-y: auto;
-        }
-        .nav-link {
-            color: rgba(255, 255, 255, 0.75);
-        }
-        .nav-link:hover {
-            color: rgba(255, 255, 255, 1);
-        }
-        .nav-link.active {
-            color: white;
-            font-weight: bold;
-        }
-        .main-content {
-            margin-left: 220px;
-            padding: 20px;
-            padding-bottom: 40px; 
-        }
-        .agent-status-online {
-            color: #1b08ca;
-        }
-        .agent-status-offline {
-            color: #dc3545;
-        }
-
-        .agent-status-inactive {
-            color: #dc8935;
-        }
-
-        .agent-inactive {
-            color: #dc8935;
-        }
-
-        .card-header {
-            font-weight: 500;
-        }
-
-        .footer {
-            position: absolute;
-            bottom: 0;
-            width: calc(100% - 220px);
-            left: 220px;
-            background-color: #343a40 !important;
-            color: white !important;
-            padding: 0.5rem 1.5rem;
-            font-size: 0.8rem;
-        }
-        
- 
-        #terminal {
-        font-family: Consolas, monospace;
-        white-space: pre;
-        line-height: 1.2;
-        }
-        .input-group-text {
-        min-width: 150px; /* Ensure prompt has enough space */
-        overflow: hidden;
-        text-overflow: ellipsis;
-        }
-
-    </style>
+    <link rel="icon" href="{{ url_for('static', filename='images/glycon2.png') }}" type="image/png">
+    <title>{% block title %}Command & Control{% endblock %} — Glycon C2</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
     {% block extra_css %}{% endblock %}
+    {% block head %}{% endblock %}
 </head>
-<body>
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
-                <img src="{{ url_for('static', filename='images/glycon2.png') }}" alt="Logo" height="30" class="d-inline-block align-text-top me-2">
-                Glycon - C2 Server
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm hidden lg:hidden"></div>
+
+    <!-- Tactical Left Sidebar -->
+    <aside id="app-sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-slate-900/95 backdrop-blur-xl border-r border-slate-800/80 flex flex-col transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
+        <!-- Brand Header -->
+        <div class="h-16 px-5 flex items-center justify-between border-b border-slate-800/80">
+            <a href="{{ url_for('dashboard') }}" class="flex items-center gap-3 group">
+                <div class="w-9 h-9 rounded-lg bg-slate-800/90 border border-slate-700/80 p-1 flex items-center justify-center group-hover:border-emerald-500/50 transition-colors">
+                    <img src="{{ url_for('static', filename='images/glycon2.png') }}" alt="Glycon" class="w-full h-full object-contain">
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold tracking-tight text-slate-100 text-base">GLYCON</span>
+                        <span class="px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">C2</span>
+                    </div>
+                    <p class="text-[11px] font-mono text-slate-400">v.{{ config.version }}</p>
+                </div>
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
+            <button type="button" id="sidebar-close-btn" class="lg:hidden text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
             </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
-                            <i class="fas fa-user-circle me-1"></i>{{ current_user.id }}
+        </div>
+
+        <!-- Navigation Links -->
+        <nav class="flex-1 overflow-y-auto px-3 py-5 space-y-6">
+            <!-- Operations -->
+            <div>
+                <p class="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Operations</p>
+                <ul class="space-y-1">
+                    <li>
+                        {% set active = request.path == url_for('dashboard') %}
+                        <a href="{{ url_for('dashboard') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('dashboard', 'w-4 h-4 shrink-0') }}
+                            <span>Dashboard</span>
                         </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="#"><i class="fas fa-user-cog me-2"></i>Settings</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
-                        </ul>
+                    </li>
+                    <li>
+                        {% set active = request.path.startswith('/agent') or request.path.startswith('/terminal') or request.path.startswith('/remote_desktop') %}
+                        <a href="{{ url_for('agents') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('agents', 'w-4 h-4 shrink-0') }}
+                            <span>Agents</span>
+                        </a>
+                    </li>
+                    <li>
+                        {% set active = request.path == url_for('tasks') %}
+                        <a href="{{ url_for('tasks') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('terminal', 'w-4 h-4 shrink-0') }}
+                            <span>Tasks</span>
+                        </a>
+                    </li>
+                    <li>
+                        {% set active = request.path == url_for('arsenal') %}
+                        <a href="{{ url_for('arsenal') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('tools', 'w-4 h-4 shrink-0') }}
+                            <span>Arsenal</span>
+                        </a>
                     </li>
                 </ul>
             </div>
-        </div>
-    </nav>
 
-    <!-- Sidebar -->
-    <div class="sidebar d-none d-lg-block" style="width: 220px;">
-        <div class="sidebar-sticky">
-            <ul class="nav flex-column">
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('dashboard') %}active{% endif %}" href="{{ url_for('dashboard') }}">
-                        <i class="fas fa-tachometer-alt me-2"></i>Dashboard
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('agents') %}active{% endif %}" href="{{ url_for('agents') }}">
-                        <i class="fas fa-robot me-2"></i>Agents
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('credentials') %}active{% endif %}" href="{{ url_for('credentials') }}">
-                        <i class="fas fa-key me-2"></i>Credentials & Loot
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('tasks') %}active{% endif %}" href="{{ url_for('tasks') }}">
-                        <i class="fas fa-terminal me-2"></i>Tasks
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('arsenal') %}active{% endif %}" href="{{ url_for('arsenal') }}">
-                        <i class="fas fa-tools me-2"></i>Arsenal
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('screenshots') %}active{% endif %}" href="{{ url_for('screenshots') }}">
-                        <i class="fas fa-camera me-2"></i>Screenshots
-                    </a>
-                </li>
-                <li class="nav-item mt-3">
-                    <hr class="bg-secondary">
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.path == url_for('settings') %}active{% endif %}" href="{{ url_for('settings') }}">
-                        <i class="fas fa-cog me-2"></i>Settings
-                    </a>
-                </li>
-            </ul>
-        </div>
-    </div>
+            <!-- Intelligence & Loot -->
+            <div>
+                <p class="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Intelligence & Loot</p>
+                <ul class="space-y-1">
+                    <li>
+                        {% set active = request.path == url_for('credentials') %}
+                        <a href="{{ url_for('credentials') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('key', 'w-4 h-4 shrink-0') }}
+                            <span>Credentials & Loot</span>
+                        </a>
+                    </li>
+                    <li>
+                        {% set active = request.path == url_for('screenshots') %}
+                        <a href="{{ url_for('screenshots') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('camera', 'w-4 h-4 shrink-0') }}
+                            <span>Screenshots</span>
+                        </a>
+                    </li>
+                    <li>
+                        {% set active = request.path == url_for('webcam_captures') %}
+                        <a href="{{ url_for('webcam_captures') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('webcam', 'w-4 h-4 shrink-0') }}
+                            <span>Webcam Captures</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
 
-    <!-- Main Content -->
-    <main class="main-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <!-- System -->
+            <div>
+                <p class="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">System</p>
+                <ul class="space-y-1">
+                    <li>
+                        {% set active = request.path == url_for('settings') %}
+                        <a href="{{ url_for('settings') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
+                            {{ icon('settings', 'w-4 h-4 shrink-0') }}
+                            <span>Settings</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- Operator Footer -->
+        <div class="p-3 border-t border-slate-800/80 bg-slate-950/50">
+            <div class="flex items-center justify-between px-2 py-1.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                        {{ icon('user', 'w-4 h-4') }}
                     </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container-fluid">
-            <div class="row">
-                <div class="col text-end text-white">
-                    Glycon - C2 Server v.{{ config.version }} by 4ndr34z
+                    <div class="min-w-0">
+                        <p class="text-xs font-semibold text-slate-200 truncate">{{ current_user.id if current_user.is_authenticated else 'Operator' }}</p>
+                        <p class="text-[11px] text-emerald-400 flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Authenticated
+                        </p>
+                    </div>
                 </div>
+                <a href="{{ url_for('logout') }}" class="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors" title="Log out">
+                    {{ icon('logout', 'w-4 h-4') }}
+                </a>
             </div>
         </div>
-    </footer>
+    </aside>
 
+    <!-- Main Content Area -->
+    <div class="lg:pl-64 flex-1 flex flex-col min-h-screen">
+        <!-- Top Header -->
+        <header class="sticky top-0 z-20 h-16 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <button type="button" id="sidebar-open-btn" class="lg:hidden p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+                </button>
+                <div class="flex items-center gap-2 text-xs font-mono text-slate-400">
+                    <span class="text-emerald-400 font-semibold">GLYCON://</span>
+                    <span class="text-slate-200 uppercase">{{ request.endpoint or 'console' }}</span>
+                </div>
+            </div>
 
-    <!-- Bootstrap JS Bundle with Popper -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- SocketIO -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
-    <!-- Custom JS -->
+            <div class="flex items-center gap-3">
+                <div class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>C2 Node Active</span>
+                </div>
+                <a href="{{ url_for('settings') }}" class="tactical-btn-ghost" title="Server Settings">
+                    {{ icon('settings', 'w-4 h-4') }}
+                    <span class="hidden sm:inline">Config</span>
+                </a>
+            </div>
+        </header>
+
+        <!-- Page Body -->
+        <main class="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="mb-6 space-y-2">
+                        {% for category, message in messages %}
+                            {% set is_err = category in ['danger', 'error'] %}
+                            <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border {% if is_err %}bg-rose-500/10 border-rose-500/30 text-rose-300{% elif category == 'warning' %}bg-amber-500/10 border-amber-500/30 text-amber-300{% else %}bg-emerald-500/10 border-emerald-500/30 text-emerald-300{% endif %}" role="alert">
+                                <div class="flex items-center gap-2.5 text-sm font-medium">
+                                    {{ icon('info', 'w-4 h-4 shrink-0') }}
+                                    <span>{{ message }}</span>
+                                </div>
+                                <button type="button" onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-100 p-1">
+                                    {{ icon('close', 'w-4 h-4') }}
+                                </button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+
+        <!-- Footer -->
+        <footer class="border-t border-slate-900/80 px-6 py-3 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <span>Glycon Command & Control Framework</span>
+            <span class="font-mono">v.{{ config.version }} &bull; by 4ndr34z</span>
+        </footer>
+    </div>
+
+    <!-- Local Scripts (Zero CDN) -->
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
     <script>
-        // Initialize tooltips
         document.addEventListener('DOMContentLoaded', function() {
-            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl)
-            });
+            const sidebar = document.getElementById('app-sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            const openBtn = document.getElementById('sidebar-open-btn');
+            const closeBtn = document.getElementById('sidebar-close-btn');
+
+            function toggleSidebar(show) {
+                if (!sidebar || !backdrop) return;
+                sidebar.classList.toggle('-translate-x-full', !show);
+                backdrop.classList.toggle('hidden', !show);
+            }
+
+            if (openBtn) openBtn.addEventListener('click', () => toggleSidebar(true));
+            if (closeBtn) closeBtn.addEventListener('click', () => toggleSidebar(false));
+            if (backdrop) backdrop.addEventListener('click', () => toggleSidebar(false));
         });
-
- 
-       
     </script>
-
     {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,14 @@
+{
+  "name": "glycon-ui",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./glycon/static/css/input.css -o ./glycon/static/css/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.1"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.4"
+  }
+}

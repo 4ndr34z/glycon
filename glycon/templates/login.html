@@ -1,159 +1,83 @@
-{% extends "base.html" %}
+{% from "macros.html" import icon %}
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="{{ url_for('static', filename='images/glycon2.png') }}" type="image/png">
+    <title>Operator Login — Glycon C2</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
 
-{% block title %}Login{% endblock %}
-
-{% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-6 col-lg-4">
-        <div class="card floating-card animate-pop">
-            <!-- Logo and Title -->
-            <div class="text-center mt-4">
-                <div class="logo-container mb-3">
-                    <img src="{{ url_for('static', filename='images/glycon2.png') }}" alt="Logo" height="240" class="logo-img">
-                </div>
-                <h2 class="portal-title">C2 Server</h2>
-                <p class="portal-subtitle">Secure Access Portal</p>
-            </div>
-            
-            <div class="card-body p-4">
-                <h3 class="login-title text-center mb-4">Login to Console</h3>
-                
-                {% if error %}
-                <div class="alert alert-danger">{{ error }}</div>
-                {% endif %}
-                
-                <form method="POST" action="{{ url_for('login') }}">
-                    <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control input-field" id="username" name="username" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control input-field" id="password" name="password" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100 login-btn">Login</button>
-                </form>
-            </div>
-        </div>
+    <!-- Tactical Ambient Glow -->
+    <div class="pointer-events-none fixed inset-0 overflow-hidden">
+        <div class="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-emerald-500/10 blur-[130px]"></div>
+        <div class="absolute bottom-0 right-1/4 w-[450px] h-[450px] rounded-full bg-cyan-500/10 blur-[130px]"></div>
     </div>
-</div>
 
-<style>
-    body {
-        background-color: #ffffff;
-        margin: 0;
-        padding: 0;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-    
-    .floating-card {
-        background-color: #000000;
-        border: none;
-        border-radius: 12px;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 
-                    0 10px 30px -15px rgba(0, 0, 0, 0.3);
-        transform: translateY(0);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        overflow: hidden;
-        position: relative;
-    }
-    
-    .floating-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.3), 
-                    0 15px 35px -15px rgba(0, 0, 0, 0.35);
-    }
-    
-    .logo-container {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 240px;
-        height: 240px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(5px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 10px;
-    }
-    
-    .logo-img {
-        filter: brightness(1.1);
-    }
-    
-    .portal-title {
-        color: #ffffff;
-        font-weight: 600;
-        margin-bottom: 0.25rem;
-    }
-    
-    .portal-subtitle {
-        color: #aaaaaa;
-        font-size: 0.9rem;
-        letter-spacing: 0.5px;
-        margin-bottom: 1.5rem;
-    }
-    
-    .login-title {
-        color: #ffffff;
-        font-weight: 500;
-        letter-spacing: 0.5px;
-    }
-    
-    .form-label {
-        color: #ffffff;
-        font-weight: 400;
-        margin-bottom: 0.5rem;
-    }
-    
-    .input-field {
-        background-color: rgba(102, 101, 101, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        color: #ffffff;
-        border-radius: 8px;
-        padding: 10px 15px;
-        transition: all 0.3s ease;
-    }
-    
-    .input-field:focus {
-        background-color: rgba(245, 242, 242, 0.1);
-        border-color: rgba(13, 110, 253, 0.5);
-        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
-        color: #ffffff;
-    }
-    
-    .login-btn {
-        background-color: #0d6efd;
-        border: none;
-        border-radius: 8px;
-        padding: 10px;
-        font-weight: 500;
-        letter-spacing: 0.5px;
-        transition: all 0.3s ease;
-    }
-    
-    .login-btn:hover {
-        background-color: #0b5ed7;
-        transform: translateY(-2px);
-    }
-    
-    /* Animation */
-    @keyframes popIn {
-        0% {
-            opacity: 0;
-            transform: scale(0.95) translateY(20px);
-        }
-        100% {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-        }
-    }
-    
-    .animate-pop {
-        animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-    }
-</style>
-{% endblock %}
+    <div class="relative z-10 w-full max-w-md">
+        <!-- Card -->
+        <div class="bg-slate-900/85 backdrop-blur-xl border border-slate-800/90 rounded-2xl shadow-2xl p-8">
+            <!-- Logo & Heading -->
+            <div class="flex flex-col items-center text-center mb-7">
+                <div class="w-28 h-28 rounded-2xl bg-slate-950/80 border border-slate-800 p-3 flex items-center justify-center shadow-glow-emerald mb-4">
+                    <img src="{{ url_for('static', filename='images/glycon2.png') }}" alt="Glycon Logo" class="w-full h-full object-contain">
+                </div>
+                <div class="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono mb-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    SECURE C2 ACCESS PORTAL
+                </div>
+                <h1 class="text-2xl font-bold tracking-tight text-slate-100">Glycon Console</h1>
+                <p class="text-xs text-slate-400 mt-1">Authenticate to access Command & Control operations</p>
+            </div>
+
+            {% if error %}
+            <div class="mb-5 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-2.5" role="alert">
+                {{ icon('info', 'w-4 h-4 shrink-0 text-rose-400') }}
+                <span>{{ error }}</span>
+            </div>
+            {% endif %}
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                    <div class="mb-5 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm flex items-center gap-2.5">
+                        {{ icon('info', 'w-4 h-4 shrink-0') }}
+                        <span>{{ message }}</span>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST" action="{{ url_for('login') }}" class="space-y-4">
+                <div>
+                    <label for="username" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Operator Username</label>
+                    <input type="text" id="username" name="username" required autofocus
+                           placeholder="Enter username"
+                           class="tactical-input">
+                </div>
+
+                <div>
+                    <label for="password" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Password</label>
+                    <input type="password" id="password" name="password" required
+                           placeholder="••••••••••••"
+                           class="tactical-input">
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="tactical-btn-primary w-full py-2.5 text-sm font-semibold">
+                        {{ icon('key', 'w-4 h-4') }}
+                        <span>Authenticate Session</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <p class="text-center text-xs font-mono text-slate-500 mt-5">
+            Glycon C2 Server v.{{ config.version }} &bull; Authorized Personnel Only
+        </p>
+    </div>
+
+</body>
+</html>

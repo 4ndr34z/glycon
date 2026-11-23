@@ -1,82 +1,91 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge %}
+
+{% block title %}Remote Desktop — {{ agent.hostname }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-5">
-    <div class="d-flex justify-content-between align-items-center mb-5">
-        <h2>
-            <i class="fas fa-desktop me-2"></i>Remote Desktop - {{ agent.hostname }}
-            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
-                {{ agent.status|capitalize }}
-            </span>
-        </h2>
-        <div>
-            <button id="rdControl" class="btn btn-danger me-2">
-                <i class="fas fa-plug me-1"></i>
+<div class="space-y-5">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                {{ icon('desktop', 'w-5 h-5') }}
+            </div>
+            <div>
+                <div class="flex items-center gap-2.5">
+                    <h1 class="text-xl font-bold tracking-tight text-slate-100">Remote Desktop — {{ agent.hostname }}</h1>
+                    {{ status_badge(agent.status) }}
+                </div>
+                <p class="text-xs font-mono text-slate-400 mt-0.5">
+                    Agent ID: {{ agent.id }} &bull; IP: {{ agent.ip }} &bull; OS: {{ agent.os }}
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+            <button type="button" id="rdControl" class="tactical-btn-danger">
+                {{ icon('plug', 'w-4 h-4') }}
                 <span id="rdStatusText">Connect Remote Desktop</span>
             </button>
-            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left me-1"></i>Back to Agent
+            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
+                {{ icon('arrow-left', 'w-4 h-4') }}
+                <span>Back to Agent</span>
             </a>
         </div>
     </div>
 
-    <div class="card shadow-sm">
-        <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center">
-                <span>Remote Desktop View</span>
-                <span>
-                    <span class="badge bg-{% if agent.rd_connected %}success{% else %}danger{% endif %} me-2" id="rd-connection-status">
-                        {% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}
-                    </span>
-                    <span class="badge bg-dark">Agent ID: {{ agent.id|truncate(10) }}</span>
+    <!-- Remote Desktop Console Card -->
+    <div class="tactical-card shadow-2xl">
+        <!-- Toolbar -->
+        <div class="px-5 py-3 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <span class="text-xs font-mono text-slate-400">LIVE STREAM VIEWPORT</span>
+                <span id="rd-connection-status" class="px-2.5 py-0.5 rounded-full text-xs font-mono {% if agent.rd_connected %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30{% else %}bg-rose-500/15 text-rose-400 border border-rose-500/30{% endif %}">
+                    {% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}
                 </span>
             </div>
-        </div>
-        <div class="card-body p-0">
-            <div id="remote-desktop" class="text-center" style="background-color: #1e1e1e; min-height: 500px; position: relative; cursor: none;">
-                <div id="waiting-message" class="d-flex align-items-center justify-content-center h-100">
-                    <div class="text-center text-white">
-                        <i class="fas fa-desktop fa-3x mb-3"></i>
-                        <h4>Remote Desktop</h4>
-                        <p class="mb-0">Click "Connect Remote Desktop" to start viewing the agent's screen</p>
-                    </div>
+
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <label for="quality-select" class="text-xs font-medium text-slate-400">Stream Quality:</label>
+                    <select id="quality-select" class="tactical-select py-1 px-2.5 text-xs">
+                        <option value="low">Low (50% - Fast)</option>
+                        <option value="medium" selected>Medium (75% - Balanced)</option>
+                        <option value="high">High (100% - Sharp)</option>
+                    </select>
                 </div>
-                <img id="desktop-screenshot" class="img-fluid" style="display: none; max-width: 100%; height: auto; cursor: none;" alt="Remote Desktop Screenshot" tabindex="0">
-                <div id="mouse-cursor" style="position: absolute; width: 16px; height: 16px; background-color: red; border-radius: 50%; pointer-events: none; display: none; z-index: 1000;"></div>
-            </div>
-        </div>
-        <div class="card-footer">
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="d-flex align-items-center">
-                        <span class="me-2">Quality:</span>
-                        <select id="quality-select" class="form-select form-select-sm" style="width: auto;">
-                            <option value="low">Low (Fast)</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="high">High (Slow)</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-6 text-end">
-                    <small class="text-muted">
-                        Last update: <span id="last-update">Never</span>
-                    </small>
+                <div class="text-xs font-mono text-slate-400">
+                    Last frame: <span id="last-update" class="text-slate-200">Never</span>
                 </div>
             </div>
+        </div>
+
+        <!-- Screen Canvas -->
+        <div id="remote-desktop" class="relative bg-[#05070b] min-h-[540px] flex items-center justify-center overflow-hidden" style="cursor: none;">
+            <div id="waiting-message" class="flex flex-col items-center justify-center text-center p-8 cursor-default">
+                <div class="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-cyan-400 mb-4">
+                    {{ icon('desktop', 'w-8 h-8') }}
+                </div>
+                <h3 class="text-base font-semibold text-slate-200">Remote Desktop Stream Offline</h3>
+                <p class="text-xs text-slate-400 mt-1 max-w-sm">Click "Connect Remote Desktop" to initialize real-time screen capture and mouse/keyboard control.</p>
+            </div>
+            <img id="desktop-screenshot" class="max-w-full h-auto select-none" style="display: none; cursor: none;" alt="Remote Desktop Screenshot" tabindex="0">
+            <div id="mouse-cursor" style="position: absolute; width: 14px; height: 14px; background-color: #10b981; border: 2px solid #ffffff; border-radius: 50%; pointer-events: none; display: none; z-index: 1000; box-shadow: 0 0 8px rgba(16,185,129,0.8);"></div>
         </div>
     </div>
 
-    <div class="mt-3">
-        <div class="alert alert-info">
-            <i class="fas fa-info-circle me-2"></i>
-            Remote Desktop status: <span id="rdStatusAlert">{% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}</span>
+    <!-- Status Footer -->
+    <div class="px-4 py-3 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+        <div class="flex items-center gap-2">
+            <span class="text-cyan-400">{{ icon('info', 'w-4 h-4') }}</span>
+            <span>Remote Desktop status: <strong id="rdStatusAlert" class="text-slate-200 font-mono">{% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}</strong></span>
         </div>
+        <span>Click inside the viewport when connected to capture keyboard input</span>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const remoteDesktop = document.getElementById('remote-desktop');
@@ -94,38 +103,37 @@ document.addEventListener('DOMContentLoaded', function() {
     let isConnected = false;
     let currentQuality = 'medium';
     let isControlling = false;
-    let imageRect = null;
-    let scale_factors = null;
     let screen_info = null;
     let autoReconnectTimeout = null;
+
+    function showAlert(message, type = 'info') {
+        GlyconUI.toast('Remote Desktop', message, type);
+    }
 
     function updateConnectionStatus(connected) {
         isConnected = connected;
         if (connected) {
             rdConnectionStatus.textContent = 'Connected';
-            rdConnectionStatus.className = 'badge bg-success me-2';
+            rdConnectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
             rdStatusText.textContent = 'Disconnect Remote Desktop';
-            rdControl.classList.remove('btn-danger');
-            rdControl.classList.add('btn-success');
+            rdControl.className = 'tactical-btn-primary';
             rdStatusAlert.textContent = 'Connected';
-            waitingMessage.style.display = 'none';
+            if (waitingMessage) waitingMessage.style.display = 'none';
             screenshotImg.style.display = 'block';
             mouseCursor.style.display = 'block';
             isControlling = true;
-            
-            // Clear any pending auto-reconnect
+
             if (autoReconnectTimeout) {
                 clearTimeout(autoReconnectTimeout);
                 autoReconnectTimeout = null;
             }
         } else {
             rdConnectionStatus.textContent = 'Disconnected';
-            rdConnectionStatus.className = 'badge bg-danger me-2';
+            rdConnectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-rose-500/15 text-rose-400 border border-rose-500/30';
             rdStatusText.textContent = 'Connect Remote Desktop';
-            rdControl.classList.remove('btn-success');
-            rdControl.classList.add('btn-danger');
+            rdControl.className = 'tactical-btn-danger';
             rdStatusAlert.textContent = 'Disconnected';
-            waitingMessage.style.display = 'flex';
+            if (waitingMessage) waitingMessage.style.display = 'flex';
             screenshotImg.style.display = 'none';
             mouseCursor.style.display = 'none';
             screenshotImg.src = '';
@@ -136,46 +144,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function getImageCoordinates(clientX, clientY) {
         const imgRect = screenshotImg.getBoundingClientRect();
-
-        // Position relative to the image (in browser pixels)
         const xImg = clientX - imgRect.left;
         const yImg = clientY - imgRect.top;
 
-        // Use actual screen resolution from screen_info if available
         let actualScreenWidth, actualScreenHeight;
-        
         if (screen_info && screen_info.width && screen_info.height) {
-            // Use screen_info if available
             actualScreenWidth = screen_info.width;
             actualScreenHeight = screen_info.height;
         } else {
-            // Fallback: Calculate from naturalWidth/Height and quality setting
-            // Medium quality = 75% of original, so multiply by 1.333 (4/3)
-            // Low quality = 50% of original, so multiply by 2
-            // High quality = 100% of original, so multiply by 1
             const qualityFactor = currentQuality === 'low' ? 2.0 : (currentQuality === 'high' ? 1.0 : 1.3333);
             actualScreenWidth = Math.round(screenshotImg.naturalWidth * qualityFactor);
             actualScreenHeight = Math.round(screenshotImg.naturalHeight * qualityFactor);
-            console.log(`[Coordinates] Using fallback calculation: naturalWidth=${screenshotImg.naturalWidth}, quality=${currentQuality}, factor=${qualityFactor}`);
         }
 
-        // Calculate scale factors between displayed image and actual screen resolution
         const scaleX = actualScreenWidth / imgRect.width;
         const scaleY = actualScreenHeight / imgRect.height;
 
-        // Convert browser coordinates to actual screen coordinates
-        const screenX = Math.round(xImg * scaleX);
-        const screenY = Math.round(yImg * scaleY);
-
-        console.log(`[Coordinates] Display: (${Math.round(xImg)}, ${Math.round(yImg)}) -> Screen: (${screenX}, ${screenY}) [Display: ${Math.round(imgRect.width)}x${Math.round(imgRect.height)}, Screen: ${actualScreenWidth}x${actualScreenHeight}]`);
-
-        // Return coordinates in actual screen resolution
-        return { x: screenX, y: screenY };
+        return {
+            x: Math.round(xImg * scaleX),
+            y: Math.round(yImg * scaleY)
+        };
     }
 
     function updateMouseCursor(x, y, imgRect, divRect) {
-        // Position the cursor dot relative to the div, accounting for image position
-        // x, y are display coordinates (relative to image)
         mouseCursor.style.left = (imgRect.left - divRect.left + x) + 'px';
         mouseCursor.style.top = (imgRect.top - divRect.top + y) + 'px';
         mouseCursor.style.display = 'block';
@@ -192,49 +183,33 @@ document.addEventListener('DOMContentLoaded', function() {
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
             autoConnect: false,
-            query: {
-                agent_id: '{{ agent.id }}'
-            }
+            query: { agent_id: '{{ agent.id }}' }
         });
 
         socket.on('connect', function() {
-            console.log('[Remote Desktop] Socket connected');
             updateConnectionStatus(true);
             socket.emit('join_remote_desktop', { agent_id: '{{ agent.id }}' });
         });
 
         socket.on('reconnect', () => {
-            console.log('[Remote Desktop] Socket reconnected');
             socket.emit('join_remote_desktop', { agent_id: '{{ agent.id }}' });
         });
 
-        socket.on('agent_connected', function(data) {
-            console.log('[Remote Desktop] Agent connected to WebSocket');
+        socket.on('agent_connected', function() {
             updateConnectionStatus(true);
-            // Remove waiting message when agent connects
-            const waitingMsg = document.getElementById('waiting-message');
-            if (waitingMsg) {
-                waitingMsg.remove();
-            }
+            if (waitingMessage) waitingMessage.style.display = 'none';
         });
 
         socket.on('disconnect', function(reason) {
-            console.log('[Remote Desktop] Socket disconnected:', reason);
             updateConnectionStatus(false);
-            
-            // Auto-reconnect after delay if it was an unexpected disconnect
             if (reason !== 'io client disconnect' && reason !== 'io server disconnect') {
                 autoReconnectTimeout = setTimeout(() => {
-                    if (!isConnected) {
-                        console.log('[Remote Desktop] Attempting auto-reconnect...');
-                        socket.connect();
-                    }
+                    if (!isConnected) socket.connect();
                 }, 5000);
             }
         });
 
         socket.on('connect_error', function(error) {
-            console.error('[Remote Desktop] Connection error:', error);
             showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
             updateConnectionStatus(false);
         });
@@ -243,64 +218,38 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.screenshot) {
                 screenshotImg.src = 'data:image/png;base64,' + data.screenshot;
                 lastUpdate.textContent = new Date().toLocaleTimeString();
-                // Remove waiting message when first screenshot arrives
-                const waitingMsg = document.getElementById('waiting-message');
-                if (waitingMsg) {
-                    waitingMsg.remove();
-                }
-                // Update image rect when screenshot changes
-                setTimeout(() => {
-                    imageRect = screenshotImg.getBoundingClientRect();
-                }, 100);
+                if (waitingMessage) waitingMessage.style.display = 'none';
             }
         });
 
         socket.on('rd_status', function(data) {
             if (data.status === 'success') {
                 updateConnectionStatus(data.action === 'start');
-                showAlert(`Remote Desktop ${data.action}ed successfully: ${data.message || ''}`, 'success');
+                showAlert(`Remote Desktop ${data.action}ed successfully`, 'success');
             } else {
                 showAlert(`Remote Desktop error: ${data.message || 'Unknown error'}`, 'danger');
             }
         });
 
         socket.on('status', function(data) {
-            console.log('[Remote Desktop] Status update:', data);
-            if (data.status === 'connected') {
-                updateConnectionStatus(true);
-            } else if (data.status === 'disconnected') {
-                updateConnectionStatus(false);
-            }
-        });
-
-        socket.on('scale_factors', function(data) {
-            console.log('[Remote Desktop] Scale factors received:', data);
-            scale_factors = data;
+            if (data.status === 'connected') updateConnectionStatus(true);
+            else if (data.status === 'disconnected') updateConnectionStatus(false);
         });
 
         socket.on('screen_info', function(data) {
-            console.log('[Remote Desktop] Screen info received:', data);
             screen_info = data;
-            console.log('[Remote Desktop] Screen info set - width:', screen_info.width, 'height:', screen_info.height);
         });
 
         socket.on('mouse_position', function(data) {
             if (data.x !== undefined && data.y !== undefined && screen_info) {
-                // Convert physical coordinates back to display coordinates for cursor
                 const imgRect = screenshotImg.getBoundingClientRect();
                 const divRect = remoteDesktop.getBoundingClientRect();
                 const scaleX = screenshotImg.naturalWidth / imgRect.width;
                 const scaleY = screenshotImg.naturalHeight / imgRect.height;
-
-                // Physical coordinates are already scaled, convert to display
-                let displayX = data.x / scaleX;
-                let displayY = data.y / scaleY;
-
-                updateMouseCursor(displayX, displayY, imgRect, divRect);
+                updateMouseCursor(data.x / scaleX, data.y / scaleY, imgRect, divRect);
             }
         });
 
-        // Add ping/pong for connection health
         setInterval(() => {
             if (socket && socket.connected) {
                 socket.emit('ping', { timestamp: Date.now() });
@@ -308,31 +257,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 30000);
     }
 
-    function showAlert(message, type = 'info') {
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
-        alertDiv.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        `;
-        document.querySelector('.container-fluid').prepend(alertDiv);
-        setTimeout(() => alertDiv.remove(), 5000);
-    }
-
-    // Mouse event handlers
     function handleMouseMove(e) {
         if (!isControlling || !socket) return;
-
         const coords = getImageCoordinates(e.clientX, e.clientY);
-
-        // Send physical coordinates to agent
         socket.emit('mouse_move', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
             y: coords.y
         });
-
-        // Update cursor position locally
         const imgRect = screenshotImg.getBoundingClientRect();
         const divRect = remoteDesktop.getBoundingClientRect();
         updateMouseCursor(e.clientX - imgRect.left, e.clientY - imgRect.top, imgRect, divRect);
@@ -341,11 +273,8 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleMouseClick(e) {
         if (!isControlling || !socket) return;
         e.preventDefault();
-
         const coords = getImageCoordinates(e.clientX, e.clientY);
         const button = e.button === 2 ? 'right' : 'left';
-
-        // Send click with physical coordinates
         socket.emit('mouse_click', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
@@ -357,11 +286,8 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleMouseWheel(e) {
         if (!isControlling || !socket) return;
         e.preventDefault();
-
         const coords = getImageCoordinates(e.clientX, e.clientY);
         const delta = e.deltaY > 0 ? 'down' : 'up';
-
-        // Send scroll with physical coordinates
         socket.emit('mouse_scroll', {
             agent_id: '{{ agent.id }}',
             x: coords.x,
@@ -370,15 +296,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Keyboard event handlers
     function handleKeyDown(e) {
         if (!isControlling || !socket) return;
-
-        // Prevent default behavior for certain keys
         if (['Tab', 'Enter', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
         }
-
         socket.emit('keyboard_press', {
             agent_id: '{{ agent.id }}',
             key: e.key,
@@ -391,7 +313,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleKeyUp(e) {
         if (!isControlling || !socket) return;
-
         socket.emit('keyboard_release', {
             agent_id: '{{ agent.id }}',
             key: e.key,
@@ -399,10 +320,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Initialize socket
     initializeSocket();
 
-    // Quality change handler
     qualitySelect.addEventListener('change', function() {
         currentQuality = this.value;
         if (socket && isConnected) {
@@ -410,10 +329,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 agent_id: '{{ agent.id }}',
                 quality: currentQuality
             });
+            showAlert(`Stream quality set to ${currentQuality}`, 'info');
         }
     });
 
-    // Control button handler
     rdControl.addEventListener('click', function() {
         if (isConnected) {
             socket.emit('rd_control', {
@@ -421,27 +340,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 action: 'stop'
             });
         } else {
-            // Clear display and show connection message
             screenshotImg.src = '';
             lastUpdate.textContent = 'Connecting...';
 
-            // Show waiting message
-            const waitingDiv = document.createElement('div');
-            waitingDiv.id = 'waiting-message';
-            waitingDiv.style.color = '#ffff00';
-            waitingDiv.style.fontFamily = 'Consolas, monospace';
-            waitingDiv.textContent = 'Waiting for beacon connection...';
-            waitingDiv.style.position = 'absolute';
-            waitingDiv.style.top = '50%';
-            waitingDiv.style.left = '50%';
-            waitingDiv.style.transform = 'translate(-50%, -50%)';
-            document.getElementById('remote-desktop').appendChild(waitingDiv);
-
             fetch('/api/task', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     agent_id: '{{ agent.id }}',
                     task_type: 'remote_desktop',
@@ -450,43 +354,30 @@ document.addEventListener('DOMContentLoaded', function() {
                         quality: currentQuality
                     }
                 })
-            }).then(response => response.json())
+            })
+            .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
                     socket.connect();
+                    showAlert('Remote Desktop task queued, waiting for beacon stream...', 'info');
                 } else {
                     showAlert('Failed to start Remote Desktop: ' + (data.message || 'Unknown error'), 'danger');
                     lastUpdate.textContent = 'Never';
-                    // Remove waiting message on failure
-                    const waitingMsg = document.getElementById('waiting-message');
-                    if (waitingMsg) {
-                        waitingMsg.remove();
-                    }
                 }
             });
         }
     });
 
-    // Add event listeners for mouse and keyboard control
     screenshotImg.addEventListener('mousemove', handleMouseMove);
     screenshotImg.addEventListener('mousedown', handleMouseClick);
     screenshotImg.addEventListener('wheel', handleMouseWheel);
-    screenshotImg.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
-
-    // Keyboard events
+    screenshotImg.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
 
-    // Focus the screenshot when connected
     screenshotImg.addEventListener('click', function() {
-        if (isControlling) {
-            screenshotImg.focus();
-        }
+        if (isControlling) screenshotImg.focus();
     });
-
-    if (isConnected) {
-        socket.connect();
-    }
 });
 </script>
 {% endblock %}

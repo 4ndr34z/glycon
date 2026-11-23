@@ -1,106 +1,118 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge, stat_card %}
 
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<h2 class="mb-4">Dashboard Overview</h2>
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-100">Operations Overview</h1>
+            <p class="text-sm text-slate-400 mt-0.5">Real-time telemetry across connected beacons, queued tasks, and harvested loot</p>
+        </div>
+        <div class="flex items-center gap-2.5">
+            <a href="{{ url_for('agents') }}" class="tactical-btn-primary">
+                {{ icon('agents', 'w-4 h-4') }}
+                <span>Manage Agents</span>
+            </a>
+        </div>
+    </div>
 
-<div class="row mb-4">
-    <div class="col-md-4">
-        <div class="card text-white bg-primary">
-            <div class="card-body">
-                <h5 class="card-title">Active Agents</h5>
-                <p class="card-text display-6" id="agent-count">{{ agent_count }}</p>
-            </div>
-        </div>
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {{ stat_card('Active Agents', agent_count, 'agent-count', 'agents', 'emerald', 'Currently online beacons') }}
+        {{ stat_card('Pending Tasks', pending_tasks, 'pending-tasks', 'terminal', 'amber', 'Awaiting agent check-in') }}
+        {{ stat_card('Credentials Harvested', credential_count, 'credential-count', 'key', 'cyan', 'Total stored credentials') }}
     </div>
-    <div class="col-md-4">
-        <div class="card text-white bg-warning">
-            <div class="card-body">
-                <h5 class="card-title">Pending Tasks</h5>
-                <p class="card-text display-6" id="pending-tasks">{{ pending_tasks }}</p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card text-white bg-success">
-            <div class="card-body">
-                <h5 class="card-title">Credentials Harvested</h5>
-                <p class="card-text display-6" id="credential-count">{{ credential_count }}</p>
-            </div>
-        </div>
-    </div>
-</div>
 
-<div class="row">
-    <div class="col-md-6">
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5>Recent Agents</h5>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover" id="recent-agents-table">
-                        <thead>
-                            <tr>
-                                <th>Hostname</th>
-                                <th>IP</th>
-                                <th>OS</th>
-                                <th>Last Seen</th>
-                            </tr>
-                        </thead>
-                        <tbody id="recent-agents-body">
-                            {% for agent in recent_agents %}
-                            <tr class="{% if agent.status == 'online' %}agent-online{% else %}agent-offline{% endif %}">
-                                <td>
-                                    <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}">
-                                        {{ agent.hostname }}
-                                    </a>
-                                </td>
-                                <td>{{ agent.ip }}</td>
-                                <td>{{ agent.os }}</td>
-                                <td>{{ agent.last_seen }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+    <!-- Recent Agents & Tasks Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Recent Agents -->
+        <div class="tactical-card">
+            <div class="tactical-card-header">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-emerald-400">{{ icon('agents', 'w-5 h-5') }}</span>
+                    <h2 class="text-base font-semibold text-slate-100">Recent Agents</h2>
                 </div>
+                <a href="{{ url_for('agents') }}" class="tactical-btn-ghost">View All &rarr;</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="tactical-table" id="recent-agents-table">
+                    <thead>
+                        <tr>
+                            <th>Hostname</th>
+                            <th>IP Address</th>
+                            <th>OS</th>
+                            <th>Status</th>
+                            <th>Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-agents-body">
+                        {% for agent in recent_agents %}
+                        <tr class="{% if agent.status == 'online' %}agent-online{% elif agent.status == 'inactive' %}agent-inactive{% else %}agent-offline{% endif %}">
+                            <td class="font-medium">
+                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-2">
+                                    {{ agent.hostname }}
+                                </a>
+                            </td>
+                            <td class="font-mono text-xs text-slate-300">{{ agent.ip }}</td>
+                            <td class="text-xs text-slate-300">{{ agent.os }}</td>
+                            <td>{{ status_badge(agent.status) }}</td>
+                            <td class="font-mono text-xs text-slate-400">{{ agent.last_seen }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center py-8 text-slate-500">No recent agents registered</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
-    </div>
 
-    <div class="col-md-6">
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5>Recent Tasks</h5>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover" id="recent-tasks-table">
-                        <thead>
-                            <tr>
-                                <th>Agent</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Created</th>
-                            </tr>
-                        </thead>
-                        <tbody id="recent-tasks-body">
-                            {% for task in recent_tasks %}
-                            <tr>
-                                <td>{{ task.agent_id[:8] }}...</td>
-                                <td>{{ task.task_type }}</td>
-                                <td>
-                                    <span class="badge bg-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% else %}warning{% endif %}">
-                                        {{ task.status }}
-                                    </span>
-                                </td>
-                                <td>{{ task.created_at }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <!-- Recent Tasks -->
+        <div class="tactical-card">
+            <div class="tactical-card-header">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-cyan-400">{{ icon('terminal', 'w-5 h-5') }}</span>
+                    <h2 class="text-base font-semibold text-slate-100">Recent Tasks</h2>
                 </div>
+                <a href="{{ url_for('tasks') }}" class="tactical-btn-ghost">View All &rarr;</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="tactical-table" id="recent-tasks-table">
+                    <thead>
+                        <tr>
+                            <th>Agent</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-tasks-body">
+                        {% for task in recent_tasks %}
+                        <tr>
+                            <td class="font-mono text-xs">
+                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-cyan-400 hover:text-cyan-300 hover:underline">
+                                    {{ task.agent_id[:8] }}...
+                                </a>
+                            </td>
+                            <td>
+                                <span class="px-2 py-0.5 rounded text-xs font-mono bg-slate-800 text-slate-200 border border-slate-700">
+                                    {{ task.task_type }}
+                                </span>
+                            </td>
+                            <td>{{ status_badge(task.status) }}</td>
+                            <td class="font-mono text-xs text-slate-400">{{ task.created_at }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center py-8 text-slate-500">No tasks queued yet</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -109,44 +121,28 @@
 <script>
     function refreshDashboard() {
         fetch(window.location.href, {
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
         .then(response => response.text())
         .then(html => {
             const parser = new DOMParser();
             const newDoc = parser.parseFromString(html, 'text/html');
-            
-            // Update counters
-            document.getElementById('agent-count').textContent = 
-                newDoc.getElementById('agent-count').textContent;
-            document.getElementById('pending-tasks').textContent = 
-                newDoc.getElementById('pending-tasks').textContent;
-            document.getElementById('credential-count').textContent = 
-                newDoc.getElementById('credential-count').textContent;
-            
-            // Update recent agents table
-            document.getElementById('recent-agents-body').innerHTML = 
-                newDoc.getElementById('recent-agents-body').innerHTML;
-            
-            // Update recent tasks table
-            document.getElementById('recent-tasks-body').innerHTML = 
-                newDoc.getElementById('recent-tasks-body').innerHTML;
+
+            ['agent-count', 'pending-tasks', 'credential-count'].forEach(id => {
+                const cur = document.getElementById(id);
+                const next = newDoc.getElementById(id);
+                if (cur && next) cur.textContent = next.textContent;
+            });
+
+            ['recent-agents-body', 'recent-tasks-body'].forEach(id => {
+                const cur = document.getElementById(id);
+                const next = newDoc.getElementById(id);
+                if (cur && next) cur.innerHTML = next.innerHTML;
+            });
         })
         .catch(error => console.error('Error refreshing dashboard:', error));
     }
 
-    // Refresh every 5 seconds
     setInterval(refreshDashboard, 5000);
 </script>
-
-<style>
-    .agent-online {
-        background-color: rgba(25, 135, 84, 0.1);
-    }
-    .agent-offline {
-        background-color: rgba(220, 53, 69, 0.1);
-    }
-</style>
 {% endblock %}

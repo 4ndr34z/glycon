@@ -1,19 +1,140 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon, status_badge %}
+
+{% block title %}Tasks{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-100">Task Queue & Execution Log</h1>
+            <p class="text-sm text-slate-400 mt-0.5">Live overview of commands, shellcode executions, and exfiltration jobs across all agents</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 card-header">
+            <span class="badge px-3 py-1 rounded-full text-xs font-mono font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                Pending: {{ tasks|selectattr('status', 'equalto', 'pending')|list|length }}
+            </span>
+            <span class="badge px-3 py-1 rounded-full text-xs font-mono font-medium bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                Executing: {{ tasks|selectattr('status', 'equalto', 'executing')|list|length }}
+            </span>
+            <span class="badge px-3 py-1 rounded-full text-xs font-mono font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                Completed: {{ tasks|selectattr('status', 'equalto', 'completed')|list|length }}
+            </span>
+        </div>
+    </div>
+
+    <!-- Tasks Table -->
+    <div class="tactical-card">
+        <div class="tactical-card-header">
+            <div class="flex items-center gap-2.5">
+                <span class="text-cyan-400">{{ icon('terminal', 'w-5 h-5') }}</span>
+                <h2 class="text-base font-semibold text-slate-100">Recent Tasks</h2>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="tactical-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Type</th>
+                        <th>Agent</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Completed</th>
+                        <th class="text-right">Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                    <tr id="task-row-{{ task.id }}">
+                        <td class="font-mono text-xs text-slate-400">#{{ task.id }}</td>
+                        <td>
+                            <span class="px-2.5 py-0.5 rounded-md text-xs font-mono font-medium {% if task.task_type == 'shell' %}bg-cyan-500/15 text-cyan-300 border border-cyan-500/30{% else %}bg-slate-800 text-slate-200 border border-slate-700{% endif %}">
+                                {{ task.task_type }}
+                            </span>
+                        </td>
+                        <td class="font-mono text-xs">
+                            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-emerald-400 hover:text-emerald-300 hover:underline">
+                                {{ task.agent_id|truncate(12) }}
+                            </a>
+                        </td>
+                        <td>{{ status_badge(task.status) }}</td>
+                        <td class="font-mono text-xs text-slate-400">{{ task.created_at }}</td>
+                        <td class="completed-at font-mono text-xs text-slate-400">{{ task.completed_at if task.completed_at else '-' }}</td>
+                        <td class="text-right">
+                            <button type="button"
+                                    class="tactical-btn-ghost"
+                                    data-modal-target="#taskModal{{ task.id }}"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#taskModal{{ task.id }}"
+                                    data-agent-id="{{ task.agent_id }}">
+                                {{ icon('info', 'w-4 h-4') }}
+                                <span>Inspect</span>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-10 text-slate-500">No tasks recorded</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Task Detail Modals -->
+{% for task in tasks %}
+<div class="glycon-modal modal fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" id="taskModal{{ task.id }}" tabindex="-1">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+            <div class="flex items-center gap-2.5">
+                <span class="text-cyan-400">{{ icon('terminal', 'w-5 h-5') }}</span>
+                <h3 class="text-base font-semibold text-slate-100">Task #{{ task.id }} Telemetry</h3>
+            </div>
+            <button type="button" data-modal-close class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800">
+                {{ icon('close', 'w-5 h-5') }}
+            </button>
+        </div>
+        <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Execution Status</span>
+                {{ status_badge(task.status) }}
+            </div>
+            <div>
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Task Payload / Parameters</h4>
+                <pre class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all">{{ task.task_data|tojson }}</pre>
+            </div>
+            {% if task.task_type == 'shellcode' %}
+            <div>
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Shellcode Output</h4>
+                <div id="shellcode-output-{{ task.id }}" class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
+                    <span class="text-slate-500">Loading shellcode output...</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <div class="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end">
+            <button type="button" data-modal-close class="tactical-btn-secondary">Close</button>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}
 
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Real-time updates via Socket.IO
     const socket = io();
 
     function updateCounters() {
         const pending = document.querySelectorAll('tbody tr .badge-status-pending').length;
         const executing = document.querySelectorAll('tbody tr .badge-status-executing').length;
         const completed = document.querySelectorAll('tbody tr .badge-status-completed').length;
-        
-        const badges = document.querySelectorAll('.card-header .badge');
-        badges.forEach(b => {
+
+        document.querySelectorAll('.card-header .badge').forEach(b => {
             if (b.textContent.includes('Pending')) b.textContent = `Pending: ${pending}`;
             if (b.textContent.includes('Executing')) b.textContent = `Executing: ${executing}`;
             if (b.textContent.includes('Completed')) b.textContent = `Completed: ${completed}`;
@@ -21,263 +142,92 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     socket.on('new_task', function(data) {
-        console.log('New task via socket:', data);
         if (document.getElementById(`task-row-${data.task_id}`)) return;
-        
         const tbody = document.querySelector('table tbody');
         const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
         const row = document.createElement('tr');
         row.id = `task-row-${data.task_id}`;
         row.innerHTML = `
-            <td>${data.task_id}</td>
-            <td><span class="badge bg-primary">${data.task_type}</span></td>
-            <td><a href="/agent_detail/${data.agent_id}" class="text-decoration-none">${data.agent_id.substring(0, 8)}</a></td>
-            <td><span class="badge bg-primary badge-status-pending">pending</span></td>
-            <td>${now}</td>
-            <td class="completed-at">-</td>
-            <td>
-                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#taskModal${data.task_id}" data-agent-id="${data.agent_id}">
-                    <i class="fas fa-info-circle"></i>
-                </button>
-            </td>
+            <td class="font-mono text-xs text-slate-400">#${GlyconUI.escapeHtml(data.task_id)}</td>
+            <td><span class="px-2.5 py-0.5 rounded-md text-xs font-mono font-medium bg-slate-800 text-slate-200 border border-slate-700">${GlyconUI.escapeHtml(data.task_type)}</span></td>
+            <td class="font-mono text-xs"><a href="/agent/${encodeURIComponent(data.agent_id)}" class="text-emerald-400 hover:underline">${GlyconUI.escapeHtml(data.agent_id.substring(0, 8))}</a></td>
+            <td><span class="badge badge-status-pending inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Pending</span></td>
+            <td class="font-mono text-xs text-slate-400">${now}</td>
+            <td class="completed-at font-mono text-xs text-slate-400">-</td>
+            <td class="text-right">-</td>
         `;
         tbody.insertBefore(row, tbody.firstChild);
         updateCounters();
     });
 
     socket.on('task_executing', function(data) {
-        console.log('Task executing via socket:', data);
         const row = document.getElementById(`task-row-${data.task_id}`);
         if (row) {
             const badge = row.querySelector('[class*="badge-status-"]');
             if (badge) {
-                badge.className = 'badge bg-warning badge-status-executing';
-                badge.textContent = 'executing';
+                badge.className = 'badge badge-status-executing inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30';
+                badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Executing';
                 updateCounters();
             }
         }
     });
 
     socket.on('task_complete', function(data) {
-        console.log('Task complete via socket:', data);
         const row = document.getElementById(`task-row-${data.task_id}`);
         if (row) {
             const badge = row.querySelector('[class*="badge-status-"]');
             if (badge) {
-                badge.className = 'badge bg-success badge-status-completed';
-                badge.textContent = 'completed';
-                
+                badge.className = 'badge badge-status-completed inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+                badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Completed';
                 const completedAt = row.querySelector('.completed-at');
                 if (completedAt) completedAt.textContent = new Date().toISOString().slice(0, 19).replace('T', ' ');
-                
                 updateCounters();
             }
         }
     });
-    console.log('Tasks page loaded, setting up modal handler');
 
-    // Load shellcode output when modal is shown
-    var modals = document.querySelectorAll('.modal');
-    console.log('Modal elements found:', modals.length);
-
-    modals.forEach(function(modal) {
+    // Load shellcode output when task modal opens
+    document.querySelectorAll('.modal').forEach(function(modal) {
         modal.addEventListener('show.bs.modal', function(e) {
-            console.log('Modal show event triggered for:', modal.id);
-            var taskId = modal.id.replace('taskModal', '');
-            console.log('Extracted task ID:', taskId);
+            const taskId = modal.id.replace('taskModal', '');
+            const outputContainer = modal.querySelector('#shellcode-output-' + taskId);
+            if (!outputContainer) return;
 
-            var outputContainer = modal.querySelector('#shellcode-output-' + taskId);
-            console.log('Looking for output container:', '#shellcode-output-' + taskId, 'Found:', !!outputContainer);
+            const triggeringButton = e.relatedTarget || document.querySelector(`button[data-bs-target="#${modal.id}"]`);
+            const agentId = triggeringButton ? triggeringButton.getAttribute('data-agent-id') : null;
+            if (!agentId) {
+                outputContainer.innerHTML = '<span class="text-amber-400">No agent ID found</span>';
+                return;
+            }
 
-            if (outputContainer) {
-                console.log('Output container found, looking for agent ID...');
-                // Try to get agent ID from the button that triggered the modal
-                var triggeringButton = document.querySelector('button[data-bs-target="#' + modal.id + '"]');
-                var agentId = null;
-
-                if (triggeringButton) {
-                    agentId = triggeringButton.getAttribute('data-agent-id');
-                    console.log('Agent ID from button:', agentId);
-                }
-
-                // Fallback to looking for agent link in modal
-                if (!agentId) {
-                    var agentLink = modal.querySelector('a[href*="agent_detail"]');
-                    console.log('Agent links found:', !!agentLink);
-
-                    if (agentLink) {
-                        var href = agentLink.getAttribute('href');
-                        console.log('Agent link href:', href);
-                        agentId = href.split('/').pop();
-                        console.log('Extracted agent ID from link:', agentId);
-                    }
-                }
-
-            if (agentId) {
-                var apiUrl = '/api/shellcode_outputs/' + agentId;
-                console.log('Making API call to:', apiUrl);
-
-                fetch(apiUrl)
-                    .then(response => {
-                        console.log('Fetch response status:', response.status);
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Fetch response data:', data);
-                        if (data.status === 'success' && data.outputs && data.outputs.length > 0) {
-                            // Filter outputs for this specific task
-                            var taskOutputs = data.outputs.filter(function(output) {
-                                return output.task_id == taskId;
-                            });
-
-                            if (taskOutputs.length > 0) {
-                                var outputHtml = '<div class="shellcode-outputs">';
-                                taskOutputs.forEach(function(output) {
-                                    var statusClass = output.status === 'success' ? 'text-success' : 'text-danger';
-                                    outputHtml += '<div class="mb-2 p-2 border rounded">';
-                                    outputHtml += '<small class="text-muted">' + output.timestamp + '</small><br>';
-                                    outputHtml += '<span class="' + statusClass + '">' + output.status + '</span>';
-                                    if (output.message) {
-                                        outputHtml += ' - ' + output.message;
-                                    }
-                                    if (output.output) {
-                                        outputHtml += '<pre class="mt-1 bg-dark text-light p-2 small">' + output.output.replace(/&/g, '&amp;').replace(/</g, '<').replace(/>/g, '>') + '</pre>';
-                                    }
-                                    outputHtml += '</div>';
-                                });
-                                outputHtml += '</div>';
-                                outputContainer.innerHTML = outputHtml;
-                            } else {
-                                outputContainer.innerHTML = '<small class="text-muted">No shellcode output available for this task</small>';
-                            }
+            fetch('/api/shellcode_outputs/' + agentId)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success' && data.outputs && data.outputs.length > 0) {
+                        const taskOutputs = data.outputs.filter(o => o.task_id == taskId);
+                        if (taskOutputs.length > 0) {
+                            outputContainer.innerHTML = taskOutputs.map(output => `
+                                <div class="mb-3 p-3 rounded-lg bg-slate-900 border border-slate-800">
+                                    <div class="flex items-center justify-between text-xs mb-1">
+                                        <span class="text-slate-400">${GlyconUI.escapeHtml(output.timestamp)}</span>
+                                        <span class="${output.status === 'success' ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${GlyconUI.escapeHtml(output.status)}</span>
+                                    </div>
+                                    ${output.message ? `<p class="text-xs text-slate-300 mb-1">${GlyconUI.escapeHtml(output.message)}</p>` : ''}
+                                    ${output.output ? `<pre class="mt-2 p-2.5 rounded bg-slate-950 text-slate-200 text-xs overflow-x-auto">${GlyconUI.escapeHtml(output.output)}</pre>` : ''}
+                                </div>
+                            `).join('');
                         } else {
-                            outputContainer.innerHTML = '<small class="text-muted">No shellcode output available</small>';
+                            outputContainer.innerHTML = '<span class="text-slate-500">No shellcode output recorded for this task</span>';
                         }
-                    })
-                    .catch(error => {
-                        console.error('Fetch error:', error);
-                        outputContainer.innerHTML = '<small class="text-danger">Failed to load shellcode output: ' + error.message + '</small>';
-                    });
-            } else {
-                console.log('No agent ID extracted');
-                outputContainer.innerHTML = '<small class="text-warning">No agent ID found</small>';
-            }
-            } else {
-                console.log('No output container found for task', taskId);
-            }
-        });
-    });
-
-    // Test modal trigger
-    var modalButtons = document.querySelectorAll('button[data-bs-toggle="modal"]');
-    modalButtons.forEach(function(button) {
-        button.addEventListener('click', function() {
-            console.log('Modal trigger button clicked, target:', button.getAttribute('data-bs-target'), 'agent-id:', button.getAttribute('data-agent-id'));
+                    } else {
+                        outputContainer.innerHTML = '<span class="text-slate-500">No shellcode output available</span>';
+                    }
+                })
+                .catch(err => {
+                    outputContainer.innerHTML = `<span class="text-rose-400">Failed to load output: ${GlyconUI.escapeHtml(err.message)}</span>`;
+                });
         });
     });
 });
 </script>
-{% endblock %}
-
-{% block content %}
-<div class="container-fluid mt-5"> 
-    <h2 class="mb-4"><i class="fas fa-terminal me-2"></i>Tasks</h2>
-
-    <div class="card shadow-sm mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span>Recent Tasks</span>
-            <div>
-                <span class="badge bg-primary me-2">Pending: {{ tasks|selectattr('status', 'equalto', 'pending')|list|length }}</span>
-                <span class="badge bg-warning me-2">Executing: {{ tasks|selectattr('status', 'equalto', 'executing')|list|length }}</span>
-                <span class="badge bg-success">Completed: {{ tasks|selectattr('status', 'equalto', 'completed')|list|length }}</span>
-            </div>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead class="table-dark">
-                        <tr>
-                            <th>ID</th>
-                            <th>Type</th>
-                            <th>Agent</th>
-                            <th>Status</th>
-                            <th>Created</th>
-                            <th>Completed</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for task in tasks %}
-                        <tr id="task-row-{{ task.id }}">
-                            <td>{{ task.id }}</td>
-                            <td>
-                                <span class="badge bg-{{ 'info' if task.task_type == 'shell' else 'primary' }}">
-                                    {{ task.task_type }}
-                                </span>
-                            </td>
-                            <td>
-                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-decoration-none">
-                                    {{ task.agent_id|truncate(8) }}
-                                </a>
-                            </td>
-                            <td>
-                                <span class="badge badge-status-{{ task.status }} bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
-                                    {{ task.status }}
-                                </span>
-                            </td>
-                            <td>{{ task.created_at }}</td>
-                            <td class="completed-at">{{ task.completed_at if task.completed_at else '-' }}</td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#taskModal{{ task.id }}" data-agent-id="{{ task.agent_id }}">
-                                    <i class="fas fa-info-circle"></i>
-                                </button>
-                            </td>
-                        </tr>
-
-                        <!-- Task Detail Modal -->
-                        <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1">
-                            <div class="modal-dialog modal-lg">
-                                <div class="modal-content">
-                                    <div class="modal-header">
-                                        <h5 class="modal-title">Task #{{ task.id }} Details</h5>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <div class="mb-3">
-                                            <h6>Task Data</h6>
-                                            <pre class="bg-light p-3">{{ task.task_data|tojson|safe }}</pre>
-                                        </div>
-                                        <div class="mb-3">
-                                            <h6>Status</h6>
-                                            <span class="badge bg-{{ 'primary' if task.status == 'pending' else 'warning' if task.status == 'executing' else 'success' }}">
-                                                {{ task.status }}
-                                            </span>
-                                        </div>
-                                        {% if task.task_type == 'shellcode' %}
-                                        <div class="mb-3">
-                                            <h6>Shellcode Output</h6>
-                                            <div id="shellcode-output-{{ task.id }}" class="shellcode-output-container">
-                                                <div class="text-center">
-                                                    <div class="spinner-border spinner-border-sm" role="status">
-                                                        <span class="visually-hidden">Loading...</span>
-                                                    </div>
-                                                    <small class="text-muted">Loading shellcode output...</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
