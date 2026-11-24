@@ -56,13 +56,13 @@ def _needs_pip_install(venv_py: str) -> bool:
 
 def install_requirements(venv_py: str, force: bool = False) -> bool:
     if not os.path.isfile(REQUIREMENTS_FILE):
-        print(f"[!] Fant ikke {REQUIREMENTS_FILE}.")
+        print(f"[!] Could not find {REQUIREMENTS_FILE}.")
         return False
 
     if not force and not _needs_pip_install(venv_py):
         return True
 
-    print("[*] Oppgraderer pip og installerer pakker fra requirements.txt...")
+    print("[*] Upgrading pip and installing packages from requirements.txt...")
     try:
         subprocess.run(
             [venv_py, "-m", "pip", "install", "--upgrade", "pip"],
@@ -74,28 +74,28 @@ def install_requirements(venv_py: str, force: bool = False) -> bool:
         )
         with open(REQ_HASH_FILE, "w", encoding="utf-8") as f:
             f.write(_compute_req_hash())
-        print("[+] Alle avhengigheter i requirements.txt er installert.")
+        print("[+] All dependencies in requirements.txt have been installed.")
         return True
     except subprocess.CalledProcessError as err:
-        print(f"[!] Feil under installasjon av pakker: {err}")
+        print(f"[!] Failed to install packages: {err}")
         return False
 
 
 def bootstrap_venv():
-    """Sørger for at venv eksisterer, installerer requirements og re-eksekverer run.py i venv."""
+    """Ensures venv exists, installs requirements, and re-executes run.py inside venv."""
     os.chdir(PROJECT_DIR)
     venv_py = _get_venv_python()
     first_time_venv = not os.path.isfile(venv_py)
 
     if first_time_venv:
-        print(f"[*] Virtuelt miljø (venv) ble ikke funnet. Oppretter {VENV_DIR} ...")
+        print(f"[*] Virtual environment (venv) not found. Creating {VENV_DIR} ...")
         builder = venv.EnvBuilder(with_pip=True)
         builder.create(VENV_DIR)
-        print("[+] Virtuelt miljø opprettet.")
+        print("[+] Virtual environment created.")
 
     if not _in_project_venv():
         install_requirements(venv_py, force=first_time_venv)
-        print(f"[*] Aktiverer venv og starter Glycon med {venv_py} ...\n")
+        print(f"[*] Activating venv and starting Glycon with {venv_py} ...\n")
         os.environ["VIRTUAL_ENV"] = VENV_DIR
         venv_bin = os.path.dirname(venv_py)
         os.environ["PATH"] = f"{venv_bin}{os.pathsep}{os.environ.get('PATH', '')}"
@@ -107,7 +107,7 @@ def bootstrap_venv():
 def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem", common_name="localhost", days=365):
     """Generate a self-signed X.509 SSL certificate and private key."""
     common_name = (common_name or "localhost").strip()
-    print(f"[*] Genererer selvsignert SSL-sertifikat for '{common_name}' (gyldig i {days} dager)...")
+    print(f"[*] Generating self-signed SSL certificate for '{common_name}' (valid for {days} days)...")
 
     try:
         from cryptography import x509
@@ -169,7 +169,7 @@ def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem", common_n
         with open(cert_path, "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
 
-        print(f"[+] SSL-sertifikat lagret til '{cert_path}' og privat nøkkel til '{key_path}'.")
+        print(f"[+] SSL certificate saved to '{cert_path}' and private key to '{key_path}'.")
         return True
 
     except ImportError:
@@ -185,15 +185,15 @@ def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem", common_n
                 os.chmod(key_path, 0o600)
             except OSError:
                 pass
-            print(f"[+] SSL-sertifikat generert via OpenSSL CLI ('{cert_path}', '{key_path}').")
+            print(f"[+] SSL certificate generated via OpenSSL CLI ('{cert_path}', '{key_path}').")
             return True
         except Exception as err:
-            print(f"[!] Kunne ikke generere SSL-sertifikat: {err}")
+            print(f"[!] Failed to generate SSL certificate: {err}")
             return False
 
 
 def update_admin_credentials(username: str, password: str):
-    """Oppdaterer eller oppretter admin-bruker i c2.db."""
+    """Updates or creates the admin user in c2.db."""
     from werkzeug.security import generate_password_hash
     from glycon.config import CONFIG
 
@@ -210,11 +210,11 @@ def update_admin_credentials(username: str, password: str):
         )
     conn.commit()
     conn.close()
-    print(f"[+] Administrator-konto oppdatert (brukernavn: '{username}').")
+    print(f"[+] Administrator account updated (username: '{username}').")
 
 
 def interactive_setup_menu(default_host="0.0.0.0", default_http_port=5555, default_https_port=443):
-    """Interaktiv oppstarts- og oppsettmeny for Glycon C2."""
+    """Interactive setup and startup menu for Glycon C2."""
     cert_path, key_path = "cert.pem", "key.pem"
     certs_exist = os.path.isfile(cert_path) and os.path.isfile(key_path)
 
@@ -240,106 +240,104 @@ def interactive_setup_menu(default_host="0.0.0.0", default_http_port=5555, defau
     try:
         while True:
             certs_exist = os.path.isfile(cert_path) and os.path.isfile(key_path)
-            ssl_status = f"Aktivert (Port {config_state['https_port']})" if config_state["use_ssl"] else "Deaktivert (Kun HTTP)"
-            cert_status = "Funnet (cert.pem / key.pem)" if certs_exist else "Mangler!"
+            ssl_status = f"Enabled (Port {config_state['https_port']})" if config_state["use_ssl"] else "Disabled (HTTP Only)"
+            cert_status = "Found (cert.pem / key.pem)" if certs_exist else "Missing!"
 
             print("\n" + "=" * 62)
-            print(f"   GLYCON C2 v.{ver_str} — OPPSETT- OG OPPSTARTSMENY")
+            print(f"   GLYCON C2 v.{ver_str} — SETUP & STARTUP MENU")
             print("=" * 62)
-            print(f"   Virtuelt miljø : {VENV_DIR} (Aktivt)")
-            print(f"   Lytteadresse   : {config_state['host']}")
-            print(f"   HTTP-port      : {config_state['http_port']}")
+            print(f"   Virtual Env    : {VENV_DIR} (Active)")
+            print(f"   Bind Address   : {config_state['host']}")
+            print(f"   HTTP Port      : {config_state['http_port']}")
             print(f"   HTTPS / SSL    : {ssl_status} [{cert_status}]")
-            print(f"   Base URL       : {config_state['base_url'] or '/ (rot)'}")
+            print(f"   Base URL       : {config_state['base_url'] or '/ (root)'}")
             print("-" * 62)
-            print("   [1] Hurtigstart med gjeldende innstillinger (Standard)")
-            print("   [2] Konfigurer oppsett (Porter, SSL, Sertifikat, Admin-bruker)")
-            print("   [3] Re-installer / oppdater pakker fra requirements.txt")
-            print("   [4] Avslutt")
+            print("   [1] Quick Start with current settings (Default)")
+            print("   [2] Configure Setup (Ports, SSL, Certificates, Admin User)")
+            print("   [3] Re-install / update packages from requirements.txt")
+            print("   [4] Exit")
             print("=" * 62)
 
-            choice = input("[?] Velg et alternativ [1-4, Enter=1]: ").strip() or "1"
+            choice = input("[?] Select an option [1-4, Enter=1]: ").strip() or "1"
 
             if choice == "1":
                 if config_state["use_ssl"] and not certs_exist:
-                    ans = input("[?] SSL-sertifikater mangler. Generere selvsignert sertifikat nå? [J/n]: ").strip().lower()
-                    if ans in ("", "j", "ja", "y", "yes"):
-                        cn = input("[?] Fyll inn Common Name eller IP [standard: localhost]: ").strip() or "localhost"
+                    ans = input("[?] SSL certificates not found. Generate self-signed certificate now? [Y/n]: ").strip().lower()
+                    if ans in ("", "y", "yes", "j", "ja"):
+                        cn = input("[?] Enter Common Name or IP [default: localhost]: ").strip() or "localhost"
                         if not generate_self_signed_cert(cert_path, key_path, common_name=cn):
                             config_state["use_ssl"] = False
                     else:
-                        print("[!] Fortsetter uten HTTPS (--no-ssl).")
+                        print("[!] Continuing without HTTPS (--no-ssl).")
                         config_state["use_ssl"] = False
                 break
 
             elif choice == "2":
-                print("\n--- Nettverk og Porter ---")
-                host_in = input(f"[?] Lytteadresse (Bind IP) [{config_state['host']}]: ").strip()
+                print("\n--- Network & Ports ---")
+                host_in = input(f"[?] Bind IP Address [{config_state['host']}]: ").strip()
                 if host_in:
                     config_state["host"] = host_in
 
-                http_in = input(f"[?] HTTP-port [{config_state['http_port']}]: ").strip()
+                http_in = input(f"[?] HTTP Port [{config_state['http_port']}]: ").strip()
                 if http_in.isdigit():
                     config_state["http_port"] = int(http_in)
 
-                ssl_in = input("[?] Aktivere HTTPS/SSL-server? [J/n]: ").strip().lower()
-                config_state["use_ssl"] = ssl_in in ("", "j", "ja", "y", "yes")
+                ssl_in = input("[?] Enable HTTPS/SSL server? [Y/n]: ").strip().lower()
+                config_state["use_ssl"] = ssl_in in ("", "y", "yes", "j", "ja")
 
                 if config_state["use_ssl"]:
-                    https_in = input(f"[?] HTTPS-port [{config_state['https_port']}]: ").strip()
+                    https_in = input(f"[?] HTTPS Port [{config_state['https_port']}]: ").strip()
                     if https_in.isdigit():
                         config_state["https_port"] = int(https_in)
 
-                    gen_prompt = "[?] Generere nye SSL-sertifikater? [j/N]: " if certs_exist else "[?] SSL-sertifikater mangler. Generere nå? [J/n]: "
+                    gen_prompt = "[?] Generate new SSL certificates? [y/N]: " if certs_exist else "[?] SSL certificates missing. Generate now? [Y/n]: "
                     gen_in = input(gen_prompt).strip().lower()
-                    should_gen = gen_in in ("j", "ja", "y", "yes") if certs_exist else gen_in in ("", "j", "ja", "y", "yes")
+                    should_gen = gen_in in ("y", "yes", "j", "ja") if certs_exist else gen_in in ("", "y", "yes", "j", "ja")
                     if should_gen:
-                        cn = input("[?] Common Name / IP for sertifikatet [standard: localhost]: ").strip() or "localhost"
-                        days_in = input("[?] Gyldighet i antall dager [365]: ").strip()
+                        cn = input("[?] Common Name / IP for certificate [default: localhost]: ").strip() or "localhost"
+                        days_in = input("[?] Validity in days [365]: ").strip()
                         days = int(days_in) if days_in.isdigit() else 365
                         generate_self_signed_cert(cert_path, key_path, common_name=cn, days=days)
 
-                base_in = input(f"[?] Valgfri Base URL-prefiks (f.eks. /c2, tom for rot) [{config_state['base_url']}]: ").strip()
+                base_in = input(f"[?] Optional Base URL prefix (e.g. /c2, empty for root) [{config_state['base_url']}]: ").strip()
                 if base_in:
                     config_state["base_url"] = "/" + base_in.strip("/")
-                elif base_in == "":
-                    pass
 
-                print("\n--- Administrator-konto ---")
-                adm_in = input("[?] Vil du endre admin-brukernavn/passord i databasen? [j/N]: ").strip().lower()
-                if adm_in in ("j", "ja", "y", "yes"):
-                    adm_user = input("[?] Admin-brukernavn [admin]: ").strip() or "admin"
-                    adm_pass = getpass.getpass("[?] Nytt admin-passord: ").strip()
+                print("\n--- Administrator Account ---")
+                adm_in = input("[?] Do you want to update the admin username/password in the database? [y/N]: ").strip().lower()
+                if adm_in in ("y", "yes", "j", "ja"):
+                    adm_user = input("[?] Admin username [admin]: ").strip() or "admin"
+                    adm_pass = getpass.getpass("[?] New admin password: ").strip()
                     if adm_pass:
                         update_admin_credentials(adm_user, adm_pass)
                     else:
-                        print("[!] Passord var tomt – beholder eksisterende passord.")
+                        print("[!] Password was empty — keeping existing password.")
 
-                start_now = input("\n[?] Starte Glycon-serveren med disse innstillingene nå? [J/n]: ").strip().lower()
-                if start_now in ("", "j", "ja", "y", "yes"):
+                start_now = input("\n[?] Start Glycon server with these settings now? [Y/n]: ").strip().lower()
+                if start_now in ("", "y", "yes", "j", "ja"):
                     break
 
             elif choice == "3":
                 install_requirements(_get_venv_python(), force=True)
 
             elif choice in ("4", "q", "exit"):
-                print("[*] Avslutter.")
+                print("[*] Exiting.")
                 sys.exit(0)
             else:
-                print("[!] Ugyldig valg, prøv igjen.")
+                print("[!] Invalid selection, please try again.")
 
     except (KeyboardInterrupt, EOFError):
-        print("\n[!] Avbrutt av bruker.")
+        print("\n[!] Aborted by user.")
         sys.exit(0)
 
     return config_state
 
 
 if __name__ == "__main__":
-    # 1. Sørg for at venv er opprettet, aktivert og requirements installert
+    # 1. Ensure venv is created, activated, and requirements are installed
     bootstrap_venv()
 
-    # 2. Nå kjører vi garantert inne i venv – importer Werkzeug og argumenter
+    # 2. Now running inside venv — import Werkzeug and parse arguments
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
     class FixedDispatcherMiddleware(DispatcherMiddleware):
@@ -371,14 +369,14 @@ if __name__ == "__main__":
 
     started_without_args = len(sys.argv) == 1
 
-    parser = argparse.ArgumentParser(description="Start Glycon C2 med automatisk venv-oppsett og konfigurasjonsmeny.")
-    parser.add_argument("--no-ssl", action="store_true", help="Deaktiver HTTPS-server")
-    parser.add_argument("--gen-ssl", action="store_true", help="Generer nye selvsignerte SSL-sertifikater (cert.pem & key.pem)")
-    parser.add_argument("--ssl-cn", type=str, default="localhost", help="Common Name / IP for SSL-sertifikat (standard: localhost)")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Lytteadresse / Bind IP (standard: 0.0.0.0)")
-    parser.add_argument("--http-port", type=int, default=5555, help="Port for HTTP-server (standard: 5555)")
-    parser.add_argument("--https-port", type=int, default=443, help="Port for HTTPS-server (standard: 443)")
-    parser.add_argument("--no-menu", action="store_true", help="Hopp over interaktiv oppsettmeny og start direkte")
+    parser = argparse.ArgumentParser(description="Start Glycon C2 with automatic venv setup and configuration menu.")
+    parser.add_argument("--no-ssl", action="store_true", help="Disable HTTPS server")
+    parser.add_argument("--gen-ssl", action="store_true", help="Generate new self-signed SSL certificates (cert.pem & key.pem)")
+    parser.add_argument("--ssl-cn", type=str, default="localhost", help="Common Name / IP for SSL certificate (default: localhost)")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Bind IP address (default: 0.0.0.0)")
+    parser.add_argument("--http-port", type=int, default=5555, help="Port for HTTP server (default: 5555)")
+    parser.add_argument("--https-port", type=int, default=443, help="Port for HTTPS server (default: 443)")
+    parser.add_argument("--no-menu", action="store_true", help="Skip interactive setup menu and start immediately")
     args = parser.parse_args()
 
     if started_without_args and not args.no_menu:
@@ -407,7 +405,7 @@ if __name__ == "__main__":
     os.environ["GLYCON_HOST"] = bind_host
     os.environ["GLYCON_HTTPS_PORT"] = str(https_port)
 
-    # Importer server etter at menyen er ferdig slik at bakgrunnstråder ikke forstyrrer input
+    # Import server after interactive prompts so background threads don't interfere with input
     from glycon.server import app, socketio
 
     app.config["HOST"] = bind_host
@@ -423,7 +421,7 @@ if __name__ == "__main__":
     else:
         prefixed_app = app
 
-    print(f"\n[*] Starter Glycon C2 på {bind_host} (HTTP: {http_port}" + (f", HTTPS: {https_port})" if use_ssl else ")"))
+    print(f"\n[*] Starting Glycon C2 on {bind_host} (HTTP: {http_port}" + (f", HTTPS: {https_port})" if use_ssl else ")"))
 
     if use_ssl:
         socketio.start_background_task(
