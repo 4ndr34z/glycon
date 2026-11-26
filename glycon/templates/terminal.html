@@ -4,7 +4,7 @@
 {% block title %}Terminal — {{ agent.hostname }}{% endblock %}
 
 {% block content %}
-<div class="space-y-5">
+<div class="space-y-4">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div class="flex items-center gap-3">
@@ -22,14 +22,21 @@
             </div>
         </div>
 
-        <div class="flex items-center gap-2.5">
-            <button type="button" id="wsControl" class="{% if agent.ws_connected %}tactical-btn-primary{% else %}tactical-btn-danger{% endif %}">
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="wsControl" class="{% if agent.ws_connected %}tactical-btn-danger{% else %}tactical-btn-primary{% endif %}">
                 {{ icon('plug', 'w-4 h-4') }}
-                <span id="wsStatusText">{% if agent.ws_connected %}Disconnect{% else %}Connect{% endif %} Terminal</span>
+                <span id="wsStatusText">{% if agent.ws_connected %}Disconnect Terminal{% else %}Connect Terminal{% endif %}</span>
             </button>
-            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
+            <button type="button" id="clearTerminalBtn" class="tactical-btn-secondary py-2 px-3 text-xs" title="Clear terminal output (Ctrl+L)">
+                <span>Clear</span>
+            </button>
+            <button type="button" id="downloadLogBtn" class="tactical-btn-secondary py-2 px-3 text-xs" title="Save terminal session transcript">
+                {{ icon('download', 'w-4 h-4') }}
+                <span class="hidden sm:inline">Save Log</span>
+            </button>
+            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary py-2 px-3 text-xs">
                 {{ icon('arrow-left', 'w-4 h-4') }}
-                <span>Back to Agent</span>
+                <span>Back</span>
             </a>
         </div>
     </div>
@@ -37,12 +44,15 @@
     <!-- Terminal Console Window -->
     <div class="tactical-card border-slate-800 shadow-2xl">
         <!-- Window Chrome Bar -->
-        <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-center gap-2">
                 <span class="w-3 h-3 rounded-full bg-rose-500/80"></span>
                 <span class="w-3 h-3 rounded-full bg-amber-500/80"></span>
                 <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
                 <span class="ml-2 text-xs font-mono text-slate-400">session://{{ agent.hostname }} ({{ agent.ip }})</span>
+                <span id="active-pids-badge" class="hidden ml-2 px-2 py-0.5 rounded-full text-[11px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    0 bg tasks
+                </span>
             </div>
             <div class="flex items-center gap-2">
                 <span id="connection-status" class="px-2.5 py-0.5 rounded-full text-xs font-mono {% if agent.ws_connected %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30{% else %}bg-rose-500/15 text-rose-400 border border-rose-500/30{% endif %}">
@@ -51,18 +61,31 @@
             </div>
         </div>
 
+        <!-- Quick Shortcuts Bar -->
+        <div class="px-4 py-1.5 bg-slate-900/80 border-b border-slate-800/80 flex flex-wrap items-center gap-1.5">
+            <span class="text-[11px] font-mono uppercase text-slate-500 mr-1">Quick:</span>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#help">#help</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#ps">#ps</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#who">#who</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-cyan-400 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#upload">#upload</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#creds">#creds</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#cookies">#cookies</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#screenshot">#screenshot</button>
+            <button type="button" class="term-shortcut-btn px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-slate-700/80 text-xs font-mono transition-colors" data-cmd="#socks status">#socks status</button>
+        </div>
+
         <!-- Terminal Output Viewport -->
         <div id="terminal" class="h-[540px] bg-[#070a10] text-slate-100 p-4 overflow-y-auto font-mono text-xs leading-relaxed whitespace-pre-wrap select-text"></div>
 
         <!-- Command Prompt Bar -->
         <div class="p-3 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <div class="flex-1 flex items-center bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 focus-within:border-emerald-500/60 focus-within:ring-2 focus-within:ring-emerald-500/20">
-                <span id="dir-prompt" class="font-mono text-xs text-emerald-400 pr-2 shrink-0 max-w-[260px] truncate">
+                <span id="dir-prompt" class="font-mono text-xs text-emerald-400 pr-2 shrink-0 max-w-[320px] truncate" title="Current working directory">
                     {% if agent.os.startswith('Windows') %}&gt;{% else %}$ {% endif %}
                 </span>
                 <input type="text" id="command-input"
                        class="w-full bg-transparent text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none disabled:opacity-50"
-                       placeholder="Enter shell command or #help..." autocomplete="off">
+                       placeholder="Enter shell command or #help (Tab to autocomplete)..." autocomplete="off" spellcheck="false">
             </div>
 
             <div class="flex items-center gap-2 shrink-0">
@@ -70,7 +93,7 @@
                     {{ icon('send', 'w-3.5 h-3.5') }}
                     <span>Send</span>
                 </button>
-                <button type="button" id="kill-process" class="tactical-btn-warning py-2 px-3 text-xs" title="Kill specific process by PID">
+                <button type="button" id="kill-process" class="tactical-btn-warning py-2 px-3 text-xs" title="Kill specific background process by PID">
                     <span>Kill PID</span>
                 </button>
                 <button type="button" id="kill-all-processes" class="tactical-btn-danger py-2 px-3 text-xs" title="Kill all running child processes">
@@ -88,9 +111,9 @@
             <span>WebSocket channel: <strong id="wsStatusAlert" class="text-slate-200 font-mono">{% if agent.ws_connected %}Connected{% else %}Disconnected{% endif %}</strong></span>
         </div>
         <div>
-            Built-in commands: <code class="px-1.5 py-0.5 rounded bg-slate-950 text-emerald-400 border border-slate-800">#help</code>
-            <code class="px-1.5 py-0.5 rounded bg-slate-950 text-cyan-400 border border-slate-800 ml-1">#upload [file]</code>
-            <code class="px-1.5 py-0.5 rounded bg-slate-950 text-amber-400 border border-slate-800 ml-1">clear</code>
+            Shortcuts: <code class="px-1.5 py-0.5 rounded bg-slate-950 text-emerald-400 border border-slate-800">Tab</code> Autocomplete
+            <code class="px-1.5 py-0.5 rounded bg-slate-950 text-cyan-400 border border-slate-800 ml-1">↑/↓</code> History
+            <code class="px-1.5 py-0.5 rounded bg-slate-950 text-amber-400 border border-slate-800 ml-1">Ctrl+L</code> Clear
         </div>
     </div>
 </div>
@@ -161,6 +184,17 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const AGENT_ID = '{{ agent.id }}';
+    const IS_WINDOWS = '{{ agent.os }}'.toLowerCase().includes('windows');
+    const INITIAL_WS_CONNECTED = {{ 'true' if agent.ws_connected else 'false' }};
+
+    const BUILTIN_SHORTCUTS = [
+        '#help', '#ps', '#who', '#upload', '#exfiltrate ', '#screenshot',
+        '#webshot', '#captureaudio ', '#creds', '#cookies', '#keylogger',
+        '#nokeylogger', '#getsystem', '#spawnas ', '#uacloop',
+        '#socks start', '#socks stop', '#socks status', '#fakeransom', '#clearransom'
+    ];
+
     const terminal = document.getElementById('terminal');
     const commandInput = document.getElementById('command-input');
     const sendButton = document.getElementById('send-command');
@@ -171,31 +205,41 @@ document.addEventListener('DOMContentLoaded', function() {
     const wsStatusText = document.getElementById('wsStatusText');
     const wsStatusAlert = document.getElementById('wsStatusAlert');
     const connectionStatus = document.getElementById('connection-status');
+    const activePidsBadge = document.getElementById('active-pids-badge');
 
     let currentDir = '?';
     let socket = null;
-    let isConnected = false;
+    let isAgentConnected = false;
+    let isConnectingTask = false;
     let commandHistory = [];
     let historyIndex = -1;
+    let activePids = new Set();
+
+    function updateActivePidsBadge() {
+        if (activePids.size > 0) {
+            activePidsBadge.textContent = `${activePids.size} bg task${activePids.size > 1 ? 's' : ''}: ${Array.from(activePids).join(', ')}`;
+            activePidsBadge.classList.remove('hidden');
+        } else {
+            activePidsBadge.classList.add('hidden');
+        }
+    }
 
     function cleanText(text) {
         if (typeof text !== 'string') return '';
-        const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(text);
-        if (hasAnsi) return text;
-        text = text.replace(/ÿ/g, ' ').replace(/\x00/g, '');
-        text = text.replace(/[^\x20-\x7E\x1B\u001b\r\n\t]/g, ' ');
-        return text;
+        // Strip only non-printable ASCII control chars (keep UTF-8 / Norwegian æøå, newlines, tabs, ANSI escape)
+        return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1A\x1C-\x1F\x7F]/g, '');
     }
 
     function renderText(text, container) {
         if (!text) return;
-        const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(text);
+        const cleaned = cleanText(text);
+        const hasAnsi = /[\x1B\u001b]\[[0-9;]*m/.test(cleaned);
         if (!hasAnsi) {
-            container.textContent = cleanText(text);
+            container.textContent = cleaned;
             return;
         }
 
-        const parts = text.split(/[\x1B\u001b]\[/);
+        const parts = cleaned.split(/[\x1B\u001b]\[/);
         let result = GlyconUI.escapeHtml(parts[0]);
 
         for (let i = 1; i < parts.length; i++) {
@@ -211,6 +255,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     else if (code === '32') styles.push('color: #34d399;');
                     else if (code === '33') styles.push('color: #fbbf24;');
                     else if (code === '34') styles.push('color: #38bdf8;');
+                    else if (code === '36') styles.push('color: #22d3ee;');
                     else if (code === '1') styles.push('font-weight: bold;');
                 });
                 result += styles.length > 0 ? `<span style="${styles.join(' ')}">${content}</span>` : content;
@@ -223,7 +268,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function normalizePath(path) {
         if (!path || typeof path !== 'string') return currentDir;
-        if ('{{ agent.os }}'.toLowerCase().includes('windows')) {
+        if (IS_WINDOWS) {
             path = path.replace(/\//g, '\\');
             if (path.match(/^[a-z]:\\/i)) path = path[0].toUpperCase() + path.substr(1);
             if (path.endsWith('\\') && path.length > 3) path = path.slice(0, -1);
@@ -234,6 +279,72 @@ document.addEventListener('DOMContentLoaded', function() {
         return path;
     }
 
+    function setTerminalState(state, detailText = '') {
+        if (state === 'connected') {
+            isAgentConnected = true;
+            isConnectingTask = false;
+            connectionStatus.textContent = 'Connected';
+            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+            wsStatusText.textContent = 'Disconnect Terminal';
+            wsControl.className = 'tactical-btn-danger';
+            wsStatusAlert.textContent = detailText || 'Connected';
+            commandInput.disabled = false;
+            sendButton.disabled = false;
+            document.getElementById('waiting-message')?.remove();
+        } else if (state === 'connecting') {
+            isAgentConnected = false;
+            isConnectingTask = true;
+            connectionStatus.textContent = 'Waiting for Agent...';
+            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse';
+            wsStatusText.textContent = 'Cancel / Stop';
+            wsControl.className = 'tactical-btn-secondary';
+            wsStatusAlert.textContent = detailText || 'Waiting for next agent beacon...';
+            commandInput.disabled = false;
+            sendButton.disabled = false;
+            if (!document.getElementById('waiting-message')) {
+                const waitingDiv = document.createElement('div');
+                waitingDiv.id = 'waiting-message';
+                waitingDiv.className = 'text-amber-400 font-mono my-1';
+                waitingDiv.textContent = '[*] Waiting for agent WebSocket handshake (will connect on next check-in)...';
+                terminal.appendChild(waitingDiv);
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+        } else {
+            isAgentConnected = false;
+            isConnectingTask = false;
+            connectionStatus.textContent = 'Disconnected';
+            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-rose-500/15 text-rose-400 border border-rose-500/30';
+            wsStatusText.textContent = 'Connect Terminal';
+            wsControl.className = 'tactical-btn-primary';
+            wsStatusAlert.textContent = detailText || 'Disconnected';
+            commandInput.disabled = true;
+            sendButton.disabled = true;
+            document.getElementById('waiting-message')?.remove();
+        }
+    }
+
+    function updatePrompt() {
+        const sep = IS_WINDOWS ? '>' : '$';
+        dirPrompt.textContent = `${getPrompt()}${sep}`;
+        dirPrompt.title = currentDir;
+    }
+
+    function getPrompt() {
+        return currentDir === '?' ? '' : currentDir;
+    }
+
+    function showAlert(message, type = 'info') {
+        GlyconUI.toast('Terminal', message, type);
+    }
+
+    function killSinglePid(pid) {
+        if (!socket || !pid) return;
+        socket.emit('kill_process', {
+            agent_id: AGENT_ID,
+            process_id: String(pid).trim()
+        });
+    }
+
     function initializeSocket() {
         if (socket) {
             socket.disconnect();
@@ -241,73 +352,105 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         socket = io('/terminal', {
+            reconnection: true,
             reconnectionAttempts: 0,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            autoConnect: false,
-            query: { agent_id: '{{ agent.id }}' }
+            autoConnect: true,
+            query: { agent_id: AGENT_ID }
         });
 
         socket.on('connect', function() {
-            updateConnectionStatus(true);
-            socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
-            socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
-
-            if (!document.getElementById('waiting-message')) {
-                const waitingDiv = document.createElement('div');
-                waitingDiv.id = 'waiting-message';
-                waitingDiv.className = 'text-amber-400 font-mono';
-                waitingDiv.textContent = '[*] Waiting for beacon WebSocket handshake...';
-                terminal.appendChild(waitingDiv);
-                terminal.scrollTop = terminal.scrollHeight;
-            }
+            socket.emit('join_terminal', { agent_id: AGENT_ID });
+            socket.emit('get_current_dir', { agent_id: AGENT_ID });
         });
 
         socket.on('reconnect', () => {
-            socket.emit('join_terminal', { agent_id: '{{ agent.id }}' });
-            socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
+            socket.emit('join_terminal', { agent_id: AGENT_ID });
+            socket.emit('get_current_dir', { agent_id: AGENT_ID });
         });
 
         socket.on('agent_connected', function() {
-            updateConnectionStatus(true);
-            document.getElementById('waiting-message')?.remove();
-            socket.emit('get_current_dir', { agent_id: '{{ agent.id }}' });
+            setTerminalState('connected');
+            socket.emit('get_current_dir', { agent_id: AGENT_ID });
+            commandInput.focus();
         });
 
-        socket.on('disconnect', function() {
-            updateConnectionStatus(false);
+        socket.on('status', function(data) {
+            if (data.status === 'connected') {
+                setTerminalState('connected');
+                socket.emit('get_current_dir', { agent_id: AGENT_ID });
+            } else if (data.status === 'disconnected') {
+                setTerminalState('disconnected');
+            }
         });
 
-        socket.on('connect_error', function(error) {
-            showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
-            updateConnectionStatus(false);
+        socket.on('ws_status', function(data) {
+            if (data.status === 'success') {
+                if (data.action === 'stop') {
+                    setTerminalState('disconnected');
+                } else {
+                    setTerminalState('connected');
+                }
+                showAlert(`WebSocket ${data.action}ed successfully`, 'success');
+            } else {
+                showAlert(`WebSocket error: ${data.message || 'Unknown error'}`, 'danger');
+            }
         });
 
         socket.on('terminal_output', function(data) {
+            if (!isAgentConnected) {
+                setTerminalState('connected');
+            }
+
             if (data.current_dir) {
                 currentDir = normalizePath(data.current_dir);
                 updatePrompt();
+                const initialDirElement = document.getElementById('initial-dir');
+                if (initialDirElement && initialDirElement.textContent.endsWith('?')) {
+                    initialDirElement.textContent = `Working directory: ${currentDir}`;
+                }
             }
 
-            if (data.running) {
-                const runningDiv = document.createElement('div');
-                runningDiv.className = 'text-amber-400 font-mono running-process-line';
-                runningDiv.innerHTML = `[Process <span class="running-process-id">${GlyconUI.escapeHtml(data.process_id)}</span> running in background...]`;
-                terminal.appendChild(runningDiv);
+            if (data.cleared_all_pids) {
+                activePids.clear();
+                updateActivePidsBadge();
+                document.querySelectorAll('.running-process-line').forEach(el => el.remove());
             }
 
-            if (data.command || data.task_type) {
-                const commandDiv = document.createElement('div');
-                commandDiv.className = 'text-emerald-400 font-mono command-text mt-1';
-                if (data.command) {
-                    commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${data.command}`;
-                } else if (data.task_type) {
-                    commandDiv.textContent = `[*] Task execution: ${data.task_type}`;
+            if (data.finished_pid) {
+                activePids.delete(String(data.finished_pid));
+                updateActivePidsBadge();
+                const pidLine = document.getElementById(`running-pid-${data.finished_pid}`);
+                if (pidLine) pidLine.remove();
+            }
+
+            if (data.running && data.process_id) {
+                const pidStr = String(data.process_id);
+                activePids.add(pidStr);
+                updateActivePidsBadge();
+
+                if (!document.getElementById(`running-pid-${pidStr}`)) {
+                    const runningDiv = document.createElement('div');
+                    runningDiv.id = `running-pid-${pidStr}`;
+                    runningDiv.className = 'text-amber-400 font-mono running-process-line flex items-center gap-2 my-0.5';
+                    runningDiv.innerHTML = `<span>[*] Process <strong class="running-process-id">${GlyconUI.escapeHtml(pidStr)}</strong> running in background...</span>`;
+                    const killBtn = document.createElement('button');
+                    killBtn.type = 'button';
+                    killBtn.className = 'px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-[10px] font-mono';
+                    killBtn.textContent = 'Kill';
+                    killBtn.addEventListener('click', () => killSinglePid(pidStr));
+                    runningDiv.appendChild(killBtn);
+                    terminal.appendChild(runningDiv);
                 }
-                if (data.process_id) {
-                    commandDiv.textContent += ` [PID: ${data.process_id}]`;
-                }
-                terminal.appendChild(commandDiv);
+            }
+
+            // Only print a task header if this output originated from an asynchronous C2 task (never re-echo user's typed command)
+            if (data.task_type) {
+                const taskDiv = document.createElement('div');
+                taskDiv.className = 'text-cyan-400 font-mono mt-1';
+                taskDiv.textContent = `[*] Task completed: ${data.task_type}`;
+                terminal.appendChild(taskDiv);
             }
 
             if (data.output) {
@@ -333,57 +476,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 updatePrompt();
                 const initialDirElement = document.getElementById('initial-dir');
                 if (initialDirElement) {
-                    initialDirElement.textContent = `Initial directory: ${currentDir}`;
+                    initialDirElement.textContent = `Working directory: ${currentDir}`;
                 }
             }
         });
-
-        socket.on('ws_status', function(data) {
-            if (data.status === 'success') {
-                updateConnectionStatus(data.action === 'start');
-                showAlert(`WebSocket ${data.action}ed successfully`, 'success');
-            } else {
-                showAlert(`WebSocket error: ${data.message || 'Unknown error'}`, 'danger');
-            }
-        });
-
-        socket.on('status', function(data) {
-            if (data.status === 'connected') updateConnectionStatus(true);
-            else if (data.status === 'disconnected') updateConnectionStatus(false);
-        });
-    }
-
-    function updateConnectionStatus(connected) {
-        isConnected = connected;
-        if (connected) {
-            connectionStatus.textContent = 'Connected';
-            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-            wsStatusText.textContent = 'Disconnect Terminal';
-            wsControl.className = 'tactical-btn-primary';
-            wsStatusAlert.textContent = 'Connected';
-            commandInput.disabled = false;
-            sendButton.disabled = false;
-        } else {
-            connectionStatus.textContent = 'Disconnected';
-            connectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-rose-500/15 text-rose-400 border border-rose-500/30';
-            wsStatusText.textContent = 'Connect Terminal';
-            wsControl.className = 'tactical-btn-danger';
-            wsStatusAlert.textContent = 'Disconnected';
-            commandInput.disabled = true;
-            sendButton.disabled = true;
-        }
-    }
-
-    function updatePrompt() {
-        dirPrompt.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'}`;
-    }
-
-    function getPrompt() {
-        return currentDir === '?' ? '' : currentDir;
-    }
-
-    function showAlert(message, type = 'info') {
-        GlyconUI.toast('Terminal', message, type);
     }
 
     function sendCommand() {
@@ -429,18 +525,22 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        commandHistory.unshift(command);
-        if (commandHistory.length > 50) commandHistory.pop();
+        if (commandHistory[0] !== command) {
+            commandHistory.unshift(command);
+            if (commandHistory.length > 100) commandHistory.pop();
+        }
         historyIndex = -1;
 
+        // Echo the command ONCE in the terminal
+        const sep = IS_WINDOWS ? '>' : '$';
         const commandDiv = document.createElement('div');
-        commandDiv.className = 'text-emerald-400 font-mono mt-1';
-        commandDiv.textContent = `${getPrompt()}${currentDir.includes('\\') ? '>' : '$'} ${command}`;
+        commandDiv.className = 'text-emerald-400 font-mono mt-1.5';
+        commandDiv.textContent = `${getPrompt()}${sep} ${command}`;
         terminal.appendChild(commandDiv);
 
         try {
             socket.emit('command', {
-                agent_id: '{{ agent.id }}',
+                agent_id: AGENT_ID,
                 command: command,
                 current_dir: currentDir
             });
@@ -455,12 +555,36 @@ document.addEventListener('DOMContentLoaded', function() {
         terminal.scrollTop = terminal.scrollHeight;
     }
 
+    // Quick shortcut buttons
+    document.querySelectorAll('.term-shortcut-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const cmd = this.getAttribute('data-cmd');
+            if (!cmd) return;
+            commandInput.value = cmd;
+            sendCommand();
+            commandInput.focus();
+        });
+    });
+
+    document.getElementById('clearTerminalBtn').addEventListener('click', function() {
+        terminal.innerHTML = '';
+        commandInput.focus();
+    });
+
+    document.getElementById('downloadLogBtn').addEventListener('click', function() {
+        const text = terminal.innerText || '';
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `glycon_terminal_${AGENT_ID}_${Date.now()}.log`;
+        a.click();
+    });
+
     // Upload file handler
     document.getElementById('uploadFileBtn').addEventListener('click', async function() {
         const fileInput = document.getElementById('uploadFileInput');
         const destinationFolder = document.getElementById('uploadDestinationFolder').value.trim();
         const fileName = document.getElementById('uploadFileName').value.trim();
-        const agentId = "{{ agent.id }}";
 
         try {
             if (!fileInput.files.length) throw new Error('Please select a file');
@@ -486,7 +610,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             'Accept': 'application/json'
                         },
                         body: JSON.stringify({
-                            agent_id: agentId,
+                            agent_id: AGENT_ID,
                             filename: finalFileName,
                             folder: destinationFolder,
                             data: base64Data,
@@ -522,7 +646,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const fileSelect = document.getElementById('arsenalFileSelect');
         const newFile = document.getElementById('newArsenalFile');
         const destinationFolder = document.getElementById('arsenalDestinationFolder').value.trim();
-        const agentId = "{{ agent.id }}";
 
         try {
             if (!destinationFolder) throw new Error('Please specify a destination folder');
@@ -540,7 +663,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const reader = new FileReader();
                 reader.onload = async function() {
                     const base64Data = reader.result.split(',')[1];
-                    await createArsenalTask(agentId, filename, destinationFolder, base64Data);
+                    await createArsenalTask(AGENT_ID, filename, destinationFolder, base64Data);
                 };
                 reader.readAsDataURL(file);
             } else if (fileSelect.value) {
@@ -550,7 +673,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const reader = new FileReader();
                 reader.onload = async function() {
                     const base64Data = reader.result.split(',')[1];
-                    await createArsenalTask(agentId, filename, destinationFolder, base64Data);
+                    await createArsenalTask(AGENT_ID, filename, destinationFolder, base64Data);
                 };
                 reader.readAsDataURL(blob);
             } else {
@@ -594,9 +717,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize terminal banner
     terminal.innerHTML = `
-        <div class="text-slate-400">Connected to agent: <span class="text-emerald-400">{{ agent.hostname }}</span> ({{ agent.id }})</div>
+        <div class="text-slate-400">Connected to agent: <span class="text-emerald-400">{{ agent.hostname }}</span> (${AGENT_ID})</div>
         <div class="text-slate-400">OS: {{ agent.os }} | Privilege: {{ agent.privilege }}</div>
-        <div id="initial-dir" class="text-slate-400">Initial directory: ${currentDir}</div>
+        <div id="initial-dir" class="text-slate-400">Working directory: ${currentDir}</div>
         <div class="text-slate-500 mb-2">Type shell commands below (or #help for built-in shortcuts):</div>
     `;
 
@@ -605,11 +728,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Kill specific process with modern Prompt modal
     killProcessButton.addEventListener('click', async function() {
-        const runningProcesses = document.querySelectorAll('.running-process-id');
+        const pids = Array.from(activePids);
         let message = 'Specify the Process ID (PID) to terminate on the remote host.';
         let defaultPid = '';
-        if (runningProcesses.length > 0) {
-            const pids = Array.from(runningProcesses).map(el => el.textContent.trim());
+        if (pids.length > 0) {
             defaultPid = pids[pids.length - 1] || '';
             message = `Active background PIDs detected: ${pids.join(', ')}\nEnter the PID to terminate:`;
         }
@@ -624,15 +746,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         if (processId && processId.trim()) {
-            try {
-                socket.emit('kill_process', {
-                    agent_id: '{{ agent.id }}',
-                    process_id: processId.trim()
-                });
-                showAlert('Kill signal sent for PID: ' + processId.trim(), 'warning');
-            } catch (e) {
-                showAlert('Error sending kill command: ' + e.message, 'danger');
-            }
+            killSinglePid(processId.trim());
+            showAlert('Kill signal sent for PID: ' + processId.trim(), 'warning');
         }
     });
 
@@ -648,7 +763,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             socket.emit('kill_process', {
-                agent_id: '{{ agent.id }}',
+                agent_id: AGENT_ID,
                 process_id: 'ALL'
             });
             showAlert('Kill ALL processes command dispatched', 'danger');
@@ -660,6 +775,16 @@ document.addEventListener('DOMContentLoaded', function() {
     commandInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             sendCommand();
+        } else if (e.key === 'l' && e.ctrlKey) {
+            e.preventDefault();
+            terminal.innerHTML = '';
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const val = commandInput.value;
+            if (val.startsWith('#')) {
+                const match = BUILTIN_SHORTCUTS.find(s => s.startsWith(val.toLowerCase()));
+                if (match) commandInput.value = match;
+            }
         } else if (e.key === 'ArrowUp') {
             if (historyIndex < commandHistory.length - 1) {
                 historyIndex++;
@@ -679,40 +804,52 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    function startTerminalSession() {
+        setTerminalState('connecting');
+        if (socket && !socket.connected) {
+            socket.connect();
+        }
+        fetch('/api/task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                agent_id: AGENT_ID,
+                task_type: 'websocket',
+                task_data: { action: 'start' }
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                if (socket && socket.connected) {
+                    socket.emit('get_current_dir', { agent_id: AGENT_ID });
+                }
+                showAlert('Terminal WebSocket task queued', 'info');
+            } else {
+                setTerminalState('disconnected');
+                showAlert('Failed to start WebSocket: ' + (data.message || 'Unknown error'), 'danger');
+            }
+        });
+    }
+
     wsControl.addEventListener('click', function() {
-        const action = isConnected ? 'stop' : 'start';
-        if (action === 'stop') {
+        if (isAgentConnected || isConnectingTask) {
             socket.emit('ws_control', {
-                agent_id: '{{ agent.id }}',
+                agent_id: AGENT_ID,
                 action: 'stop'
             });
+            setTerminalState('disconnected');
         } else {
-            fetch('/api/task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    agent_id: '{{ agent.id }}',
-                    task_type: 'websocket',
-                    task_data: { action: 'start' }
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    socket.connect();
-                    showAlert('WebSocket task queued, waiting for agent handshake...', 'info');
-                } else {
-                    showAlert('Failed to start WebSocket: ' + (data.message || 'Unknown error'), 'danger');
-                }
-            });
+            startTerminalSession();
         }
     });
 
-    commandInput.focus();
     updatePrompt();
-
-    if ({{ 'true' if agent.ws_connected else 'false' }}) {
-        socket.connect();
+    if (INITIAL_WS_CONNECTED) {
+        setTerminalState('connected');
+        commandInput.focus();
+    } else {
+        setTerminalState('disconnected');
     }
 });
 </script>

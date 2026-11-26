@@ -4,7 +4,7 @@
 {% block title %}Remote Desktop — {{ agent.hostname }}{% endblock %}
 
 {% block content %}
-<div class="space-y-5">
+<div class="space-y-4">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div class="flex items-center gap-3">
@@ -22,65 +22,137 @@
             </div>
         </div>
 
-        <div class="flex items-center gap-2.5">
-            <button type="button" id="rdControl" class="tactical-btn-danger">
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="rdControl" class="tactical-btn-primary">
                 {{ icon('plug', 'w-4 h-4') }}
-                <span id="rdStatusText">Connect Remote Desktop</span>
+                <span id="rdStatusText">{% if agent.rd_connected %}Disconnect Stream{% else %}Connect Remote Desktop{% endif %}</span>
             </button>
-            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
+            <button type="button" id="rdKeyframeBtn" class="tactical-btn-secondary py-2 px-3 text-xs" title="Force fresh keyframe from agent">
+                {{ icon('refresh', 'w-4 h-4') }}
+                <span class="hidden sm:inline">Refresh</span>
+            </button>
+            <button type="button" id="rdSnapshotBtn" class="tactical-btn-secondary py-2 px-3 text-xs" title="Download current screen frame">
+                {{ icon('camera', 'w-4 h-4') }}
+                <span class="hidden sm:inline">Snapshot</span>
+            </button>
+            <button type="button" id="rdFullscreenBtn" class="tactical-btn-secondary py-2 px-3 text-xs" title="Toggle Fullscreen viewport">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/></svg>
+                <span class="hidden sm:inline">Fullscreen</span>
+            </button>
+            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary py-2 px-3 text-xs">
                 {{ icon('arrow-left', 'w-4 h-4') }}
-                <span>Back to Agent</span>
+                <span>Back</span>
             </a>
         </div>
     </div>
 
     <!-- Remote Desktop Console Card -->
-    <div class="tactical-card shadow-2xl">
-        <!-- Toolbar -->
-        <div class="px-5 py-3 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
-            <div class="flex items-center gap-3">
-                <span class="text-xs font-mono text-slate-400">LIVE STREAM VIEWPORT</span>
+    <div id="rd-console-card" class="tactical-card shadow-2xl flex flex-col">
+        <!-- Primary Toolbar -->
+        <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2.5">
+                <span class="text-xs font-mono uppercase tracking-wider text-slate-400">STREAM</span>
                 <span id="rd-connection-status" class="px-2.5 py-0.5 rounded-full text-xs font-mono {% if agent.rd_connected %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30{% else %}bg-rose-500/15 text-rose-400 border border-rose-500/30{% endif %}">
                     {% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}
                 </span>
+                <span id="rd-telemetry" class="text-xs font-mono text-slate-400 hidden sm:inline">
+                    &bull; <span id="rd-res-badge" class="text-cyan-400">--x--</span>
+                    &bull; <span id="rd-fps-badge" class="text-emerald-400">0.0 FPS</span>
+                    &bull; <span id="rd-size-badge" class="text-slate-300">0 KB</span>
+                </span>
             </div>
 
-            <div class="flex items-center gap-4">
-                <div class="flex items-center gap-2">
-                    <label for="quality-select" class="text-xs font-medium text-slate-400">Stream Quality:</label>
-                    <select id="quality-select" class="tactical-select py-1 px-2.5 text-xs">
-                        <option value="low">Low (50% - Fast)</option>
-                        <option value="medium" selected>Medium (75% - Balanced)</option>
-                        <option value="high">High (100% - Sharp)</option>
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-1.5">
+                    <label for="monitor-select" class="text-xs font-medium text-slate-400">Display:</label>
+                    <select id="monitor-select" class="tactical-select py-1 px-2 text-xs">
+                        <option value="1" selected>Display 1 (Primary)</option>
+                        <option value="0">All Displays</option>
                     </select>
                 </div>
+
+                <div class="flex items-center gap-1.5">
+                    <label for="quality-select" class="text-xs font-medium text-slate-400">Quality:</label>
+                    <select id="quality-select" class="tactical-select py-1 px-2 text-xs">
+                        <option value="low">Low (50% Fast)</option>
+                        <option value="medium" selected>Medium (75% Balanced)</option>
+                        <option value="high">High (100% HD)</option>
+                        <option value="ultra">Ultra (100% Crisp)</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center gap-1.5">
+                    <label for="fps-select" class="text-xs font-medium text-slate-400">Target FPS:</label>
+                    <select id="fps-select" class="tactical-select py-1 px-2 text-xs">
+                        <option value="1">1 FPS</option>
+                        <option value="2">2 FPS</option>
+                        <option value="5" selected>5 FPS</option>
+                        <option value="10">10 FPS</option>
+                        <option value="15">15 FPS</option>
+                    </select>
+                </div>
+
+                <label class="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none" title="Stream live mouse movement (uncheck for click-only mode over high-latency links)">
+                    <input type="checkbox" id="follow-cursor-toggle" class="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-emerald-500" checked>
+                    <span>Live Move</span>
+                </label>
+
                 <div class="text-xs font-mono text-slate-400">
-                    Last frame: <span id="last-update" class="text-slate-200">Never</span>
+                    Frame: <span id="last-update" class="text-slate-200">Never</span>
                 </div>
             </div>
         </div>
 
-        <!-- Screen Canvas -->
-        <div id="remote-desktop" class="relative bg-[#05070b] min-h-[540px] flex items-center justify-center overflow-hidden" style="cursor: none;">
+        <!-- Secondary Toolbar: Quick Hotkeys & Direct Text Input -->
+        <div class="px-4 py-2 bg-slate-900/90 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5">
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[11px] font-mono uppercase text-slate-400 mr-1">Hotkeys:</span>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="win,r" title="Open Windows Run dialog">Win+R</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="ctrl,shift,esc" title="Open Task Manager">TaskMgr</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="win,d" title="Show/Hide Desktop">Win+D</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="alt,tab" title="Switch active window">Alt+Tab</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="alt,f4" title="Close active window">Alt+F4</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="ctrl,a" title="Select All">Ctrl+A</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="ctrl,c" title="Copy">Ctrl+C</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="ctrl,v" title="Paste">Ctrl+V</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="esc" title="Escape">Esc</button>
+                <button type="button" class="rd-hotkey-btn px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono transition-colors" data-keys="enter" title="Enter">Enter</button>
+            </div>
+
+            <form id="rd-type-form" class="flex items-center gap-1.5 flex-1 min-w-[260px] max-w-md">
+                <input type="text" id="rd-type-input" class="tactical-input py-1 px-2.5 text-xs font-mono flex-1" placeholder="Type text / command to send to remote window...">
+                <label class="inline-flex items-center gap-1 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap">
+                    <input type="checkbox" id="rd-type-enter" class="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-emerald-500" checked>
+                    <span>+Enter</span>
+                </label>
+                <button type="submit" class="tactical-btn-primary py-1 px-2.5 text-xs">Send</button>
+            </form>
+        </div>
+
+        <!-- Screen Viewport -->
+        <div id="remote-desktop" class="relative bg-[#05070b] min-h-[560px] flex-1 flex items-center justify-center overflow-hidden select-none" tabindex="0">
             <div id="waiting-message" class="flex flex-col items-center justify-center text-center p-8 cursor-default">
                 <div class="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-cyan-400 mb-4">
                     {{ icon('desktop', 'w-8 h-8') }}
                 </div>
-                <h3 class="text-base font-semibold text-slate-200">Remote Desktop Stream Offline</h3>
-                <p class="text-xs text-slate-400 mt-1 max-w-sm">Click "Connect Remote Desktop" to initialize real-time screen capture and mouse/keyboard control.</p>
+                <h3 id="waiting-title" class="text-base font-semibold text-slate-200">Remote Desktop Stream Offline</h3>
+                <p id="waiting-subtitle" class="text-xs text-slate-400 mt-1 max-w-sm">Click "Connect Remote Desktop" to initialize real-time screen capture and mouse/keyboard control.</p>
             </div>
-            <img id="desktop-screenshot" class="max-w-full h-auto select-none" style="display: none; cursor: none;" alt="Remote Desktop Screenshot" tabindex="0">
-            <div id="mouse-cursor" style="position: absolute; width: 14px; height: 14px; background-color: #10b981; border: 2px solid #ffffff; border-radius: 50%; pointer-events: none; display: none; z-index: 1000; box-shadow: 0 0 8px rgba(16,185,129,0.8);"></div>
+
+            <img id="desktop-screenshot" class="max-w-full max-h-[82vh] w-auto h-auto object-contain select-none outline-none" style="display: none; cursor: crosshair;" alt="Remote Desktop Stream" draggable="false" tabindex="0">
+
+            <div id="mouse-cursor" style="position: absolute; width: 12px; height: 12px; background-color: rgba(16, 185, 129, 0.85); border: 2px solid #ffffff; border-radius: 50%; pointer-events: none; display: none; z-index: 1000; transform: translate(-50%, -50%); box-shadow: 0 0 8px rgba(16,185,129,0.9);"></div>
+            <div id="click-ripple" style="position: absolute; width: 22px; height: 22px; border: 2px solid #22d3ee; border-radius: 50%; pointer-events: none; display: none; z-index: 999; transform: translate(-50%, -50%);"></div>
         </div>
     </div>
 
     <!-- Status Footer -->
-    <div class="px-4 py-3 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+    <div class="px-4 py-3 rounded-xl bg-slate-900/70 border border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
         <div class="flex items-center gap-2">
             <span class="text-cyan-400">{{ icon('info', 'w-4 h-4') }}</span>
-            <span>Remote Desktop status: <strong id="rdStatusAlert" class="text-slate-200 font-mono">{% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}</strong></span>
+            <span>Status: <strong id="rdStatusAlert" class="text-slate-200 font-mono">{% if agent.rd_connected %}Connected{% else %}Disconnected{% endif %}</strong></span>
         </div>
-        <span>Click inside the viewport when connected to capture keyboard input</span>
+        <span>Left/Right/Double-click, Drag &amp; Wheel Scroll supported &bull; Click viewport to focus direct keyboard capture</span>
     </div>
 </div>
 {% endblock %}
@@ -88,73 +160,119 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const AGENT_ID = '{{ agent.id }}';
+    const INITIAL_RD_CONNECTED = {{ 'true' if agent.rd_connected else 'false' }};
+
+    const consoleCard = document.getElementById('rd-console-card');
     const remoteDesktop = document.getElementById('remote-desktop');
     const screenshotImg = document.getElementById('desktop-screenshot');
     const waitingMessage = document.getElementById('waiting-message');
+    const waitingTitle = document.getElementById('waiting-title');
+    const waitingSubtitle = document.getElementById('waiting-subtitle');
     const mouseCursor = document.getElementById('mouse-cursor');
+    const clickRipple = document.getElementById('click-ripple');
     const rdControl = document.getElementById('rdControl');
     const rdStatusText = document.getElementById('rdStatusText');
     const rdStatusAlert = document.getElementById('rdStatusAlert');
     const rdConnectionStatus = document.getElementById('rd-connection-status');
     const qualitySelect = document.getElementById('quality-select');
+    const fpsSelect = document.getElementById('fps-select');
+    const monitorSelect = document.getElementById('monitor-select');
+    const followCursorToggle = document.getElementById('follow-cursor-toggle');
     const lastUpdate = document.getElementById('last-update');
+    const resBadge = document.getElementById('rd-res-badge');
+    const fpsBadge = document.getElementById('rd-fps-badge');
+    const sizeBadge = document.getElementById('rd-size-badge');
 
     let socket = null;
-    let isConnected = false;
-    let currentQuality = 'medium';
+    let isAgentStreaming = false;
+    let isConnectingTask = false;
     let isControlling = false;
+    let currentQuality = qualitySelect.value;
+    let currentFps = parseInt(fpsSelect.value, 10) || 5;
     let screen_info = null;
-    let autoReconnectTimeout = null;
+
+    // Frame rate telemetry
+    let frameTimestamps = [];
+
+    // Mouse throttling & drag tracking
+    let lastMouseMoveSent = 0;
+    const MOUSE_MOVE_THROTTLE_MS = 40; // Max 25 updates/sec
+    let isMouseDown = false;
+    let mouseDownStartPos = null;
+    let mouseDownTime = 0;
+    let activeButton = 'left';
 
     function showAlert(message, type = 'info') {
         GlyconUI.toast('Remote Desktop', message, type);
     }
 
-    function updateConnectionStatus(connected) {
-        isConnected = connected;
-        if (connected) {
-            rdConnectionStatus.textContent = 'Connected';
+    function setStreamState(state, detailText = '') {
+        if (state === 'streaming') {
+            isAgentStreaming = true;
+            isConnectingTask = false;
+            isControlling = true;
+            rdConnectionStatus.textContent = 'Streaming Live';
             rdConnectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-            rdStatusText.textContent = 'Disconnect Remote Desktop';
-            rdControl.className = 'tactical-btn-primary';
-            rdStatusAlert.textContent = 'Connected';
+            rdStatusText.textContent = 'Disconnect Stream';
+            rdControl.className = 'tactical-btn-danger';
+            rdStatusAlert.textContent = detailText || 'Connected & Streaming';
             if (waitingMessage) waitingMessage.style.display = 'none';
             screenshotImg.style.display = 'block';
-            mouseCursor.style.display = 'block';
-            isControlling = true;
-
-            if (autoReconnectTimeout) {
-                clearTimeout(autoReconnectTimeout);
-                autoReconnectTimeout = null;
+        } else if (state === 'connecting') {
+            isAgentStreaming = false;
+            isConnectingTask = true;
+            isControlling = false;
+            rdConnectionStatus.textContent = 'Waiting for Agent...';
+            rdConnectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse';
+            rdStatusText.textContent = 'Cancel / Stop';
+            rdControl.className = 'tactical-btn-secondary';
+            rdStatusAlert.textContent = detailText || 'Task queued — waiting for next agent check-in...';
+            if (waitingMessage && !screenshotImg.getAttribute('src')) {
+                waitingMessage.style.display = 'flex';
+                waitingTitle.textContent = 'Waiting for Agent Check-In...';
+                waitingSubtitle.textContent = 'Remote Desktop start task queued. Stream will begin automatically on the next agent beacon.';
             }
         } else {
+            isAgentStreaming = false;
+            isConnectingTask = false;
+            isControlling = false;
             rdConnectionStatus.textContent = 'Disconnected';
             rdConnectionStatus.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-rose-500/15 text-rose-400 border border-rose-500/30';
             rdStatusText.textContent = 'Connect Remote Desktop';
-            rdControl.className = 'tactical-btn-danger';
-            rdStatusAlert.textContent = 'Disconnected';
-            if (waitingMessage) waitingMessage.style.display = 'flex';
+            rdControl.className = 'tactical-btn-primary';
+            rdStatusAlert.textContent = detailText || 'Disconnected';
+            if (waitingMessage) {
+                waitingMessage.style.display = 'flex';
+                waitingTitle.textContent = 'Remote Desktop Stream Offline';
+                waitingSubtitle.textContent = 'Click "Connect Remote Desktop" to initialize real-time screen capture and mouse/keyboard control.';
+            }
             screenshotImg.style.display = 'none';
             mouseCursor.style.display = 'none';
-            screenshotImg.src = '';
+            screenshotImg.removeAttribute('src');
             lastUpdate.textContent = 'Never';
-            isControlling = false;
+            fpsBadge.textContent = '0.0 FPS';
         }
     }
 
     function getImageCoordinates(clientX, clientY) {
         const imgRect = screenshotImg.getBoundingClientRect();
-        const xImg = clientX - imgRect.left;
-        const yImg = clientY - imgRect.top;
+        if (!imgRect.width || !imgRect.height) return { x: 0, y: 0 };
+
+        const xImg = Math.max(0, Math.min(clientX - imgRect.left, imgRect.width));
+        const yImg = Math.max(0, Math.min(clientY - imgRect.top, imgRect.height));
 
         let actualScreenWidth, actualScreenHeight;
         if (screen_info && screen_info.width && screen_info.height) {
             actualScreenWidth = screen_info.width;
             actualScreenHeight = screen_info.height;
-        } else {
-            const qualityFactor = currentQuality === 'low' ? 2.0 : (currentQuality === 'high' ? 1.0 : 1.3333);
+        } else if (screenshotImg.naturalWidth && screenshotImg.naturalHeight) {
+            const qualityFactor = currentQuality === 'low' ? 2.0 : (currentQuality === 'medium' ? (1.0 / 0.75) : 1.0);
             actualScreenWidth = Math.round(screenshotImg.naturalWidth * qualityFactor);
             actualScreenHeight = Math.round(screenshotImg.naturalHeight * qualityFactor);
+        } else {
+            actualScreenWidth = 1920;
+            actualScreenHeight = 1080;
         }
 
         const scaleX = actualScreenWidth / imgRect.width;
@@ -166,10 +284,42 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
-    function updateMouseCursor(x, y, imgRect, divRect) {
-        mouseCursor.style.left = (imgRect.left - divRect.left + x) + 'px';
-        mouseCursor.style.top = (imgRect.top - divRect.top + y) + 'px';
+    function showClickRipple(clientX, clientY, color = '#22d3ee') {
+        const divRect = remoteDesktop.getBoundingClientRect();
+        clickRipple.style.left = (clientX - divRect.left) + 'px';
+        clickRipple.style.top = (clientY - divRect.top) + 'px';
+        clickRipple.style.borderColor = color;
+        clickRipple.style.display = 'block';
+        clickRipple.animate([
+            { transform: 'translate(-50%, -50%) scale(0.5)', opacity: 1 },
+            { transform: 'translate(-50%, -50%) scale(1.6)', opacity: 0 }
+        ], { duration: 280, easing: 'ease-out' });
+        setTimeout(() => { clickRipple.style.display = 'none'; }, 280);
+    }
+
+    function updateMouseCursorPosition(clientX, clientY) {
+        const divRect = remoteDesktop.getBoundingClientRect();
+        mouseCursor.style.left = (clientX - divRect.left) + 'px';
+        mouseCursor.style.top = (clientY - divRect.top) + 'px';
         mouseCursor.style.display = 'block';
+    }
+
+    function populateMonitors(monitors, activeIndex) {
+        if (!Array.isArray(monitors) || !monitors.length) return;
+        const currentOpts = Array.from(monitorSelect.options).map(o => `${o.value}:${o.text}`).join('|');
+        const newOpts = monitors.map(m => `${m.index}:${m.label}`).join('|');
+        if (currentOpts !== newOpts) {
+            monitorSelect.innerHTML = '';
+            monitors.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.index;
+                opt.textContent = m.label;
+                if (m.index === activeIndex) opt.selected = true;
+                monitorSelect.appendChild(opt);
+            });
+        } else if (activeIndex !== undefined) {
+            monitorSelect.value = String(activeIndex);
+        }
     }
 
     function initializeSocket() {
@@ -179,74 +329,84 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         socket = io('/remote_desktop', {
-            reconnectionAttempts: 5,
+            reconnection: true,
+            reconnectionAttempts: 15,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            autoConnect: false,
-            query: { agent_id: '{{ agent.id }}' }
+            autoConnect: true,
+            query: { agent_id: AGENT_ID }
         });
 
         socket.on('connect', function() {
-            updateConnectionStatus(true);
-            socket.emit('join_remote_desktop', { agent_id: '{{ agent.id }}' });
+            socket.emit('join_remote_desktop', { agent_id: AGENT_ID });
         });
 
-        socket.on('reconnect', () => {
-            socket.emit('join_remote_desktop', { agent_id: '{{ agent.id }}' });
+        socket.on('reconnect', function() {
+            socket.emit('join_remote_desktop', { agent_id: AGENT_ID });
         });
 
         socket.on('agent_connected', function() {
-            updateConnectionStatus(true);
-            if (waitingMessage) waitingMessage.style.display = 'none';
+            setStreamState('streaming', 'Agent stream connected');
+            showAlert('Agent connected to Remote Desktop stream', 'success');
         });
 
-        socket.on('disconnect', function(reason) {
-            updateConnectionStatus(false);
-            if (reason !== 'io client disconnect' && reason !== 'io server disconnect') {
-                autoReconnectTimeout = setTimeout(() => {
-                    if (!isConnected) socket.connect();
-                }, 5000);
-            }
-        });
-
-        socket.on('connect_error', function(error) {
-            showAlert('Connection failed: ' + (error.message || 'Unknown error'), 'danger');
-            updateConnectionStatus(false);
-        });
-
-        socket.on('screenshot_update', function(data) {
-            if (data.screenshot) {
-                screenshotImg.src = 'data:image/png;base64,' + data.screenshot;
-                lastUpdate.textContent = new Date().toLocaleTimeString();
-                if (waitingMessage) waitingMessage.style.display = 'none';
+        socket.on('status', function(data) {
+            if (data.status === 'connected') {
+                setStreamState('streaming', 'Connected & Streaming');
+            } else if (data.status === 'disconnected') {
+                setStreamState('disconnected', 'Disconnected');
+            } else if (data.status === 'error') {
+                showAlert('Error: ' + (data.message || 'Unknown error'), 'danger');
             }
         });
 
         socket.on('rd_status', function(data) {
             if (data.status === 'success') {
-                updateConnectionStatus(data.action === 'start');
-                showAlert(`Remote Desktop ${data.action}ed successfully`, 'success');
+                if (data.action === 'stop') {
+                    setStreamState('disconnected', 'Disconnected');
+                } else {
+                    setStreamState('streaming', 'Connected');
+                }
             } else {
                 showAlert(`Remote Desktop error: ${data.message || 'Unknown error'}`, 'danger');
             }
         });
 
-        socket.on('status', function(data) {
-            if (data.status === 'connected') updateConnectionStatus(true);
-            else if (data.status === 'disconnected') updateConnectionStatus(false);
-        });
-
         socket.on('screen_info', function(data) {
             screen_info = data;
+            if (data.width && data.height) {
+                resBadge.textContent = `${data.width}x${data.height}`;
+            }
+            if (data.monitors) {
+                populateMonitors(data.monitors, data.monitor_index);
+            }
         });
 
-        socket.on('mouse_position', function(data) {
-            if (data.x !== undefined && data.y !== undefined && screen_info) {
-                const imgRect = screenshotImg.getBoundingClientRect();
-                const divRect = remoteDesktop.getBoundingClientRect();
-                const scaleX = screenshotImg.naturalWidth / imgRect.width;
-                const scaleY = screenshotImg.naturalHeight / imgRect.height;
-                updateMouseCursor(data.x / scaleX, data.y / scaleY, imgRect, divRect);
+        socket.on('screenshot_update', function(data) {
+            if (!data || !data.screenshot) return;
+            const mime = data.format === 'png' ? 'image/png' : 'image/jpeg';
+            screenshotImg.src = `data:${mime};base64,` + data.screenshot;
+
+            if (!isAgentStreaming) {
+                setStreamState('streaming', 'Streaming Live');
+            }
+
+            const now = performance.now();
+            frameTimestamps.push(now);
+            while (frameTimestamps.length > 0 && now - frameTimestamps[0] > 2000) {
+                frameTimestamps.shift();
+            }
+            const measuredFps = frameTimestamps.length > 1
+                ? ((frameTimestamps.length - 1) * 1000 / (now - frameTimestamps[0])).toFixed(1)
+                : '1.0';
+            fpsBadge.textContent = `${measuredFps} FPS`;
+
+            const kb = Math.round((data.screenshot.length * 0.75) / 1024);
+            sizeBadge.textContent = `${kb} KB`;
+            lastUpdate.textContent = new Date().toLocaleTimeString();
+
+            if (!screen_info && screenshotImg.naturalWidth) {
+                resBadge.textContent = `${screenshotImg.naturalWidth}x${screenshotImg.naturalHeight}`;
             }
         });
 
@@ -254,130 +414,290 @@ document.addEventListener('DOMContentLoaded', function() {
             if (socket && socket.connected) {
                 socket.emit('ping', { timestamp: Date.now() });
             }
-        }, 30000);
+        }, 25000);
     }
 
-    function handleMouseMove(e) {
-        if (!isControlling || !socket) return;
-        const coords = getImageCoordinates(e.clientX, e.clientY);
-        socket.emit('mouse_move', {
-            agent_id: '{{ agent.id }}',
-            x: coords.x,
-            y: coords.y
-        });
-        const imgRect = screenshotImg.getBoundingClientRect();
-        const divRect = remoteDesktop.getBoundingClientRect();
-        updateMouseCursor(e.clientX - imgRect.left, e.clientY - imgRect.top, imgRect, divRect);
-    }
-
-    function handleMouseClick(e) {
-        if (!isControlling || !socket) return;
-        e.preventDefault();
-        const coords = getImageCoordinates(e.clientX, e.clientY);
-        const button = e.button === 2 ? 'right' : 'left';
-        socket.emit('mouse_click', {
-            agent_id: '{{ agent.id }}',
-            x: coords.x,
-            y: coords.y,
-            button: button
-        });
-    }
-
-    function handleMouseWheel(e) {
-        if (!isControlling || !socket) return;
-        e.preventDefault();
-        const coords = getImageCoordinates(e.clientX, e.clientY);
-        const delta = e.deltaY > 0 ? 'down' : 'up';
-        socket.emit('mouse_scroll', {
-            agent_id: '{{ agent.id }}',
-            x: coords.x,
-            y: coords.y,
-            direction: delta
-        });
-    }
-
-    function handleKeyDown(e) {
-        if (!isControlling || !socket) return;
-        if (['Tab', 'Enter', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-            e.preventDefault();
+    function queueStartRemoteDesktop() {
+        setStreamState('connecting');
+        if (socket && !socket.connected) {
+            socket.connect();
         }
-        socket.emit('keyboard_press', {
-            agent_id: '{{ agent.id }}',
-            key: e.key,
-            keyCode: e.keyCode,
-            shiftKey: e.shiftKey,
-            ctrlKey: e.ctrlKey,
-            altKey: e.altKey
+        fetch('/api/task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                agent_id: AGENT_ID,
+                task_type: 'remote_desktop',
+                task_data: {
+                    action: 'start',
+                    quality: currentQuality,
+                    fps: currentFps
+                }
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                if (socket && socket.connected) {
+                    socket.emit('request_keyframe', { agent_id: AGENT_ID });
+                }
+                showAlert('Remote Desktop start task queued', 'info');
+            } else {
+                setStreamState('disconnected', 'Failed to queue task');
+                showAlert('Failed to start Remote Desktop: ' + (data.message || 'Unknown error'), 'danger');
+            }
+        })
+        .catch(err => {
+            setStreamState('disconnected', 'Network error');
+            showAlert('Network error starting Remote Desktop', 'danger');
         });
     }
 
-    function handleKeyUp(e) {
-        if (!isControlling || !socket) return;
-        socket.emit('keyboard_release', {
-            agent_id: '{{ agent.id }}',
-            key: e.key,
-            keyCode: e.keyCode
-        });
+    function stopRemoteDesktop() {
+        if (socket && socket.connected) {
+            socket.emit('rd_control', {
+                agent_id: AGENT_ID,
+                action: 'stop'
+            });
+        }
+        setStreamState('disconnected');
     }
 
-    initializeSocket();
+    rdControl.addEventListener('click', function() {
+        if (isAgentStreaming || isConnectingTask) {
+            stopRemoteDesktop();
+        } else {
+            queueStartRemoteDesktop();
+        }
+    });
+
+    document.getElementById('rdKeyframeBtn').addEventListener('click', function() {
+        if (socket && socket.connected) {
+            socket.emit('request_keyframe', { agent_id: AGENT_ID });
+            showAlert('Requested fresh frame from agent', 'info');
+        }
+    });
+
+    document.getElementById('rdSnapshotBtn').addEventListener('click', function() {
+        if (!screenshotImg.src || !screenshotImg.src.startsWith('data:image/')) {
+            showAlert('No active frame to save', 'warning');
+            return;
+        }
+        const a = document.createElement('a');
+        a.href = screenshotImg.src;
+        a.download = `glycon_rd_${AGENT_ID}_${Date.now()}.jpg`;
+        a.click();
+    });
+
+    document.getElementById('rdFullscreenBtn').addEventListener('click', function() {
+        if (!document.fullscreenElement) {
+            consoleCard.requestFullscreen().catch(() => {});
+        } else {
+            document.exitFullscreen().catch(() => {});
+        }
+    });
 
     qualitySelect.addEventListener('change', function() {
         currentQuality = this.value;
-        if (socket && isConnected) {
+        if (socket && socket.connected) {
             socket.emit('change_quality', {
-                agent_id: '{{ agent.id }}',
+                agent_id: AGENT_ID,
                 quality: currentQuality
             });
             showAlert(`Stream quality set to ${currentQuality}`, 'info');
         }
     });
 
-    rdControl.addEventListener('click', function() {
-        if (isConnected) {
-            socket.emit('rd_control', {
-                agent_id: '{{ agent.id }}',
-                action: 'stop'
+    fpsSelect.addEventListener('change', function() {
+        currentFps = parseInt(this.value, 10) || 5;
+        if (socket && socket.connected) {
+            socket.emit('change_fps', {
+                agent_id: AGENT_ID,
+                fps: currentFps
+            });
+            showAlert(`Target frame rate set to ${currentFps} FPS`, 'info');
+        }
+    });
+
+    monitorSelect.addEventListener('change', function() {
+        const monIdx = parseInt(this.value, 10);
+        if (socket && socket.connected) {
+            socket.emit('change_monitor', {
+                agent_id: AGENT_ID,
+                monitor_index: monIdx
+            });
+            showAlert(`Switched to display ${this.options[this.selectedIndex].text}`, 'info');
+        }
+    });
+
+    // Quick Hotkeys
+    document.querySelectorAll('.rd-hotkey-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (!isControlling || !socket) {
+                showAlert('Connect Remote Desktop first', 'warning');
+                return;
+            }
+            const keys = (this.getAttribute('data-keys') || '').split(',').filter(Boolean);
+            if (keys.length) {
+                socket.emit('keyboard_hotkey', {
+                    agent_id: AGENT_ID,
+                    keys: keys
+                });
+            }
+            remoteDesktop.focus();
+        });
+    });
+
+    // Direct Text Send Form
+    document.getElementById('rd-type-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!isControlling || !socket) {
+            showAlert('Connect Remote Desktop first', 'warning');
+            return;
+        }
+        const input = document.getElementById('rd-type-input');
+        const enterToggle = document.getElementById('rd-type-enter');
+        const text = input.value;
+        if (!text) return;
+
+        socket.emit('keyboard_type', {
+            agent_id: AGENT_ID,
+            text: text,
+            enter: enterToggle.checked
+        });
+        input.value = '';
+        remoteDesktop.focus();
+    });
+
+    // Mouse Events
+    screenshotImg.addEventListener('mousemove', function(e) {
+        if (!isControlling || !socket) return;
+        updateMouseCursorPosition(e.clientX, e.clientY);
+
+        if (!followCursorToggle.checked && !isMouseDown) return;
+        const now = performance.now();
+        if (now - lastMouseMoveSent < MOUSE_MOVE_THROTTLE_MS) return;
+        lastMouseMoveSent = now;
+
+        const coords = getImageCoordinates(e.clientX, e.clientY);
+        socket.emit('mouse_move', {
+            agent_id: AGENT_ID,
+            x: coords.x,
+            y: coords.y
+        });
+    });
+
+    screenshotImg.addEventListener('mousedown', function(e) {
+        if (!isControlling || !socket) return;
+        e.preventDefault();
+        remoteDesktop.focus();
+
+        activeButton = e.button === 2 ? 'right' : (e.button === 1 ? 'middle' : 'left');
+        const coords = getImageCoordinates(e.clientX, e.clientY);
+        isMouseDown = true;
+        mouseDownStartPos = { x: coords.x, y: coords.y, clientX: e.clientX, clientY: e.clientY };
+        mouseDownTime = performance.now();
+
+        showClickRipple(e.clientX, e.clientY, activeButton === 'right' ? '#f43f5e' : '#22d3ee');
+    });
+
+    window.addEventListener('mouseup', function(e) {
+        if (!isMouseDown || !isControlling || !socket) return;
+        isMouseDown = false;
+
+        const coords = getImageCoordinates(e.clientX, e.clientY);
+        const dx = Math.abs(coords.x - (mouseDownStartPos ? mouseDownStartPos.x : coords.x));
+        const dy = Math.abs(coords.y - (mouseDownStartPos ? mouseDownStartPos.y : coords.y));
+        const heldMs = performance.now() - mouseDownTime;
+
+        if (dx > 8 || dy > 8 || heldMs > 350) {
+            // Drag & drop operation
+            socket.emit('mouse_down', {
+                agent_id: AGENT_ID,
+                x: mouseDownStartPos.x,
+                y: mouseDownStartPos.y,
+                button: activeButton
+            });
+            socket.emit('mouse_up', {
+                agent_id: AGENT_ID,
+                x: coords.x,
+                y: coords.y,
+                button: activeButton
             });
         } else {
-            screenshotImg.src = '';
-            lastUpdate.textContent = 'Connecting...';
-
-            fetch('/api/task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    agent_id: '{{ agent.id }}',
-                    task_type: 'remote_desktop',
-                    task_data: {
-                        action: 'start',
-                        quality: currentQuality
-                    }
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    socket.connect();
-                    showAlert('Remote Desktop task queued, waiting for beacon stream...', 'info');
-                } else {
-                    showAlert('Failed to start Remote Desktop: ' + (data.message || 'Unknown error'), 'danger');
-                    lastUpdate.textContent = 'Never';
-                }
+            socket.emit('mouse_click', {
+                agent_id: AGENT_ID,
+                x: coords.x,
+                y: coords.y,
+                button: activeButton
             });
         }
     });
 
-    screenshotImg.addEventListener('mousemove', handleMouseMove);
-    screenshotImg.addEventListener('mousedown', handleMouseClick);
-    screenshotImg.addEventListener('wheel', handleMouseWheel);
-    screenshotImg.addEventListener('contextmenu', (e) => e.preventDefault());
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('keyup', handleKeyUp);
-
-    screenshotImg.addEventListener('click', function() {
-        if (isControlling) screenshotImg.focus();
+    screenshotImg.addEventListener('dblclick', function(e) {
+        if (!isControlling || !socket) return;
+        e.preventDefault();
+        const coords = getImageCoordinates(e.clientX, e.clientY);
+        showClickRipple(e.clientX, e.clientY, '#10b981');
+        socket.emit('mouse_dblclick', {
+            agent_id: AGENT_ID,
+            x: coords.x,
+            y: coords.y,
+            button: 'left'
+        });
     });
+
+    screenshotImg.addEventListener('wheel', function(e) {
+        if (!isControlling || !socket) return;
+        e.preventDefault();
+        const coords = getImageCoordinates(e.clientX, e.clientY);
+        const direction = e.deltaY > 0 ? 'down' : 'up';
+        socket.emit('mouse_scroll', {
+            agent_id: AGENT_ID,
+            x: coords.x,
+            y: coords.y,
+            direction: direction,
+            amount: 3
+        });
+    }, { passive: false });
+
+    screenshotImg.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Direct Keyboard Capture when viewport is focused (and not typing in an input box)
+    function isInputFocused() {
+        const tag = (document.activeElement && document.activeElement.tagName) || '';
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (!isControlling || !socket || isInputFocused()) return;
+        e.preventDefault();
+        socket.emit('keyboard_press', {
+            agent_id: AGENT_ID,
+            key: e.key,
+            keyCode: e.keyCode,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+            altKey: e.altKey
+        });
+    });
+
+    document.addEventListener('keyup', function(e) {
+        if (!isControlling || !socket || isInputFocused()) return;
+        if (['Shift', 'Control', 'Alt'].includes(e.key)) {
+            e.preventDefault();
+            socket.emit('keyboard_release', {
+                agent_id: AGENT_ID,
+                key: e.key,
+                keyCode: e.keyCode
+            });
+        }
+    });
+
+    initializeSocket();
+    if (INITIAL_RD_CONNECTED) {
+        setStreamState('connecting', 'Rejoining active stream...');
+    }
 });
 </script>
 {% endblock %}
