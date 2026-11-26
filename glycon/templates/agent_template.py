@@ -25,6 +25,32 @@ try:
             if zp not in sys.path: sys.path.insert(0, zp)
 except: pass
 
+def _refresh_import_paths(purge_mod=None):
+    """Invalidate import caches and refresh site-packages so newly installed packages load in-process."""
+    try:
+        import importlib
+        import site
+        if purge_mod:
+            root_mod = purge_mod.split('.')[0]
+            for k in list(sys.modules.keys()):
+                if k == root_mod or k.startswith(root_mod + '.'):
+                    sys.modules.pop(k, None)
+        importlib.invalidate_caches()
+        for sp_getter in (getattr(site, 'getsitepackages', None), getattr(site, 'getusersitepackages', None)):
+            if callable(sp_getter):
+                try:
+                    res = sp_getter()
+                    paths = [res] if isinstance(res, str) else (res or [])
+                    for p in paths:
+                        if p and os.path.exists(p):
+                            site.addsitedir(p)
+                            if p not in sys.path:
+                                sys.path.insert(0, p)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 def install_module(module_name, pip_name=None, force=False):
     """Helper function to install missing modules"""
     pip_name = pip_name or module_name
@@ -34,6 +60,7 @@ def install_module(module_name, pip_name=None, force=False):
         if force: cmd.extend(["--force-reinstall", "--no-cache-dir"])
         cmd.append(pip_name)
         subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _refresh_import_paths(purge_mod=module_name if force else None)
         _log_to_public(f"Successfully installed {{pip_name}}")
         return True
     except subprocess.CalledProcessError as e:
@@ -58,50 +85,62 @@ required_modules = [
     ('scipy', None)
 ]
 
-# Check and install missing modules
+def _verify_module(module):
+    if module == 'cv2':
+        import cv2
+        if not hasattr(cv2, '__version__'):
+            raise AttributeError("cv2 broken")
+    elif module == 'wintypes':
+        import ctypes
+        from ctypes import wintypes
+    elif module == 'datetime':
+        from datetime import datetime, timedelta
+    elif module == 'xml.etree.ElementTree':
+        import xml.etree.ElementTree as ET
+    elif module == 'Crypto':
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import pad, unpad
+    elif module == 'keyboard':
+        from pynput import keyboard
+    elif module == 'PIL':
+        import PIL.Image
+    else:
+        __import__(module.split('.')[0])
+
+# Check and install missing modules in-process without unnecessary exit/restart
 restart_required = False
 for module, pip_name in required_modules:
     try:
-        if module == 'cv2':
-            import cv2
-            if not hasattr(cv2, '__version__'): raise AttributeError("cv2 broken")
-        elif module == 'wintypes':
-            import ctypes
-            from ctypes import wintypes
-        elif module == 'datetime':
-            from datetime import datetime, timedelta
-        elif module == 'xml.etree.ElementTree':
-            import xml.etree.ElementTree as ET
-        elif module == 'Crypto':
-            from Crypto.Cipher import AES
-            from Crypto.Util.Padding import pad, unpad
-        elif module == 'keyboard':
-            from pynput import keyboard
-        elif module == 'PIL':
-            import PIL.Image
-        else:
-            __import__(module.split('.')[0])
+        _verify_module(module)
     except (ImportError, AttributeError, SyntaxError) as e:
         force = not isinstance(e, ImportError)
         _log_to_public(f"Module {{module}} failed: {{e}}. Reinstalling (force={{force}})...")
         if install_module(module, pip_name or module, force=force):
-            restart_required = True
+            try:
+                _verify_module(module)
+            except Exception:
+                restart_required = True
+    except Exception as e:
+        _log_to_public(f"Non-fatal init warning for {{module}}: {{e}}")
 
 if restart_required:
-    _log_to_public("Restarting agent...")
-    try:
-        import time
-        time.sleep(1) # Gi filsystemet et øyeblikk
-        if getattr(sys, 'frozen', False):
-            cmd = [sys.executable] + sys.argv[1:]
-        else:
-            cmd = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
-        
-        _log_to_public(f"Restarting with command: {{cmd}}")
-        subprocess.Popen(cmd, creationflags=0x00000008 | 0x00000200, close_fds=True)
-    except Exception as e:
-        _log_to_public(f"Restart failed: {{e}}")
-    sys.exit(0)
+    is_frozen = getattr(sys, 'frozen', False)
+    script_path = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] not in ('-c', '') else ''
+    can_exec_file = is_frozen or (script_path and os.path.isfile(script_path))
+    if can_exec_file:
+        _log_to_public("Restarting agent...")
+        try:
+            import time
+            time.sleep(1)
+            cmd = ([sys.executable] + sys.argv[1:]) if is_frozen else ([sys.executable, script_path] + sys.argv[1:])
+            _log_to_public(f"Restarting with command: {{cmd}}")
+            if platform.system() == 'Windows':
+                subprocess.Popen(cmd, creationflags=0x00000008 | 0x00000200, close_fds=True)
+                sys.exit(0)
+            else:
+                os.execv(sys.executable, cmd)
+        except Exception as e:
+            _log_to_public(f"Restart failed, continuing in current process: {{e}}")
 
 # Now proceed with the imports
 try:
