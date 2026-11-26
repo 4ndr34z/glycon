@@ -966,9 +966,27 @@ if __name__ == "__main__":
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
     class FixedDispatcherMiddleware(DispatcherMiddleware):
+        AGENT_PASSTHROUGH_PATHS = (
+            "/socket.io/",
+            "/a/p",
+            "/a/d",
+            "/api/checkin",
+            "/api/task_result",
+            "/api/shellcode_output",
+            "/api/killdate_reached",
+            "/api/agent_terminated",
+            "/api/verify_termination",
+            "/api/vaporlink/stage",
+            "/api/download_shellcode/",
+            "/api/download_runner/",
+        )
+
         def __call__(self, environ, start_response):
             path = environ.get("PATH_INFO", "")
-            if path.startswith("/socket.io/"):
+            while "//" in path:
+                path = path.replace("//", "/")
+            environ["PATH_INFO"] = path
+            if any(path == p or path.startswith(p) for p in self.AGENT_PASSTHROUGH_PATHS):
                 return self.app(environ, start_response)
             sorted_mounts = sorted(self.mounts.items(), key=lambda x: len(x[0]), reverse=True)
             for mount_point, mounted_app in sorted_mounts:
