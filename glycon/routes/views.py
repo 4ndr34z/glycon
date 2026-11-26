@@ -3,9 +3,21 @@ from flask_login import login_required
 import sqlite3
 import io, json
 from datetime import datetime
+from urllib.parse import urlparse
 from glycon.config import CONFIG
 from glycon.vaporlink import VAPORLINK_MANAGER
 import os
+
+
+def _align_server_url_with_base(stored_url: str, active_base_url: str) -> str:
+    if not stored_url:
+        return stored_url
+    try:
+        parsed = urlparse(stored_url if "://" in stored_url else f"https://{stored_url}")
+        base_clean = "/" + active_base_url.strip("/") if (active_base_url and active_base_url.strip("/")) else ""
+        return f"{parsed.scheme}://{parsed.netloc}{base_clean}"
+    except Exception:
+        return stored_url
 
 def init_view_routes(app):
     @app.context_processor
@@ -116,9 +128,10 @@ def init_view_routes(app):
 
         agent_config = None
         if row:
+            active_base = request.script_root or app.config.get('BASE_URL', '')
             agent_config = {
                 'checkin_interval': row[0],
-                'server_url': row[1],
+                'server_url': _align_server_url_with_base(row[1], active_base),
                 'take_screenshots': bool(row[2]),
                 'screenshot_frequency': row[3],
                 'take_webcam': bool(row[4]),
@@ -147,9 +160,10 @@ def init_view_routes(app):
 
         agent_config = None
         if row:
+            active_base = request.script_root or app.config.get('BASE_URL', '')
             agent_config = {
                 'checkin_interval': row[0],
-                'server_url': row[1],
+                'server_url': _align_server_url_with_base(row[1], active_base),
                 'take_screenshots': bool(row[2]),
                 'screenshot_frequency': row[3],
                 'take_webcam': bool(row[4]),

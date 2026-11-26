@@ -966,8 +966,7 @@ if __name__ == "__main__":
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
     class FixedDispatcherMiddleware(DispatcherMiddleware):
-        AGENT_PASSTHROUGH_PATHS = (
-            "/socket.io/",
+        AGENT_CANONICAL_SUFFIXES = (
             "/a/p",
             "/a/d",
             "/api/checkin",
@@ -977,17 +976,24 @@ if __name__ == "__main__":
             "/api/agent_terminated",
             "/api/verify_termination",
             "/api/vaporlink/stage",
-            "/api/download_shellcode/",
-            "/api/download_runner/",
         )
 
         def __call__(self, environ, start_response):
             path = environ.get("PATH_INFO", "")
             while "//" in path:
                 path = path.replace("//", "/")
-            environ["PATH_INFO"] = path
-            if any(path == p or path.startswith(p) for p in self.AGENT_PASSTHROUGH_PATHS):
+            if path.startswith("/socket.io/") or "/socket.io/" in path:
+                environ["PATH_INFO"] = path[path.index("/socket.io/"):]
                 return self.app(environ, start_response)
+            for suffix in self.AGENT_CANONICAL_SUFFIXES:
+                if path == suffix or path.endswith(suffix):
+                    environ["PATH_INFO"] = suffix
+                    return self.app(environ, start_response)
+            for marker in ("/api/download_shellcode/", "/api/download_runner/"):
+                if marker in path:
+                    environ["PATH_INFO"] = path[path.index(marker):]
+                    return self.app(environ, start_response)
+            environ["PATH_INFO"] = path
             sorted_mounts = sorted(self.mounts.items(), key=lambda x: len(x[0]), reverse=True)
             for mount_point, mounted_app in sorted_mounts:
                 if path == mount_point or path.startswith(mount_point + "/"):
