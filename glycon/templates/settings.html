@@ -780,6 +780,11 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             if (data.status === 'success') {
                 document.getElementById('downloadLink').href = data.download_url;
+                const cmd1El = document.getElementById('command1');
+                if (cmd1El && payload.server_url) {
+                    const cleanSrv = payload.server_url.replace(/\/+$/, '');
+                    cmd1El.textContent = `curl -ks ${cleanSrv}/a/d -o agent.py`;
+                }
                 document.getElementById('agentDownload').style.display = 'block';
                 document.getElementById('agentError').style.display = 'none';
                 GlyconUI.toast('Agent Generated', 'Implant profile saved and binary ready', 'success');

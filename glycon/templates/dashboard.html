@@ -52,7 +52,7 @@
                         {% for agent in recent_agents %}
                         <tr class="{% if agent.status == 'online' %}agent-online{% elif agent.status == 'inactive' %}agent-inactive{% else %}agent-offline{% endif %}">
                             <td class="font-medium">
-                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-2">
+                                <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-2">
                                     {{ agent.hostname }}
                                 </a>
                             </td>
@@ -94,7 +94,7 @@
                         {% for task in recent_tasks %}
                         <tr>
                             <td class="font-mono text-xs">
-                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-cyan-400 hover:text-cyan-300 hover:underline">
+                                <a href="{{ url_for('agent_detail', agent_id=task.agent_id) }}" class="text-cyan-400 hover:text-cyan-300 hover:underline">
                                     {{ task.agent_id[:8] }}...
                                 </a>
                             </td>

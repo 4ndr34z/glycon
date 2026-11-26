@@ -43,7 +43,7 @@
                 <p class="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Operations</p>
                 <ul class="space-y-1">
                     <li>
-                        {% set active = request.path == url_for('dashboard') %}
+                        {% set active = request.endpoint == 'dashboard' %}
                         <a href="{{ url_for('dashboard') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('dashboard', 'w-4 h-4 shrink-0') }}
                             <span>Dashboard</span>
@@ -57,21 +57,21 @@
                         </a>
                     </li>
                     <li>
-                        {% set active = request.path == url_for('tasks') %}
+                        {% set active = request.endpoint == 'tasks' %}
                         <a href="{{ url_for('tasks') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('terminal', 'w-4 h-4 shrink-0') }}
                             <span>Tasks</span>
                         </a>
                     </li>
                     <li>
-                        {% set active = request.path == url_for('arsenal') %}
+                        {% set active = request.endpoint == 'arsenal' %}
                         <a href="{{ url_for('arsenal') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('tools', 'w-4 h-4 shrink-0') }}
                             <span>Arsenal</span>
                         </a>
                     </li>
                     <li>
-                        {% set active = request.path == url_for('vaporlink_view') %}
+                        {% set active = request.endpoint == 'vaporlink_view' %}
                         <a href="{{ url_for('vaporlink_view') }}" class="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             <span class="flex items-center gap-3">
                                 {{ icon('vaporlink', 'w-4 h-4 shrink-0') }}
@@ -88,21 +88,21 @@
                 <p class="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Intelligence & Loot</p>
                 <ul class="space-y-1">
                     <li>
-                        {% set active = request.path == url_for('credentials') %}
+                        {% set active = request.endpoint == 'credentials' %}
                         <a href="{{ url_for('credentials') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('key', 'w-4 h-4 shrink-0') }}
                             <span>Credentials & Loot</span>
                         </a>
                     </li>
                     <li>
-                        {% set active = request.path == url_for('screenshots') %}
+                        {% set active = request.endpoint == 'screenshots' %}
                         <a href="{{ url_for('screenshots') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('camera', 'w-4 h-4 shrink-0') }}
                             <span>Screenshots</span>
                         </a>
                     </li>
                     <li>
-                        {% set active = request.path == url_for('webcam_captures') %}
+                        {% set active = request.endpoint == 'webcam_captures' %}
                         <a href="{{ url_for('webcam_captures') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('webcam', 'w-4 h-4 shrink-0') }}
                             <span>Webcam Captures</span>
@@ -116,7 +116,7 @@
                 <p class="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">System</p>
                 <ul class="space-y-1">
                     <li>
-                        {% set active = request.path == url_for('settings') %}
+                        {% set active = request.endpoint == 'settings' %}
                         <a href="{{ url_for('settings') }}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {% if active %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent{% endif %}">
                             {{ icon('settings', 'w-4 h-4 shrink-0') }}
                             <span>Settings</span>
@@ -209,6 +209,20 @@
     <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
     <script>
+        (function() {
+            const baseUrl = {{ (request.script_root or '') | tojson }};
+            window.GLYCON_BASE_URL = baseUrl;
+            if (baseUrl) {
+                const origFetch = window.fetch.bind(window);
+                window.fetch = function(input, init) {
+                    if (typeof input === 'string' && input.startsWith('/') && !input.startsWith(baseUrl + '/') && !input.startsWith('/socket.io/')) {
+                        input = baseUrl + input;
+                    }
+                    return origFetch(input, init);
+                };
+            }
+        })();
+
         document.addEventListener('DOMContentLoaded', function() {
             const sidebar = document.getElementById('app-sidebar');
             const backdrop = document.getElementById('sidebar-backdrop');

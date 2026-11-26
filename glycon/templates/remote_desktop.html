@@ -27,7 +27,7 @@
                 {{ icon('plug', 'w-4 h-4') }}
                 <span id="rdStatusText">Connect Remote Desktop</span>
             </button>
-            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
+            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
                 {{ icon('arrow-left', 'w-4 h-4') }}
                 <span>Back to Agent</span>
             </a>

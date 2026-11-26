@@ -51,9 +51,9 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
         <div class="tactical-card p-4 bg-gradient-to-br from-cyan-500/10 to-transparent border-cyan-500/20">
             <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">WSS / Stager Ingress</p>
-            <p id="kpi-ws-bind" class="text-lg font-bold font-mono text-slate-100 mt-1">{{ vl_status.config.ws_ip }}:{{ vl_status.config.ws_port }}</p>
-            <p id="kpi-ws-mode" class="text-[11px] text-cyan-400 mt-0.5 font-mono">
-                {{ 'HTTPS/WSS' if vl_status.config.tls_enabled else 'HTTP/WS' }} &bull; Decoy: {{ 'ON' if vl_status.config.web_server else 'OFF' }}
+            <p id="kpi-ws-bind" class="text-lg font-bold font-mono text-slate-100 mt-1 truncate" title="{{ vl_status.config.ws_link }}">{{ vl_status.config.ws_link }}</p>
+            <p id="kpi-ws-mode" class="text-[11px] text-cyan-400 mt-0.5 font-mono truncate">
+                Bind: {{ vl_status.config.ws_ip }}:{{ vl_status.config.ws_port }} &bull; {{ 'HTTPS/WSS' if vl_status.config.tls_enabled else 'HTTP/WS' }}
             </p>
         </div>
 
@@ -377,20 +377,40 @@
                 </div>
 
                 <div class="grid grid-cols-2 gap-2.5">
-                    <button type="button" onclick="applyModePreset('standalone-https')" class="p-2.5 rounded-xl border border-slate-800 hover:border-cyan-500/40 bg-slate-950/60 text-left">
-                        <div class="text-xs font-semibold text-cyan-400">Standalone HTTPS/WSS</div>
-                        <div class="text-[11px] text-slate-400">Direct TLS (0.0.0.0:9443)</div>
+                    <button type="button" id="preset-btn-standalone" onclick="applyModePreset('standalone-https')" class="p-2.5 rounded-xl border {% if vl_status.config.tls_enabled %}border-cyan-500/60 bg-cyan-500/10{% else %}border-slate-800 bg-slate-950/60{% endif %} hover:border-cyan-500/50 text-left transition-all">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-cyan-400">Standalone HTTPS/WSS</span>
+                            <span id="preset-badge-standalone" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 {% if not vl_status.config.tls_enabled %}hidden{% endif %}">ACTIVE</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">Direct TLS (0.0.0.0:9443)</div>
                     </button>
-                    <button type="button" onclick="applyModePreset('proxy-mode')" class="p-2.5 rounded-xl border border-slate-800 hover:border-emerald-500/40 bg-slate-950/60 text-left">
-                        <div class="text-xs font-semibold text-emerald-400">Reverse Proxy Mode</div>
-                        <div class="text-[11px] text-slate-400">Plain WS (127.0.0.1:8000)</div>
+                    <button type="button" id="preset-btn-proxy" onclick="applyModePreset('proxy-mode')" class="p-2.5 rounded-xl border {% if not vl_status.config.tls_enabled %}border-emerald-500/60 bg-emerald-500/10{% else %}border-slate-800 bg-slate-950/60{% endif %} hover:border-emerald-500/50 text-left transition-all">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-emerald-400">Reverse Proxy Mode</span>
+                            <span id="preset-badge-proxy" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 {% if vl_status.config.tls_enabled %}hidden{% endif %}">ACTIVE</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">Plain WS (127.0.0.1:8000)</div>
                     </button>
                 </div>
 
                 <form id="vl-config-form" onsubmit="saveVaporConfig(event)" class="space-y-3.5">
                     <div>
-                        <label class="block text-xs font-medium text-slate-300 mb-1">Public WSS &amp; Stager Endpoint (<code class="text-cyan-400">WS_LINK</code>)</label>
-                        <input type="text" id="cfg-ws-link" value="{{ vl_status.config.ws_link }}" class="tactical-input text-xs font-mono">
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block text-xs font-medium text-slate-300">Public WSS &amp; Stager Endpoint (<code class="text-cyan-400">WS_LINK</code>)</label>
+                            <label class="inline-flex items-center gap-1.5 text-[11px] text-amber-400 cursor-pointer" title="Lock custom FQDN/Port/Path so auto-sync from cert.pem or Agent Settings does not overwrite it">
+                                <input type="checkbox" id="cfg-ws-link-custom" {% if vl_status.config.ws_link_custom %}checked{% endif %} class="rounded border-slate-700 bg-slate-900 text-amber-500">
+                                <span>Manual Override (Lock)</span>
+                            </label>
+                        </div>
+                        <div class="flex gap-2">
+                            <input type="text" id="cfg-ws-link" value="{{ vl_status.config.ws_link }}" placeholder="e.g. proxy.domain.com/api or c2.domain.com:9443/api" oninput="document.getElementById('cfg-ws-link-custom').checked = true" class="tactical-input text-xs font-mono flex-1">
+                            <button type="button" onclick="syncWsLinkToAutoHost()" class="tactical-btn-secondary text-xs py-1.5 px-2.5 shrink-0" title="Reset to certificate / Glycon FQDN ({{ vl_status.auto_host }})">
+                                Auto-Sync
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-slate-500 mt-1">
+                            Detected FQDN: <code id="cfg-auto-host-hint" class="text-slate-300 font-mono">{{ vl_status.auto_host }}</code> &bull; Behind a reverse proxy on 443, omit <code class="text-slate-400">:9443</code> (e.g. <code class="text-cyan-400">{{ vl_status.auto_host }}/api</code>).
+                        </p>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
@@ -415,14 +435,18 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-3">
-                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
-                            <input type="checkbox" id="cfg-tls-enabled" {% if vl_status.config.tls_enabled %}checked{% endif %} class="rounded border-slate-700 bg-slate-900 text-cyan-500">
-                            <span class="text-xs font-medium text-slate-200">Direct TLS (WSS)</span>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer" title="Clients & stagers connect using wss:// and https:// (keep ON when behind an HTTPS reverse proxy)">
+                            <input type="checkbox" id="cfg-public-tls" {% if vl_status.config.public_tls %}checked{% endif %} class="rounded border-slate-700 bg-slate-900 text-emerald-500">
+                            <span class="text-xs font-medium text-slate-200">Client WSS/HTTPS</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer" title="Terminate TLS directly on VaporLink listener socket (turn OFF if Nginx/Caddy terminates TLS in front)">
+                            <input type="checkbox" id="cfg-tls-enabled" {% if vl_status.config.tls_enabled %}checked{% endif %} onchange="if(this.checked) document.getElementById('cfg-public-tls').checked = true;" class="rounded border-slate-700 bg-slate-900 text-cyan-500">
+                            <span class="text-xs font-medium text-slate-200">Listener TLS</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
                             <input type="checkbox" id="cfg-web-server" {% if vl_status.config.web_server %}checked{% endif %} class="rounded border-slate-700 bg-slate-900 text-emerald-500">
-                            <span class="text-xs font-medium text-slate-200">Decoy Webserver</span>
+                            <span class="text-xs font-medium text-slate-200">Decoy Web</span>
                         </label>
                     </div>
 
@@ -728,8 +752,32 @@ function renderVaporState(st) {
         document.getElementById('decoy-open-btn').href = st.decoy_url;
     }
 
-    document.getElementById('kpi-ws-bind').textContent = `${cfg.ws_ip}:${cfg.ws_port}`;
-    document.getElementById('kpi-ws-mode').textContent = `${cfg.tls_enabled ? 'HTTPS/WSS' : 'HTTP/WS'} • Decoy: ${cfg.web_server ? 'ON' : 'OFF'}`;
+    document.getElementById('kpi-ws-bind').textContent = cfg.ws_link || `${cfg.ws_ip}:${cfg.ws_port}`;
+    document.getElementById('kpi-ws-bind').title = cfg.ws_link || `${cfg.ws_ip}:${cfg.ws_port}`;
+    const protoLabel = cfg.public_tls ? (cfg.tls_enabled ? 'Direct HTTPS/WSS' : 'Proxy HTTPS/WSS') : 'Plain HTTP/WS';
+    document.getElementById('kpi-ws-mode').textContent = `Bind: ${cfg.ws_ip}:${cfg.ws_port} • ${protoLabel}`;
+    if (st.auto_host) {
+        const hintEl = document.getElementById('cfg-auto-host-hint');
+        if (hintEl) hintEl.textContent = st.auto_host;
+    }
+
+    const btnStandalone = document.getElementById('preset-btn-standalone');
+    const btnProxy = document.getElementById('preset-btn-proxy');
+    const badgeStandalone = document.getElementById('preset-badge-standalone');
+    const badgeProxy = document.getElementById('preset-badge-proxy');
+    if (btnStandalone && btnProxy) {
+        if (cfg.tls_enabled) {
+            btnStandalone.className = 'p-2.5 rounded-xl border border-cyan-500/60 bg-cyan-500/10 hover:border-cyan-500/50 text-left transition-all';
+            btnProxy.className = 'p-2.5 rounded-xl border border-slate-800 bg-slate-950/60 hover:border-emerald-500/50 text-left transition-all';
+            if (badgeStandalone) badgeStandalone.classList.remove('hidden');
+            if (badgeProxy) badgeProxy.classList.add('hidden');
+        } else {
+            btnStandalone.className = 'p-2.5 rounded-xl border border-slate-800 bg-slate-950/60 hover:border-cyan-500/50 text-left transition-all';
+            btnProxy.className = 'p-2.5 rounded-xl border border-emerald-500/60 bg-emerald-500/10 hover:border-emerald-500/50 text-left transition-all';
+            if (badgeStandalone) badgeStandalone.classList.add('hidden');
+            if (badgeProxy) badgeProxy.classList.remove('hidden');
+        }
+    }
     document.getElementById('kpi-socks-bind').textContent = `socks5://${cfg.socks_ip}:${cfg.socks_port}`;
     document.getElementById('proxychains-hint').textContent = `socks5 ${cfg.socks_ip} ${cfg.socks_port}`;
     document.getElementById('kpi-primary-target').textContent = st.primary_session
@@ -822,26 +870,46 @@ function renderVaporState(st) {
     }
 }
 
-function applyModePreset(mode) {
+function syncWsLinkToAutoHost() {
+    const autoHost = (document.getElementById('cfg-auto-host-hint')?.textContent || '').trim() || window.location.hostname;
+    const isProxy = !document.getElementById('cfg-tls-enabled').checked;
+    const wsPort = document.getElementById('cfg-ws-port').value || '9443';
+    document.getElementById('cfg-ws-link').value = isProxy ? `${autoHost}/api` : `${autoHost}:${wsPort}/api`;
+    document.getElementById('cfg-ws-link-custom').checked = false;
+    GlyconUI.toast(`Synced WS_LINK to ${document.getElementById('cfg-ws-link').value} (Click Save to apply)`, 'info');
+}
+
+async function applyModePreset(mode) {
+    const autoHost = (document.getElementById('cfg-auto-host-hint')?.textContent || '').trim() || window.location.hostname;
+    const isLocked = document.getElementById('cfg-ws-link-custom').checked;
     if (mode === 'standalone-https') {
         document.getElementById('cfg-ws-ip').value = '0.0.0.0';
         document.getElementById('cfg-ws-port').value = '9443';
+        document.getElementById('cfg-public-tls').checked = true;
         document.getElementById('cfg-tls-enabled').checked = true;
         document.getElementById('cfg-web-server').checked = true;
-        GlyconUI.toast('Preset loaded: Standalone HTTPS/WSS on 0.0.0.0:9443 (Click Save to apply)', 'info');
+        if (!isLocked && autoHost) {
+            document.getElementById('cfg-ws-link').value = `${autoHost}:9443/api`;
+        }
     } else {
         document.getElementById('cfg-ws-ip').value = '127.0.0.1';
         document.getElementById('cfg-ws-port').value = '8000';
+        document.getElementById('cfg-public-tls').checked = true;
         document.getElementById('cfg-tls-enabled').checked = false;
         document.getElementById('cfg-web-server').checked = true;
-        GlyconUI.toast('Preset loaded: Reverse Proxy HTTP/WS on 127.0.0.1:8000 (Click Save to apply)', 'info');
+        if (!isLocked && autoHost) {
+            document.getElementById('cfg-ws-link').value = `${autoHost}/api`;
+        }
     }
+    await saveVaporConfig();
 }
 
 async function saveVaporConfig(e) {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     const payload = {
         ws_link: document.getElementById('cfg-ws-link').value.trim(),
+        ws_link_custom: document.getElementById('cfg-ws-link-custom').checked,
+        public_tls: document.getElementById('cfg-public-tls').checked,
         ws_ip: document.getElementById('cfg-ws-ip').value.trim(),
         ws_port: parseInt(document.getElementById('cfg-ws-port').value, 10),
         socks_ip: document.getElementById('cfg-socks-ip').value.trim(),

@@ -10,7 +10,7 @@ import os
 def init_view_routes(app):
     @app.context_processor
     def inject_config():
-        return dict(config=CONFIG, base_url='')
+        return dict(config=CONFIG, base_url=request.script_root)
     
     @app.route('/')
     @app.route('/')

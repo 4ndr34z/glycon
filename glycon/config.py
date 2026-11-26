@@ -13,7 +13,13 @@ class Config:
         self.screenshot_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'screenshots'))
         self.max_content_length = 500 * 1024 * 1024  # 500MB
         self.secret_key = "mQsjJsMfsW43sdzPf9L2Sr78"
-        self.monitor_token = secrets.token_urlsafe(32)  
+        self.monitor_token = secrets.token_urlsafe(32)
+
+        # Create required directories
+        os.makedirs(self.upload_folder, exist_ok=True)
+
+        # Initialize database
+        self.init_db()
 
     @property
     def version(self) -> str:
@@ -22,17 +28,6 @@ class Config:
             return get_version()
         except Exception:
             return "2.1.4"
-
-
-        
-       
-        # Create required directories
-        os.makedirs(self.upload_folder, exist_ok=True)
-
-        #os.makedirs(self.screenshot_folder, exist_ok=True)
-
-        # Initialize database
-        self.init_db()
 
     def init_db(self):
         conn = sqlite3.connect(self.database)
@@ -217,27 +212,27 @@ class Config:
         # Migrate blocked_logs table if it exists with old schema
         try:
             # Check if old columns exist
-            c.execute("SELECT timestamp, ip, path FROM blocked_logs LIMIT 1")
+            c.execute("SELECT timestamp, ip, path FROM blocked_logs")
             old_rows = c.fetchall()
-            if old_rows:
-                # Create new table with correct schema
-                c.execute('''
-                    CREATE TABLE blocked_logs_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        first_seen TEXT NOT NULL,
-                        last_seen TEXT NOT NULL,
-                        ip TEXT NOT NULL UNIQUE,
-                        count INTEGER NOT NULL DEFAULT 1
-                    )
-                ''')
-                # Migrate data
-                for row in old_rows:
-                    timestamp, ip, path = row
-                    c.execute("INSERT OR IGNORE INTO blocked_logs_new (first_seen, last_seen, ip, count) VALUES (?, ?, ?, 1)",
-                             (timestamp, timestamp, ip))
-                # Replace table
-                c.execute("DROP TABLE blocked_logs")
-                c.execute("ALTER TABLE blocked_logs_new RENAME TO blocked_logs")
+            # Create new table with correct schema
+            c.execute("DROP TABLE IF EXISTS blocked_logs_new")
+            c.execute('''
+                CREATE TABLE blocked_logs_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    ip TEXT NOT NULL UNIQUE,
+                    count INTEGER NOT NULL DEFAULT 1
+                )
+            ''')
+            # Migrate data
+            for row in old_rows:
+                timestamp, ip, path = row
+                c.execute("INSERT OR IGNORE INTO blocked_logs_new (first_seen, last_seen, ip, count) VALUES (?, ?, ?, 1)",
+                         (timestamp, timestamp, ip))
+            # Replace table
+            c.execute("DROP TABLE blocked_logs")
+            c.execute("ALTER TABLE blocked_logs_new RENAME TO blocked_logs")
         except sqlite3.OperationalError:
             # Table doesn't exist or already migrated
             pass

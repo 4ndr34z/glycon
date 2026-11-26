@@ -22,11 +22,11 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5" id="screenshots-container">
         {% for screenshot in screenshots %}
         <div class="tactical-card group flex flex-col screenshot-card" data-screenshot-id="{{ screenshot.id }}">
-            <a href="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+            <a href="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
                data-lightbox="screenshots"
                data-title="{{ screenshot.hostname }} — {{ screenshot.timestamp }}"
                class="relative block aspect-video bg-slate-950 overflow-hidden">
-                <img src="{{ base_url }}{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
+                <img src="{{ url_for('get_screenshot', screenshot_id=screenshot.id) }}"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                      alt="Screenshot">
                 <div class="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -38,7 +38,7 @@
             </a>
             <div class="p-4 flex items-center justify-between gap-3">
                 <div class="min-w-0">
-                    <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=screenshot.agent_id) }}"
+                    <a href="{{ url_for('agent_detail', agent_id=screenshot.agent_id) }}"
                        class="text-sm font-semibold text-emerald-400 hover:text-emerald-300 hover:underline truncate block">
                         {{ screenshot.hostname }}
                     </a>

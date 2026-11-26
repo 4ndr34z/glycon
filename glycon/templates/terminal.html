@@ -27,7 +27,7 @@
                 {{ icon('plug', 'w-4 h-4') }}
                 <span id="wsStatusText">{% if agent.ws_connected %}Disconnect{% else %}Connect{% endif %} Terminal</span>
             </button>
-            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
+            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="tactical-btn-secondary">
                 {{ icon('arrow-left', 'w-4 h-4') }}
                 <span>Back to Agent</span>
             </a>
@@ -545,7 +545,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 reader.readAsDataURL(file);
             } else if (fileSelect.value) {
                 const filename = fileSelect.value;
-                const fileResp = await fetch(`${window.location.origin}/api/arsenal/download/${encodeURIComponent(filename)}`);
+                const fileResp = await fetch(`{{ base_url }}/api/arsenal/download/${encodeURIComponent(filename)}`);
                 const blob = await fileResp.blob();
                 const reader = new FileReader();
                 reader.onload = async function() {

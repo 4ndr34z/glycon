@@ -60,7 +60,7 @@
                     <tr class="{% if agent.status == 'online' %}agent-online{% elif agent.status == 'inactive' %}agent-inactive{% else %}agent-offline{% endif %}" id="agent-{{ agent.id }}">
                         <td class="font-mono text-xs text-slate-400">{{ agent.id[:8] }}...</td>
                         <td class="font-semibold">
-                            <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}" class="text-slate-100 hover:text-emerald-400 transition-colors">
+                            <a href="{{ url_for('agent_detail', agent_id=agent.id) }}" class="text-slate-100 hover:text-emerald-400 transition-colors">
                                 {{ agent.hostname }}
                             </a>
                         </td>
@@ -72,17 +72,17 @@
                         <td>{{ status_badge(agent.status) }}</td>
                         <td class="text-right">
                             <div class="inline-flex items-center justify-end gap-1.5">
-                                <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=agent.id) }}"
+                                <a href="{{ url_for('agent_detail', agent_id=agent.id) }}"
                                    class="p-1.5 rounded-lg bg-slate-800/80 text-cyan-400 hover:bg-cyan-500/20 border border-slate-700/80 hover:border-cyan-500/40 transition-colors"
                                    title="Agent Details & Tasks">
                                     {{ icon('info', 'w-4 h-4') }}
                                 </a>
-                                <a href="{{ base_url }}{{ url_for('terminal', agent_id=agent.id) }}"
+                                <a href="{{ url_for('terminal', agent_id=agent.id) }}"
                                    class="p-1.5 rounded-lg bg-slate-800/80 text-emerald-400 hover:bg-emerald-500/20 border border-slate-700/80 hover:border-emerald-500/40 transition-colors"
                                    title="Interactive Terminal">
                                     {{ icon('terminal', 'w-4 h-4') }}
                                 </a>
-                                <a href="{{ base_url }}{{ url_for('remote_desktop', agent_id=agent.id) }}"
+                                <a href="{{ url_for('remote_desktop', agent_id=agent.id) }}"
                                    class="p-1.5 rounded-lg bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700/80 transition-colors"
                                    title="Remote Desktop">
                                     {{ icon('desktop', 'w-4 h-4') }}
@@ -225,7 +225,7 @@
 <script>
     let socket;
     try {
-        socket = io("{{ request.url_root }}", {
+        socket = io("/", {
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
@@ -386,7 +386,7 @@
                     throw new Error(data.message || 'Failed to generate agent');
                 }
 
-                downloadLink.href = `/a/d?t=${Date.now()}`;
+                downloadLink.href = `{{ base_url }}/a/d?t=${Date.now()}`;
                 generateCommand(config.server_url, config.enable_killdate, config.killdate, config.trusted_certificate);
                 downloadDiv.style.display = 'block';
                 GlyconUI.toast('Agent Compiled', 'Deployment stagers ready', 'success');

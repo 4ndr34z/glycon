@@ -1614,6 +1614,12 @@ result = "UAC loop started"
             conn.commit()
             conn.close()
 
+            try:
+                from glycon.vaporlink import VAPORLINK_MANAGER
+                VAPORLINK_MANAGER.sync_fqdn_from_url(config['server_url'])
+            except Exception:
+                pass
+
             template_path = os.path.join(app.root_path, 'templates', 'agent_template.py')
             if not os.path.exists(template_path):
                 return jsonify({"status": "error", "message": "Agent template not found"}), 500
@@ -2735,6 +2741,12 @@ result = "UAC loop started"
                     if clean_link.startswith(prefix):
                         clean_link = clean_link[len(prefix):]
                 updates['ws_link'] = clean_link
+
+            if 'ws_link_custom' in data:
+                updates['ws_link_custom'] = 'on' if bool(data['ws_link_custom']) else 'off'
+
+            if 'public_tls' in data:
+                updates['public_tls'] = 'on' if bool(data['public_tls']) else 'off'
 
             if 'ws_ip' in data and data['ws_ip']:
                 updates['ws_ip'] = str(data['ws_ip']).strip()

@@ -1,4 +1,4 @@
-from flask import Flask, request, url_for, abort, redirect
+from flask import Flask, request, url_for, abort, redirect, jsonify
 from flask_socketio import SocketIO
 from flask_login import LoginManager
 from flask_cors import CORS
@@ -119,7 +119,7 @@ def create_app():
 
 
         # Get client IP (handle X-Forwarded-For for proxies)
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        client_ip = request.headers.get('X-Forwarded-For') or request.remote_addr or '127.0.0.1'
         if client_ip and ',' in client_ip:
             client_ip = client_ip.split(',')[0].strip()
 
@@ -153,9 +153,10 @@ def create_app():
         c.execute('''
             CREATE TABLE IF NOT EXISTS blocked_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                ip TEXT NOT NULL,
-                path TEXT NOT NULL
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                ip TEXT NOT NULL UNIQUE,
+                count INTEGER NOT NULL DEFAULT 1
             )
         ''')
 

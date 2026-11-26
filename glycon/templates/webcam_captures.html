@@ -22,11 +22,11 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5" id="webcam-container">
         {% for capture in captures %}
         <div class="tactical-card group flex flex-col webcam-card" data-capture-id="{{ capture.id }}">
-            <a href="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
+            <a href="{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
                data-lightbox="webcam"
                data-title="{{ capture.hostname or 'Unknown Agent' }} — {{ capture.timestamp }}"
                class="relative block aspect-video bg-slate-950 overflow-hidden">
-                <img src="{{ base_url }}{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
+                <img src="{{ url_for('get_webcam_capture', capture_id=capture.id) }}"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                      alt="Webcam Capture">
                 <div class="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -39,7 +39,7 @@
             <div class="p-4 flex items-center justify-between gap-3">
                 <div class="min-w-0">
                     {% if capture.hostname %}
-                    <a href="{{ base_url }}{{ url_for('agent_detail', agent_id=capture.agent_id) }}"
+                    <a href="{{ url_for('agent_detail', agent_id=capture.agent_id) }}"
                        class="text-sm font-semibold text-cyan-400 hover:text-cyan-300 hover:underline truncate block">
                         {{ capture.hostname }}
                     </a>

@@ -111,3 +111,29 @@ donut/
 .gemini/
 .venv/
 node_modules/
+
+# ==========================================
+# SSL / TLS CERTIFICATES & DNS API SECRETS
+# ==========================================
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+cert.pem
+key.pem
+fullchain.pem
+privkey.pem
+chain.pem
+.certs/
+certs/
+letsencrypt/
+.letsencrypt/
+.dns_credentials/
+dns_credentials/
+*.ini
+dns_*.json
+dns_*.env
+.acme.sh/
+
