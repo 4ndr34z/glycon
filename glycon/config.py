@@ -142,6 +142,7 @@ class Config:
                 killdate_enabled INTEGER NOT NULL,
                 killdate TEXT,
                 trusted_certificate INTEGER NOT NULL,
+                file_logging INTEGER NOT NULL DEFAULT 0,
                 aes_key TEXT NOT NULL,
                 aes_iv TEXT NOT NULL,
                 timestamp TEXT NOT NULL
@@ -187,6 +188,12 @@ class Config:
         
         try:
             c.execute("ALTER TABLE agent_configurations ADD COLUMN webcam_frequency INTEGER NOT NULL DEFAULT 10")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore error
+            pass
+
+        try:
+            c.execute("ALTER TABLE agent_configurations ADD COLUMN file_logging INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             # Column already exists, ignore error
             pass

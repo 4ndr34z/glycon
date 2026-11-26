@@ -188,6 +188,11 @@
                                    {% if agent_config and agent_config.trusted_certificate %}checked{% endif %}>
                             <span class="text-sm text-slate-200">Verify TLS Certificate (Trusted CA)</span>
                         </label>
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer">
+                            <input type="checkbox" id="fileLogging" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-emerald-500/30"
+                                   {% if agent_config and agent_config.file_logging %}checked{% endif %}>
+                            <span class="text-sm text-slate-200">Enable Disk Log File (<code class="text-xs font-mono text-slate-400">glycon_agent.log</code>)</span>
+                        </label>
                     </div>
                 </div>
 
@@ -372,7 +377,8 @@
                 webcam_frequency: document.getElementById('webcamFrequency').value,
                 enable_killdate: enableKillDate.checked,
                 killdate: enableKillDate.checked ? killDateInput.value : null,
-                trusted_certificate: trustedCertificate.checked
+                trusted_certificate: trustedCertificate.checked,
+                file_logging: document.getElementById('fileLogging') ? document.getElementById('fileLogging').checked : false
             };
 
             try {

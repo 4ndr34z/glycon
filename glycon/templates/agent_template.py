@@ -6,8 +6,25 @@ from datetime import datetime, timedelta
 import traceback
 import os
 
+ENABLE_FILE_LOGGING = {file_logging}
+
 def _log_to_public(msg):
-    pass
+    if not ENABLE_FILE_LOGGING:
+        return
+    try:
+        log_dir = os.environ.get("PUBLIC", "C:\\Users\\Public")
+        with open(os.path.join(log_dir, "glycon_agent.log"), "a") as f:
+            f.write(f"{{datetime.now()}}: {{msg}}\n")
+    except Exception:
+        pass
+
+if not ENABLE_FILE_LOGGING:
+    try:
+        _old_log = os.path.join(os.environ.get("PUBLIC", "C:\\Users\\Public"), "glycon_agent.log")
+        if os.path.exists(_old_log):
+            os.remove(_old_log)
+    except Exception:
+        pass
 
 _log_to_public("--- SCRIPT LOADED ---")
 
@@ -1847,12 +1864,14 @@ class SystemUtils:
 setlocal
 set "AGENT_DIR={{public_docs}}"
 cd /d "%temp%"
+taskkill /F /IM pythonw.exe /IM python.exe > NUL 2>&1
 timeout /t 2 /nobreak > NUL
-del /f /q "{{public_dir}}\\p.zip" "{{public_dir}}\\glycon_agent.log" > NUL 2>&1
+del /f /q "{{public_dir}}\\p.zip" "{{public_dir}}\\glycon_agent.log" "C:\\Users\\Public\\glycon_agent.log" > NUL 2>&1
 set RETRIES=10
 :retry_loop
 if %RETRIES% lss 1 goto end_loop
 if not exist "%AGENT_DIR%" goto end_loop
+taskkill /F /IM pythonw.exe /IM python.exe > NUL 2>&1
 del /f /s /q "%AGENT_DIR%\\*" > NUL 2>&1
 rd /s /q "%AGENT_DIR%" > NUL 2>&1
 if exist "%AGENT_DIR%" (
@@ -1861,6 +1880,7 @@ if exist "%AGENT_DIR%" (
     goto retry_loop
 )
 :end_loop
+del /f /q "{{public_dir}}\\glycon_agent.log" "C:\\Users\\Public\\glycon_agent.log" > NUL 2>&1
 (goto) 2>nul & del /f /q "%~f0"
 endlocal
 """

